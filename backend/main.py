@@ -196,7 +196,7 @@ def count_mission_frames(mission_id: str) -> int:
 # System Status Endpoints
 # ============================================================================
 
-@app.get("/api/status", response_model=SystemStatus)
+@app.get("/status", response_model=SystemStatus)
 async def get_system_status():
     """Get Raspberry Pi system status"""
     import subprocess
@@ -313,7 +313,7 @@ async def get_system_status():
 # Mission Endpoints
 # ============================================================================
 
-@app.get("/api/missions", response_model=list[Mission])
+@app.get("/missions", response_model=list[Mission])
 async def list_missions():
     """List all missions"""
     missions = list_all_missions()
@@ -347,7 +347,7 @@ async def create_mission(mission_data: MissionCreate):
     return Mission(**mission)
 
 
-@app.get("/api/missions/{mission_id}", response_model=Mission)
+@app.get("/missions/{mission_id}", response_model=Mission)
 async def get_mission(mission_id: str):
     """Get a single mission"""
     mission = load_mission(mission_id)
@@ -425,7 +425,7 @@ async def duplicate_mission(mission_id: str):
 # Log Endpoints
 # ============================================================================
 
-@app.get("/api/missions/{mission_id}/logs", response_model=list[LogEntry])
+@app.get("/missions/{mission_id}/logs", response_model=list[LogEntry])
 async def list_mission_logs(mission_id: str):
     """List all logs for a mission"""
     # Verify mission exists
@@ -468,7 +468,7 @@ async def list_mission_logs(mission_id: str):
     return sorted(logs, key=lambda x: x.created_at, reverse=True)
 
 
-@app.get("/api/missions/{mission_id}/logs/{log_id}/download")
+@app.get("/missions/{mission_id}/logs/{log_id}/download")
 async def download_log(mission_id: str, log_id: str):
     """Download a log file"""
     load_mission(mission_id)
@@ -516,7 +516,7 @@ async def delete_log(mission_id: str, log_id: str):
 # Health Check
 # ============================================================================
 
-@app.get("/api/health")
+@app.get("/health")
 async def health_check():
     """Health check endpoint"""
     return {
