@@ -294,17 +294,72 @@ sudo chmod -R 777 /opt/aurige/data
 
 ## API Reference
 
+### System
+
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/health` | GET | Health check |
-| `/api/status` | GET | System status |
-| `/api/missions` | GET | List missions |
+| `/api/status` | GET | System status (CPU, memory, CAN, network) |
+
+### CAN Control
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/can/init` | POST | Initialize CAN interface with bitrate |
+| `/api/can/stop` | POST | Bring down CAN interface |
+| `/api/can/send` | POST | Send single CAN frame |
+| `/api/can/{interface}/status` | GET | Get CAN interface status |
+
+### Capture & Replay
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/capture/start` | POST | Start CAN capture to file |
+| `/api/capture/stop` | POST | Stop capture |
+| `/api/capture/status` | GET | Get capture status |
+| `/api/replay/start` | POST | Start log replay |
+| `/api/replay/stop` | POST | Stop replay |
+| `/api/replay/status` | GET | Get replay status |
+
+### Generator & Fuzzing
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/generator/start` | POST | Start CAN traffic generator |
+| `/api/generator/stop` | POST | Stop generator |
+| `/api/fuzzing/start` | POST | Start fuzzing sequence |
+| `/api/fuzzing/stop` | POST | Stop fuzzing |
+
+### OBD-II Diagnostics
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/obd/vin` | POST | Request VIN |
+| `/api/obd/dtc/read` | POST | Read DTCs |
+| `/api/obd/dtc/clear` | POST | Clear DTCs |
+| `/api/obd/reset` | POST | ECU reset |
+| `/api/obd/pid` | POST | Read specific OBD PID |
+
+### Missions
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/missions` | GET | List all missions |
 | `/api/missions` | POST | Create mission |
 | `/api/missions/{id}` | GET | Get mission |
 | `/api/missions/{id}` | PATCH | Update mission |
 | `/api/missions/{id}` | DELETE | Delete mission |
+| `/api/missions/{id}/duplicate` | POST | Duplicate mission |
 | `/api/missions/{id}/logs` | GET | List mission logs |
+| `/api/missions/{id}/logs/{log_id}` | DELETE | Delete log |
 | `/api/missions/{id}/logs/{log_id}/download` | GET | Download log |
+
+### WebSocket Streams
+
+| Endpoint | Description |
+|----------|-------------|
+| `/ws/candump?interface=can0` | Live CAN frame stream |
+| `/ws/cansniffer?interface=can0` | Aggregated CAN view |
 
 ## License
 

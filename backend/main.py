@@ -971,11 +971,11 @@ async def get_fuzzing_status():
 # Mission CRUD Endpoints
 # =============================================================================
 
-@app.get("/api/missions", response_model=list[Mission])
+@app.get("/api/missions")
 async def list_missions():
     """List all missions"""
     missions = list_all_missions()
-    return [Mission(**m) for m in missions]
+    return {"missions": missions}
 
 
 @app.post("/api/missions", response_model=Mission)
@@ -1271,6 +1271,188 @@ async def stop_sniffer():
     state.candump_interface = None
     
     return {"status": "stopped"}
+
+
+# =============================================================================
+# OBD-II Diagnostic Endpoints
+# =============================================================================
+
+class OBDRequest(BaseModel):
+    interface: str = "can0"
+    timeout_ms: int = Field(alias="timeoutMs", default=1000)
+
+    class Config:
+        populate_by_name = True
+
+
+@app.post("/api/obd/vin")
+async def read_vin(request: OBDRequest):
+    """
+    Read Vehicle Identification Number via OBD-II.
+    
+    Sends: 7DF#0209020000000000 (Service 09, PID 02 - VIN request)
+    Expects multi-frame response on 7E8-7EF
+    """
+    # Send VIN request
+    can_send_frame(request.interface, "7DF", "0209020000000000")
+    
+    # In a real implementation, we'd wait for and parse the response
+    # This requires isotp (ISO 15765-2) for multi-frame messages
+    # For now, return a placeholder
+    return {
+        "status": "sent",
+        "message": "VIN request sent. Check candump for response.",
+        "note": "Full ISO-TP support requires can-isotp kernel module",
+    }
+
+
+@app.post("/api/obd/dtc/read")
+async def read_dtc(request: OBDRequest):
+    """
+    Read Diagnostic Trouble Codes.
+    
+    Sends: 7DF#0103000000000000 (Service 03 - Read DTCs)
+    """
+    can_send_frame(request.interface, "7DF", "0103000000000000")
+    
+    return {
+        "status": "sent",
+        "message": "DTC read request sent. Check candump for response.",
+    }
+
+
+@app.post("/api/obd/dtc/clear")
+async def clear_dtc(request: OBDRequest):
+    """
+    Clear Diagnostic Trouble Codes.
+    
+    Sends: 7DF#0104000000000000 (Service 04 - Clear DTCs)
+    WARNING: This clears all stored DTCs and freeze frame data!
+    """
+    can_send_frame(request.interface, "7DF", "0104000000000000")
+    
+    return {
+        "status": "sent",
+        "message": "DTC clear request sent.",
+        "warning": "All stored DTCs and freeze frame data may be cleared",
+    }
+
+
+@app.post("/api/obd/reset")
+async def reset_ecu(request: OBDRequest):
+    """
+    Request ECU reset (soft reset).
+    
+    Sends: 7DF#0211010000000000 (Service 11, subfunction 01 - Hard reset)
+    WARNING: This may cause the vehicle to enter a temporary non-operational state!
+    """
+    can_send_frame(request.interface, "7DF", "0211010000000000")
+    
+    return {
+        "status": "sent",
+        "message": "ECU reset request sent.",
+        "warning": "Vehicle may enter temporary non-operational state",
+    }
+
+
+@app.post("/api/obd/pid")
+async def read_obd_pid(
+    interface: str = "can0",
+    service: str = "01",  # Service 01 = Current Data
+    pid: str = "0C",  # PID 0C = Engine RPM
+):
+    """
+    Read a specific OBD-II PID.
+    
+    Common PIDs:
+    - 01 0C: Engine RPM
+    - 01 0D: Vehicle Speed
+    - 01 05: Engine Coolant Temp
+    - 01 0F: Intake Air Temp
+    - 01 2F: Fuel Level
+    """
+    # Format: Length + Service + PID + padding
+    data = f"02{service}{pid}0000000000"[:16]
+    can_send_frame(interface, "7DF", data)
+    
+    return {
+        "status": "sent",
+        "service": service,
+        "pid": pid,
+        "message": f"OBD-II request sent for service {service}, PID {pid}",
+    }
+
+
+# =============================================================================
+# WebSocket - cansniffer (filtered/aggregated view)
+# =============================================================================
+
+class SnifferState:
+    process: Optional[asyncio.subprocess.Process] = None
+    interface: Optional[str] = None
+    clients: list[WebSocket] = []
+
+sniffer_state = SnifferState()
+
+
+@app.websocket("/ws/cansniffer")
+async def websocket_cansniffer(websocket: WebSocket, interface: str = Query(default="can0")):
+    """
+    WebSocket endpoint for cansniffer (aggregated CAN view).
+    
+    cansniffer shows unique CAN IDs and highlights changing bytes.
+    Useful for identifying which IDs correspond to specific functions.
+    """
+    await websocket.accept()
+    sniffer_state.clients.append(websocket)
+    
+    try:
+        # Start cansniffer if not already running
+        if sniffer_state.process is None or sniffer_state.interface != interface:
+            if sniffer_state.process and sniffer_state.process.returncode is None:
+                sniffer_state.process.terminate()
+                await sniffer_state.process.wait()
+            
+            # -c: colorize, -t a: absolute time
+            sniffer_state.process = await asyncio.create_subprocess_exec(
+                "cansniffer", "-c", interface,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            sniffer_state.interface = interface
+        
+        # Read and broadcast
+        while True:
+            if sniffer_state.process and sniffer_state.process.stdout:
+                line = await sniffer_state.process.stdout.readline()
+                if not line:
+                    break
+                
+                try:
+                    decoded = line.decode().strip()
+                    if decoded:
+                        # Send raw cansniffer output
+                        # Frontend can parse the format
+                        for client in sniffer_state.clients:
+                            try:
+                                await client.send_text(decoded)
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+            else:
+                await asyncio.sleep(0.1)
+                
+    except WebSocketDisconnect:
+        pass
+    finally:
+        if websocket in sniffer_state.clients:
+            sniffer_state.clients.remove(websocket)
+        
+        if not sniffer_state.clients and sniffer_state.process:
+            sniffer_state.process.terminate()
+            sniffer_state.process = None
+            sniffer_state.interface = None
 
 
 # =============================================================================
