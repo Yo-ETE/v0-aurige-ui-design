@@ -1,58 +1,168 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useCallback } from "react"
+import { useSearchParams } from "next/navigation"
 import { AppShell } from "@/components/app-shell"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Video, FolderOpen, Play, Trash2, Download, Circle, Square, FileText } from "lucide-react"
-
-interface LogFile {
-  id: string
-  name: string
-  date: string
-  size: string
-  frames: number
-}
-
-const mockLogs: LogFile[] = [
-  { id: "1", name: "capture_2024-01-15_14-32-01.log", date: "15/01/2024 14:32", size: "2.4 MB", frames: 15420 },
-  { id: "2", name: "capture_2024-01-15_10-15-33.log", date: "15/01/2024 10:15", size: "1.1 MB", frames: 7230 },
-  { id: "3", name: "capture_2024-01-14_16-45-22.log", date: "14/01/2024 16:45", size: "3.8 MB", frames: 24100 },
-]
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { 
+  Video, FolderOpen, Play, Trash2, Download, Circle, Square, FileText, 
+  AlertCircle, Loader2, CheckCircle2 
+} from "lucide-react"
+import { 
+  startCapture, stopCapture, getCaptureStatus, 
+  listMissionLogs, deleteLog, getLogDownloadUrl,
+  startReplay, stopReplay, getReplayStatus,
+  type LogEntry, type CaptureStatus, type ProcessStatus
+} from "@/lib/api"
 
 export default function CaptureReplay() {
-  const [isCapturing, setIsCapturing] = useState(false)
-  const [captureTime, setCaptureTime] = useState(0)
-  const [logs, setLogs] = useState<LogFile[]>(mockLogs)
-  const [missionLogs] = useState<LogFile[]>([])
+  const searchParams = useSearchParams()
+  const missionId = searchParams.get("missionId") || ""
+  
+  const [captureStatus, setCaptureStatus] = useState<CaptureStatus>({ running: false, durationSeconds: 0 })
+  const [replayStatus, setReplayStatus] = useState<ProcessStatus>({ running: false })
+  const [logs, setLogs] = useState<LogEntry[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
+  const [captureDescription, setCaptureDescription] = useState("")
+  const [replayingLogId, setReplayingLogId] = useState<string | null>(null)
+  
+  // Timer for capture duration display
+  const [displayDuration, setDisplayDuration] = useState(0)
 
-  const handleStartCapture = () => {
-    setIsCapturing(true)
-    const startTime = Date.now()
-    const interval = setInterval(() => {
-      setCaptureTime(Math.floor((Date.now() - startTime) / 1000))
-    }, 1000)
-    // Store interval ID for cleanup
-    ;(window as unknown as { captureInterval: NodeJS.Timeout }).captureInterval = interval
-  }
-
-  const handleStopCapture = () => {
-    setIsCapturing(false)
-    clearInterval((window as unknown as { captureInterval: NodeJS.Timeout }).captureInterval)
-    setCaptureTime(0)
-    // Add new mock log
-    const newLog: LogFile = {
-      id: Date.now().toString(),
-      name: `capture_${new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-")}.log`,
-      date: new Date().toLocaleString("fr-FR"),
-      size: `${(Math.random() * 3 + 0.5).toFixed(1)} MB`,
-      frames: Math.floor(Math.random() * 20000 + 5000),
+  // Fetch statuses
+  const fetchStatuses = useCallback(async () => {
+    try {
+      const [capture, replay] = await Promise.all([
+        getCaptureStatus(),
+        getReplayStatus(),
+      ])
+      setCaptureStatus(capture)
+      setReplayStatus(replay)
+      if (capture.running) {
+        setDisplayDuration(capture.durationSeconds)
+      }
+    } catch (err) {
+      // API might not be available - use defaults
     }
-    setLogs([newLog, ...logs])
+  }, [])
+
+  // Fetch logs for mission
+  const fetchLogs = useCallback(async () => {
+    if (!missionId) return
+    try {
+      const missionLogs = await listMissionLogs(missionId)
+      setLogs(missionLogs)
+    } catch (err) {
+      // Mission might not exist
+      setLogs([])
+    }
+  }, [missionId])
+
+  useEffect(() => {
+    const init = async () => {
+      setIsLoading(true)
+      await Promise.all([fetchStatuses(), fetchLogs()])
+      setIsLoading(false)
+    }
+    init()
+    
+    // Poll statuses
+    const interval = setInterval(fetchStatuses, 2000)
+    return () => clearInterval(interval)
+  }, [fetchStatuses, fetchLogs])
+
+  // Update duration timer when capturing
+  useEffect(() => {
+    if (!captureStatus.running) return
+    
+    const interval = setInterval(() => {
+      setDisplayDuration(prev => prev + 1)
+    }, 1000)
+    
+    return () => clearInterval(interval)
+  }, [captureStatus.running])
+
+  const handleStartCapture = async () => {
+    if (!missionId) {
+      setError("Aucune mission sélectionnée. Sélectionnez une mission depuis le tableau de bord.")
+      return
+    }
+    
+    setError(null)
+    setSuccess(null)
+    
+    try {
+      const result = await startCapture(missionId, "can0", undefined, captureDescription || undefined)
+      setSuccess(`Capture démarrée: ${result.filename}`)
+      setDisplayDuration(0)
+      setCaptureDescription("")
+      await fetchStatuses()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur lors du démarrage de la capture")
+    }
   }
 
-  const handleDeleteLog = (id: string) => {
-    setLogs(logs.filter((log) => log.id !== id))
+  const handleStopCapture = async () => {
+    setError(null)
+    setSuccess(null)
+    
+    try {
+      const result = await stopCapture()
+      setSuccess(`Capture arrêtée: ${result.filename} (${result.durationSeconds}s)`)
+      await Promise.all([fetchStatuses(), fetchLogs()])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur lors de l'arrêt de la capture")
+    }
+  }
+
+  const handleReplay = async (logId: string) => {
+    if (!missionId) return
+    
+    setError(null)
+    setSuccess(null)
+    
+    try {
+      await startReplay(missionId, logId, "can0")
+      setReplayingLogId(logId)
+      setSuccess("Replay démarré")
+      await fetchStatuses()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur lors du replay")
+    }
+  }
+
+  const handleStopReplay = async () => {
+    setError(null)
+    
+    try {
+      await stopReplay()
+      setReplayingLogId(null)
+      setSuccess("Replay arrêté")
+      await fetchStatuses()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur lors de l'arrêt du replay")
+    }
+  }
+
+  const handleDeleteLog = async (logId: string) => {
+    if (!missionId) return
+    if (!confirm("Supprimer ce log ?")) return
+    
+    setError(null)
+    
+    try {
+      await deleteLog(missionId, logId)
+      await fetchLogs()
+      setSuccess("Log supprimé")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur lors de la suppression")
+    }
   }
 
   const formatTime = (seconds: number) => {
@@ -61,12 +171,58 @@ export default function CaptureReplay() {
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
   }
 
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  }
+
+  if (isLoading) {
+    return (
+      <AppShell title="Capture & Replay" description="Chargement...">
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      </AppShell>
+    )
+  }
+
   return (
     <AppShell
       title="Capture & Replay"
       description="Capturer et rejouer des logs CAN"
     >
       <div className="grid gap-6 lg:grid-cols-2">
+        {/* Alerts */}
+        {(error || success) && (
+          <div className="lg:col-span-2">
+            {error && (
+              <Alert className="border-destructive/50 bg-destructive/10">
+                <AlertCircle className="h-4 w-4 text-destructive" />
+                <AlertDescription className="text-destructive">{error}</AlertDescription>
+              </Alert>
+            )}
+            {success && (
+              <Alert className="border-success/50 bg-success/10">
+                <CheckCircle2 className="h-4 w-4 text-success" />
+                <AlertDescription className="text-success">{success}</AlertDescription>
+              </Alert>
+            )}
+          </div>
+        )}
+
+        {/* Mission warning */}
+        {!missionId && (
+          <div className="lg:col-span-2">
+            <Alert className="border-warning/50 bg-warning/10">
+              <AlertCircle className="h-4 w-4 text-warning" />
+              <AlertDescription className="text-warning">
+                Aucune mission sélectionnée. Les captures nécessitent une mission active.
+              </AlertDescription>
+            </Alert>
+          </div>
+        )}
+
         {/* Capture CAN Card */}
         <Card className="border-border bg-card">
           <CardHeader>
@@ -83,21 +239,31 @@ export default function CaptureReplay() {
             </div>
           </CardHeader>
           <CardContent className="space-y-6">
-            {isCapturing && (
+            {captureStatus.running ? (
               <div className="flex items-center justify-center gap-4 rounded-lg bg-destructive/10 py-6">
                 <div className="relative">
                   <Circle className="h-4 w-4 animate-pulse fill-destructive text-destructive" />
                 </div>
                 <span className="text-2xl font-mono font-semibold text-destructive">
-                  {formatTime(captureTime)}
+                  {formatTime(displayDuration)}
                 </span>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Label htmlFor="description">Description (optionnel)</Label>
+                <Input
+                  id="description"
+                  placeholder="Ex: Ouverture porte conducteur"
+                  value={captureDescription}
+                  onChange={(e) => setCaptureDescription(e.target.value)}
+                />
               </div>
             )}
 
             <div className="flex gap-3">
               <Button
                 onClick={handleStartCapture}
-                disabled={isCapturing}
+                disabled={captureStatus.running || !missionId}
                 className="flex-1 gap-2"
               >
                 <Circle className="h-4 w-4" />
@@ -106,7 +272,7 @@ export default function CaptureReplay() {
               <Button
                 variant="destructive"
                 onClick={handleStopCapture}
-                disabled={!isCapturing}
+                disabled={!captureStatus.running}
                 className="flex-1 gap-2"
               >
                 <Square className="h-4 w-4" />
@@ -117,7 +283,7 @@ export default function CaptureReplay() {
             <p className="text-xs text-muted-foreground">
               Les logs sont sauvegardés dans{" "}
               <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-foreground">
-                /var/aurige/logs/
+                /opt/aurige/data/missions/{missionId || "<mission>"}/logs/
               </code>
             </p>
           </CardContent>
@@ -131,9 +297,9 @@ export default function CaptureReplay() {
                 <FolderOpen className="h-5 w-5 text-primary" />
               </div>
               <div>
-                <CardTitle className="text-lg">Logs disponibles</CardTitle>
+                <CardTitle className="text-lg">Logs de la mission</CardTitle>
                 <CardDescription>
-                  Fichiers de capture récents
+                  Fichiers de capture enregistrés
                 </CardDescription>
               </div>
             </div>
@@ -150,7 +316,7 @@ export default function CaptureReplay() {
                 </p>
               </div>
             ) : (
-              <div className="space-y-3 max-h-64 overflow-y-auto">
+              <div className="space-y-3 max-h-80 overflow-y-auto">
                 {logs.map((log) => (
                   <div
                     key={log.id}
@@ -158,18 +324,49 @@ export default function CaptureReplay() {
                   >
                     <div className="min-w-0 flex-1">
                       <p className="truncate font-mono text-sm text-foreground">
-                        {log.name}
+                        {log.filename}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        {log.date} • {log.size} • {log.frames.toLocaleString()} trames
+                        {new Date(log.createdAt).toLocaleString("fr-FR")} • {formatFileSize(log.size)} • {log.framesCount.toLocaleString()} trames
+                        {log.durationSeconds && ` • ${formatTime(log.durationSeconds)}`}
                       </p>
+                      {log.description && (
+                        <p className="text-xs text-primary mt-1">{log.description}</p>
+                      )}
                     </div>
                     <div className="ml-4 flex items-center gap-1">
-                      <Button size="icon" variant="ghost" className="h-8 w-8">
-                        <Play className="h-4 w-4" />
-                      </Button>
-                      <Button size="icon" variant="ghost" className="h-8 w-8">
-                        <Download className="h-4 w-4" />
+                      {replayStatus.running && replayingLogId === log.id ? (
+                        <Button 
+                          size="icon" 
+                          variant="ghost" 
+                          className="h-8 w-8 text-destructive"
+                          onClick={handleStopReplay}
+                        >
+                          <Square className="h-4 w-4" />
+                        </Button>
+                      ) : (
+                        <Button 
+                          size="icon" 
+                          variant="ghost" 
+                          className="h-8 w-8"
+                          onClick={() => handleReplay(log.id)}
+                          disabled={replayStatus.running || captureStatus.running}
+                        >
+                          <Play className="h-4 w-4" />
+                        </Button>
+                      )}
+                      <Button 
+                        size="icon" 
+                        variant="ghost" 
+                        className="h-8 w-8"
+                        asChild
+                      >
+                        <a 
+                          href={getLogDownloadUrl(missionId, log.id)} 
+                          download={log.filename}
+                        >
+                          <Download className="h-4 w-4" />
+                        </a>
                       </Button>
                       <Button
                         size="icon"
@@ -182,43 +379,6 @@ export default function CaptureReplay() {
                     </div>
                   </div>
                 ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Logs de la mission Card */}
-        <Card className="border-border bg-card lg:col-span-2">
-          <CardHeader>
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                <FileText className="h-5 w-5 text-primary" />
-              </div>
-              <div>
-                <CardTitle className="text-lg">Logs de la mission</CardTitle>
-                <CardDescription>
-                  Logs associés à la mission BMW Série 1
-                </CardDescription>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            {missionLogs.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12 text-center">
-                <FolderOpen className="mb-3 h-12 w-12 text-muted-foreground/50" />
-                <p className="text-sm text-muted-foreground">
-                  Aucun log associé à cette mission
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Importez ou capturez des logs pour les ajouter à la mission
-                </p>
-                <Button variant="outline" className="mt-4 bg-transparent">
-                  Importer un log
-                </Button>
-              </div>
-            ) : (
-              <div className="rounded-lg border border-border">
-                {/* Table would go here */}
               </div>
             )}
           </CardContent>

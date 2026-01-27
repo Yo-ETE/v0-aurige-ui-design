@@ -1,24 +1,16 @@
 /**
  * AURIGE API Client
  * 
- * This module handles ALL communication with the FastAPI backend.
- * The frontend NEVER executes CAN commands directly - all operations
- * go through these API functions.
- * 
- * Architecture:
- * - REST API for CRUD operations and commands
- * - WebSocket for real-time CAN streaming
+ * All communication with the FastAPI backend goes through this client.
+ * The frontend NEVER executes shell commands or accesses CAN directly.
+ * All CAN operations are delegated to the backend.
  */
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api"
-const WS_BASE = process.env.NEXT_PUBLIC_WS_URL || 
-  (typeof window !== "undefined" 
-    ? `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}`
-    : "ws://localhost:8000")
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || ""
 
-// ============================================================================
+// =============================================================================
 // Types
-// ============================================================================
+// =============================================================================
 
 export interface Vehicle {
   brand: string
@@ -31,7 +23,7 @@ export interface Vehicle {
 }
 
 export interface CANConfig {
-  interface: string
+  interface: "can0" | "can1"
   bitrate: number
 }
 
@@ -63,23 +55,12 @@ export interface MissionUpdateInput {
 
 export interface LogEntry {
   id: string
-  missionId: string
   filename: string
   size: number
   framesCount: number
   createdAt: string
   durationSeconds?: number
   description?: string
-}
-
-export interface CANInterfaceInfo {
-  name: string
-  isUp: boolean
-  bitrate?: number
-  txPackets: number
-  rxPackets: number
-  txErrors: number
-  rxErrors: number
 }
 
 export interface SystemStatus {
@@ -92,22 +73,53 @@ export interface SystemStatus {
   storageUsed: number
   storageTotal: number
   wifiConnected: boolean
+  wifiIp?: string
   ethernetConnected: boolean
-  canInterfaces: CANInterfaceInfo[]
-  apiVersion: string
+  ethernetIp?: string
+  can0Up: boolean
+  can0Bitrate?: number
+  can1Up: boolean
+  can1Bitrate?: number
+  apiRunning: boolean
+  webRunning: boolean
+}
+
+export interface CANInterfaceStatus {
+  interface: string
+  up: boolean
+  bitrate?: number
+  txPackets: number
+  rxPackets: number
+  errors: number
 }
 
 export interface CANFrame {
+  interface: string
+  canId: string
+  data: string
+}
+
+export interface CaptureStatus {
+  running: boolean
+  filename?: string
+  durationSeconds: number
+}
+
+export interface ProcessStatus {
+  running: boolean
+}
+
+// WebSocket message from candump
+export interface CANMessage {
   timestamp: string
   interface: string
   canId: string
   data: string
-  delta: string
 }
 
-// ============================================================================
+// =============================================================================
 // API Fetch Helper
-// ============================================================================
+// =============================================================================
 
 class APIError extends Error {
   constructor(public status: number, message: string) {
@@ -120,7 +132,7 @@ async function fetchApi<T>(
   endpoint: string,
   options?: RequestInit
 ): Promise<T> {
-  const url = `${API_BASE}${endpoint}`
+  const url = `${API_BASE}/api${endpoint}`
   
   const response = await fetch(url, {
     ...options,
@@ -142,9 +154,9 @@ async function fetchApi<T>(
   return JSON.parse(text)
 }
 
-// ============================================================================
+// =============================================================================
 // System Status
-// ============================================================================
+// =============================================================================
 
 export async function getSystemStatus(): Promise<SystemStatus> {
   return fetchApi<SystemStatus>("/status")
@@ -154,139 +166,181 @@ export async function checkHealth(): Promise<{ status: string; timestamp: string
   return fetchApi("/health")
 }
 
-// ============================================================================
+// =============================================================================
 // CAN Interface Control
-// ============================================================================
+// =============================================================================
 
-export async function setupCANInterface(
-  interfaceName: string,
-  bitrate: number
-): Promise<{ status: string; interface: string; bitrate: number; isUp: boolean }> {
-  return fetchApi("/can/setup", {
+export async function getCANStatus(iface: "can0" | "can1"): Promise<CANInterfaceStatus> {
+  return fetchApi<CANInterfaceStatus>(`/can/${iface}/status`)
+}
+
+export async function initializeCAN(iface: "can0" | "can1", bitrate: number): Promise<{ status: string }> {
+  return fetchApi("/can/init", {
     method: "POST",
-    body: JSON.stringify({ interface: interfaceName, bitrate }),
+    body: JSON.stringify({ interface: iface, bitrate }),
   })
 }
 
-export async function bringCANDown(
-  interfaceName: string
-): Promise<{ status: string; interface: string }> {
-  return fetchApi(`/can/down?interface=${encodeURIComponent(interfaceName)}`, {
+export async function stopCAN(iface: "can0" | "can1"): Promise<{ status: string }> {
+  return fetchApi(`/can/stop?interface=${iface}`, {
     method: "POST",
   })
 }
 
-export async function sendCANFrame(
-  interfaceName: string,
-  canId: string,
-  data: string
-): Promise<{ status: string; interface: string; canId: string; data: string }> {
+export async function sendCANFrame(frame: CANFrame): Promise<{ status: string }> {
   return fetchApi("/can/send", {
     method: "POST",
-    body: JSON.stringify({ interface: interfaceName, canId, data }),
+    body: JSON.stringify(frame),
   })
 }
 
-// ============================================================================
-// Capture Control
-// ============================================================================
-
-export interface CaptureStartResponse {
-  status: string
-  captureId: string
-  interface: string
-  filename: string
-}
+// =============================================================================
+// Capture
+// =============================================================================
 
 export async function startCapture(
-  interfaceName: string,
   missionId: string,
-  filename: string
-): Promise<CaptureStartResponse> {
-  return fetchApi("/can/capture/start", {
-    method: "POST",
-    body: JSON.stringify({ interface: interfaceName, missionId, filename }),
-  })
-}
-
-export async function stopCapture(captureId: string): Promise<{ status: string; captureId: string }> {
-  return fetchApi(`/can/capture/stop?capture_id=${encodeURIComponent(captureId)}`, {
-    method: "POST",
-  })
-}
-
-// ============================================================================
-// Replay Control
-// ============================================================================
-
-export interface ReplayStartResponse {
-  status: string
-  replayId: string
-  interface: string
-  filename: string
-  speed: number
-  loop: boolean
-}
-
-export async function startReplay(
-  missionId: string,
-  filename: string,
-  interfaceName: string,
-  speed: number = 1.0,
-  loop: boolean = false
-): Promise<ReplayStartResponse> {
-  return fetchApi("/can/replay/start", {
-    method: "POST",
-    body: JSON.stringify({ missionId, filename, interface: interfaceName, speed, loop }),
-  })
-}
-
-export async function stopReplay(replayId: string): Promise<{ status: string; replayId: string }> {
-  return fetchApi(`/can/replay/stop?replay_id=${encodeURIComponent(replayId)}`, {
-    method: "POST",
-  })
-}
-
-// ============================================================================
-// Generator Control
-// ============================================================================
-
-export interface GeneratorStartResponse {
-  status: string
-  generatorId: string
-  interface: string
-}
-
-export async function startGenerator(
-  interfaceName: string,
-  options: {
-    canId?: string
-    dataLength?: number
-    gapMs?: number
-    burstCount?: number
-  } = {}
-): Promise<GeneratorStartResponse> {
-  return fetchApi("/can/generator/start", {
+  iface: "can0" | "can1",
+  filename?: string,
+  description?: string
+): Promise<{ status: string; filename: string }> {
+  return fetchApi("/capture/start", {
     method: "POST",
     body: JSON.stringify({
-      interface: interfaceName,
-      canId: options.canId,
-      dataLength: options.dataLength ?? 8,
-      gapMs: options.gapMs ?? 100,
-      burstCount: options.burstCount,
+      missionId,
+      interface: iface,
+      filename,
+      description,
     }),
   })
 }
 
-export async function stopGenerator(generatorId: string): Promise<{ status: string; generatorId: string }> {
-  return fetchApi(`/can/generator/stop?generator_id=${encodeURIComponent(generatorId)}`, {
+export async function stopCapture(): Promise<{ status: string; filename?: string; durationSeconds: number }> {
+  return fetchApi("/capture/stop", {
     method: "POST",
   })
 }
 
-// ============================================================================
+export async function getCaptureStatus(): Promise<CaptureStatus> {
+  return fetchApi<CaptureStatus>("/capture/status")
+}
+
+// =============================================================================
+// Replay
+// =============================================================================
+
+export async function startReplay(
+  missionId: string,
+  logId: string,
+  iface: "can0" | "can1",
+  speed: number = 1.0
+): Promise<{ status: string }> {
+  return fetchApi("/replay/start", {
+    method: "POST",
+    body: JSON.stringify({
+      missionId,
+      logId,
+      interface: iface,
+      speed,
+    }),
+  })
+}
+
+export async function stopReplay(): Promise<{ status: string }> {
+  return fetchApi("/replay/stop", {
+    method: "POST",
+  })
+}
+
+export async function getReplayStatus(): Promise<ProcessStatus> {
+  return fetchApi<ProcessStatus>("/replay/status")
+}
+
+// =============================================================================
+// Generator
+// =============================================================================
+
+export async function startGenerator(
+  iface: "can0" | "can1",
+  delayMs: number,
+  dataLength: number,
+  canId?: string
+): Promise<{ status: string }> {
+  return fetchApi("/generator/start", {
+    method: "POST",
+    body: JSON.stringify({
+      interface: iface,
+      delayMs,
+      dataLength,
+      canId,
+    }),
+  })
+}
+
+export async function stopGenerator(): Promise<{ status: string }> {
+  return fetchApi("/generator/stop", {
+    method: "POST",
+  })
+}
+
+export async function getGeneratorStatus(): Promise<ProcessStatus> {
+  return fetchApi<ProcessStatus>("/generator/status")
+}
+
+// =============================================================================
+// Fuzzing
+// =============================================================================
+
+export async function startFuzzing(
+  iface: "can0" | "can1",
+  idStart: string,
+  idEnd: string,
+  dataTemplate: string,
+  iterations: number,
+  delayMs: number
+): Promise<{ status: string }> {
+  return fetchApi("/fuzzing/start", {
+    method: "POST",
+    body: JSON.stringify({
+      interface: iface,
+      idStart,
+      idEnd,
+      dataTemplate,
+      iterations,
+      delayMs,
+    }),
+  })
+}
+
+export async function stopFuzzing(): Promise<{ status: string }> {
+  return fetchApi("/fuzzing/stop", {
+    method: "POST",
+  })
+}
+
+export async function getFuzzingStatus(): Promise<ProcessStatus> {
+  return fetchApi<ProcessStatus>("/fuzzing/status")
+}
+
+// =============================================================================
+// Sniffer
+// =============================================================================
+
+export async function startSniffer(iface: "can0" | "can1"): Promise<{ status: string }> {
+  return fetchApi(`/sniffer/start?interface=${iface}`, {
+    method: "POST",
+  })
+}
+
+export async function stopSniffer(): Promise<{ status: string }> {
+  return fetchApi("/sniffer/stop", {
+    method: "POST",
+  })
+}
+
+// =============================================================================
 // Missions
-// ============================================================================
+// =============================================================================
 
 export async function listMissions(): Promise<Mission[]> {
   return fetchApi<Mission[]>("/missions")
@@ -322,16 +376,16 @@ export async function duplicateMission(id: string): Promise<Mission> {
   })
 }
 
-// ============================================================================
+// =============================================================================
 // Logs
-// ============================================================================
+// =============================================================================
 
 export async function listMissionLogs(missionId: string): Promise<LogEntry[]> {
   return fetchApi<LogEntry[]>(`/missions/${missionId}/logs`)
 }
 
 export function getLogDownloadUrl(missionId: string, logId: string): string {
-  return `${API_BASE}/missions/${missionId}/logs/${logId}/download`
+  return `${API_BASE}/api/missions/${missionId}/logs/${logId}/download`
 }
 
 export async function deleteLog(missionId: string, logId: string): Promise<void> {
@@ -340,124 +394,36 @@ export async function deleteLog(missionId: string, logId: string): Promise<void>
   })
 }
 
-// ============================================================================
-// WebSocket - Real-time CAN Streaming
-// ============================================================================
+// =============================================================================
+// WebSocket Helper
+// =============================================================================
 
-export type CANStreamCallback = (frame: CANFrame) => void
-export type CANStreamErrorCallback = (error: string) => void
-export type CANStreamStatusCallback = (status: "connected" | "disconnected") => void
-
-export interface CANStreamOptions {
-  interface: string
-  onFrame: CANStreamCallback
-  onError?: CANStreamErrorCallback
-  onStatus?: CANStreamStatusCallback
-}
-
-export class CANStreamClient {
-  private ws: WebSocket | null = null
-  private options: CANStreamOptions
-  private reconnectAttempts = 0
-  private maxReconnectAttempts = 5
-  private reconnectTimeout: NodeJS.Timeout | null = null
-
-  constructor(options: CANStreamOptions) {
-    this.options = options
-  }
-
-  connect(): void {
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      return
-    }
-
-    const wsUrl = `${WS_BASE}/ws/candump?interface=${encodeURIComponent(this.options.interface)}`
-    
+export function createCANWebSocket(
+  iface: "can0" | "can1",
+  onMessage: (msg: CANMessage) => void,
+  onError?: (error: Event) => void,
+  onClose?: () => void
+): WebSocket {
+  const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:"
+  const wsHost = process.env.NEXT_PUBLIC_WS_URL || `${wsProtocol}//${window.location.host}`
+  const ws = new WebSocket(`${wsHost}/ws/candump?interface=${iface}`)
+  
+  ws.onmessage = (event) => {
     try {
-      this.ws = new WebSocket(wsUrl)
-
-      this.ws.onopen = () => {
-        this.reconnectAttempts = 0
-        this.options.onStatus?.("connected")
-      }
-
-      this.ws.onmessage = (event) => {
-        try {
-          const message = JSON.parse(event.data)
-          
-          if (message.type === "frame") {
-            this.options.onFrame(message.data as CANFrame)
-          } else if (message.type === "error") {
-            this.options.onError?.(message.message)
-          } else if (message.type === "status") {
-            this.options.onStatus?.(message.status)
-          }
-        } catch (e) {
-          console.error("Failed to parse WebSocket message:", e)
-        }
-      }
-
-      this.ws.onerror = () => {
-        this.options.onError?.("WebSocket connection error")
-      }
-
-      this.ws.onclose = () => {
-        this.options.onStatus?.("disconnected")
-        this.attemptReconnect()
-      }
-    } catch (e) {
-      this.options.onError?.(`Failed to connect: ${e}`)
+      const msg = JSON.parse(event.data) as CANMessage
+      onMessage(msg)
+    } catch {
+      // Ignore parse errors
     }
   }
-
-  private attemptReconnect(): void {
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      this.options.onError?.("Max reconnection attempts reached")
-      return
-    }
-
-    this.reconnectAttempts++
-    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000)
-    
-    this.reconnectTimeout = setTimeout(() => {
-      this.connect()
-    }, delay)
+  
+  if (onError) {
+    ws.onerror = onError
   }
-
-  disconnect(): void {
-    if (this.reconnectTimeout) {
-      clearTimeout(this.reconnectTimeout)
-      this.reconnectTimeout = null
-    }
-    
-    if (this.ws) {
-      this.ws.close()
-      this.ws = null
-    }
+  
+  if (onClose) {
+    ws.onclose = onClose
   }
-
-  isConnected(): boolean {
-    return this.ws?.readyState === WebSocket.OPEN
-  }
-}
-
-/**
- * Create a CAN stream client for real-time frame monitoring.
- * 
- * Usage:
- * ```
- * const stream = createCANStream({
- *   interface: "can0",
- *   onFrame: (frame) => console.log(frame),
- *   onError: (err) => console.error(err),
- *   onStatus: (status) => console.log(status),
- * })
- * 
- * stream.connect()
- * // ... later
- * stream.disconnect()
- * ```
- */
-export function createCANStream(options: CANStreamOptions): CANStreamClient {
-  return new CANStreamClient(options)
+  
+  return ws
 }

@@ -1,57 +1,131 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { AppShell } from "@/components/app-shell"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
-import { Cpu, Play, Square, Shuffle } from "lucide-react"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Cpu, Play, Square, Shuffle, AlertCircle, CheckCircle2, Loader2 } from "lucide-react"
+import { startGenerator, stopGenerator, getGeneratorStatus, type ProcessStatus } from "@/lib/api"
 
 export default function Generateur() {
   const [canId, setCanId] = useState("")
   const [useRandomId, setUseRandomId] = useState(true)
   const [frameLength, setFrameLength] = useState("8")
   const [delay, setDelay] = useState("100")
-  const [isRunning, setIsRunning] = useState(false)
+  const [status, setStatus] = useState<ProcessStatus>({ running: false })
+  const [isStarting, setIsStarting] = useState(false)
+  const [isStopping, setIsStopping] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
+  
+  // Simulated frame count (actual count would require backend tracking)
   const [frameCount, setFrameCount] = useState(0)
   const [lastFrame, setLastFrame] = useState<{ id: string; data: string } | null>(null)
 
+  const fetchStatus = useCallback(async () => {
+    try {
+      const s = await getGeneratorStatus()
+      setStatus(s)
+      if (!s.running) {
+        setFrameCount(0)
+        setLastFrame(null)
+      }
+    } catch {
+      // API might not be available
+    }
+  }, [])
+
   useEffect(() => {
-    if (!isRunning) return
+    fetchStatus()
+    const interval = setInterval(fetchStatus, 3000)
+    return () => clearInterval(interval)
+  }, [fetchStatus])
+
+  // Simulate frame generation display when running
+  useEffect(() => {
+    if (!status.running) return
 
     const interval = setInterval(() => {
       const id = useRandomId
         ? Math.floor(Math.random() * 0x7ff).toString(16).toUpperCase().padStart(3, "0")
         : canId || "7DF"
-      const length = Number.parseInt(frameLength) || 8
+      const length = parseInt(frameLength) || 8
       const data = Array.from({ length }, () =>
         Math.floor(Math.random() * 256).toString(16).toUpperCase().padStart(2, "0")
-      ).join("")
+      ).join(" ")
 
       setLastFrame({ id, data })
       setFrameCount((prev) => prev + 1)
-    }, Number.parseInt(delay) || 100)
+    }, parseInt(delay) || 100)
 
     return () => clearInterval(interval)
-  }, [isRunning, useRandomId, canId, frameLength, delay])
+  }, [status.running, useRandomId, canId, frameLength, delay])
 
-  const handleStart = () => {
-    setIsRunning(true)
+  const handleStart = async () => {
+    setError(null)
+    setSuccess(null)
+    setIsStarting(true)
     setFrameCount(0)
+    
+    try {
+      await startGenerator(
+        "can0",
+        parseInt(delay) || 100,
+        parseInt(frameLength) || 8,
+        useRandomId ? undefined : canId || undefined
+      )
+      setSuccess("Générateur démarré")
+      await fetchStatus()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur lors du démarrage")
+    } finally {
+      setIsStarting(false)
+    }
   }
 
-  const handleStop = () => {
-    setIsRunning(false)
+  const handleStop = async () => {
+    setError(null)
+    setIsStopping(true)
+    
+    try {
+      await stopGenerator()
+      setSuccess("Générateur arrêté")
+      await fetchStatus()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur lors de l'arrêt")
+    } finally {
+      setIsStopping(false)
+    }
   }
 
   return (
     <AppShell
       title="Générateur"
-      description="Génération de trames CAN aléatoires"
+      description="Génération de trames CAN (cangen)"
     >
       <div className="grid gap-6 lg:grid-cols-2">
+        {/* Alerts */}
+        {(error || success) && (
+          <div className="lg:col-span-2">
+            {error && (
+              <Alert className="border-destructive/50 bg-destructive/10">
+                <AlertCircle className="h-4 w-4 text-destructive" />
+                <AlertDescription className="text-destructive">{error}</AlertDescription>
+              </Alert>
+            )}
+            {success && (
+              <Alert className="border-success/50 bg-success/10">
+                <CheckCircle2 className="h-4 w-4 text-success" />
+                <AlertDescription className="text-success">{success}</AlertDescription>
+              </Alert>
+            )}
+          </div>
+        )}
+
         {/* Configuration Card */}
         <Card className="border-border bg-card">
           <CardHeader>
@@ -79,7 +153,7 @@ export default function Generateur() {
                 <Switch
                   checked={useRandomId}
                   onCheckedChange={setUseRandomId}
-                  disabled={isRunning}
+                  disabled={status.running}
                 />
               </div>
 
@@ -89,10 +163,10 @@ export default function Generateur() {
                   <Input
                     id="can-id"
                     value={canId}
-                    onChange={(e) => setCanId(e.target.value)}
+                    onChange={(e) => setCanId(e.target.value.toUpperCase())}
                     className="font-mono"
                     placeholder="7DF"
-                    disabled={isRunning}
+                    disabled={status.running}
                   />
                 </div>
               )}
@@ -106,7 +180,7 @@ export default function Generateur() {
                   onChange={(e) => setFrameLength(e.target.value)}
                   min={1}
                   max={8}
-                  disabled={isRunning}
+                  disabled={status.running}
                 />
               </div>
 
@@ -117,7 +191,7 @@ export default function Generateur() {
                   type="number"
                   value={delay}
                   onChange={(e) => setDelay(e.target.value)}
-                  disabled={isRunning}
+                  disabled={status.running}
                 />
               </div>
             </div>
@@ -125,22 +199,34 @@ export default function Generateur() {
             <div className="flex gap-3">
               <Button
                 onClick={handleStart}
-                disabled={isRunning}
+                disabled={status.running || isStarting}
                 className="flex-1 gap-2"
               >
-                <Play className="h-4 w-4" />
+                {isStarting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Play className="h-4 w-4" />
+                )}
                 Démarrer
               </Button>
               <Button
                 onClick={handleStop}
-                disabled={!isRunning}
+                disabled={!status.running || isStopping}
                 variant="destructive"
                 className="flex-1 gap-2"
               >
-                <Square className="h-4 w-4" />
+                {isStopping ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Square className="h-4 w-4" />
+                )}
                 Arrêter
               </Button>
             </div>
+            
+            <p className="text-xs text-muted-foreground">
+              Utilise <code className="rounded bg-muted px-1 py-0.5 font-mono">cangen</code> pour générer du trafic CAN
+            </p>
           </CardContent>
         </Card>
 
@@ -165,11 +251,11 @@ export default function Generateur() {
               <div className="flex items-center gap-3">
                 <div
                   className={`h-3 w-3 rounded-full ${
-                    isRunning ? "animate-pulse bg-success" : "bg-muted-foreground"
+                    status.running ? "animate-pulse bg-success" : "bg-muted-foreground"
                   }`}
                 />
                 <span className="font-medium text-foreground">
-                  {isRunning ? "Génération active" : "En attente"}
+                  {status.running ? "Génération active" : "En attente"}
                 </span>
               </div>
               <span className="text-2xl font-bold text-primary">
@@ -183,7 +269,7 @@ export default function Generateur() {
               {lastFrame ? (
                 <div className="rounded-lg bg-terminal p-4 font-mono">
                   <div className="flex items-center gap-4">
-                    <span className="text-primary">{lastFrame.id}</span>
+                    <span className="text-primary">0x{lastFrame.id}</span>
                     <span className="text-muted-foreground">#</span>
                     <span className="text-terminal-foreground">{lastFrame.data}</span>
                   </div>
@@ -201,7 +287,7 @@ export default function Generateur() {
             <div className="grid grid-cols-2 gap-4">
               <div className="rounded-lg bg-secondary p-3 text-center">
                 <p className="text-2xl font-bold text-foreground">
-                  {Math.round(1000 / (Number.parseInt(delay) || 100))}
+                  {Math.round(1000 / (parseInt(delay) || 100))}
                 </p>
                 <p className="text-xs text-muted-foreground">trames/sec</p>
               </div>

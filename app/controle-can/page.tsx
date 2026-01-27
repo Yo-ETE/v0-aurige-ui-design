@@ -1,13 +1,15 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { AppShell } from "@/components/app-shell"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
-import { Settings, Send, Power, PowerOff, CheckCircle2 } from "lucide-react"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Settings, Send, Power, PowerOff, CheckCircle2, AlertCircle, Loader2 } from "lucide-react"
+import { initializeCAN, stopCAN, sendCANFrame, getCANStatus, type CANInterfaceStatus } from "@/lib/api"
 
 const bitrates = [
   { value: "20000", label: "20 kbit/s" },
@@ -21,30 +23,97 @@ const bitrates = [
 ]
 
 export default function ControleCAN() {
-  const [canInterface, setCanInterface] = useState("can0")
+  const [canInterface, setCanInterface] = useState<"can0" | "can1">("can0")
   const [bitrate, setBitrate] = useState("500000")
-  const [isInitialized, setIsInitialized] = useState(false)
+  const [canStatus, setCanStatus] = useState<CANInterfaceStatus | null>(null)
+  const [isInitializing, setIsInitializing] = useState(false)
+  const [isStopping, setIsStopping] = useState(false)
   const [canFrame, setCanFrame] = useState("")
   const [isSending, setIsSending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
+
+  // Fetch CAN interface status
+  const fetchStatus = async () => {
+    try {
+      const status = await getCANStatus(canInterface)
+      setCanStatus(status)
+      if (status.bitrate) {
+        setBitrate(status.bitrate.toString())
+      }
+    } catch (err) {
+      // Interface may not exist - this is OK
+      setCanStatus(null)
+    }
+  }
+
+  useEffect(() => {
+    fetchStatus()
+    const interval = setInterval(fetchStatus, 5000)
+    return () => clearInterval(interval)
+  }, [canInterface])
 
   const handleInitialize = async () => {
-    // Mock API call
-    await new Promise((resolve) => setTimeout(resolve, 500))
-    setIsInitialized(true)
+    setError(null)
+    setSuccess(null)
+    setIsInitializing(true)
+    
+    try {
+      await initializeCAN(canInterface, parseInt(bitrate))
+      setSuccess(`Interface ${canInterface} initialisée à ${bitrates.find(b => b.value === bitrate)?.label}`)
+      await fetchStatus()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur lors de l'initialisation")
+    } finally {
+      setIsInitializing(false)
+    }
   }
 
   const handleStop = async () => {
-    await new Promise((resolve) => setTimeout(resolve, 300))
-    setIsInitialized(false)
+    setError(null)
+    setSuccess(null)
+    setIsStopping(true)
+    
+    try {
+      await stopCAN(canInterface)
+      setSuccess(`Interface ${canInterface} arrêtée`)
+      await fetchStatus()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur lors de l'arrêt")
+    } finally {
+      setIsStopping(false)
+    }
   }
 
   const handleSendFrame = async () => {
     if (!canFrame) return
+    setError(null)
+    setSuccess(null)
     setIsSending(true)
-    await new Promise((resolve) => setTimeout(resolve, 200))
-    setIsSending(false)
-    setCanFrame("")
+    
+    try {
+      // Parse frame format: ID#DATA (e.g., 7DF#02010C)
+      const [canId, data] = canFrame.split("#")
+      if (!canId || !data) {
+        throw new Error("Format invalide. Utilisez: ID#DATA (ex: 7DF#02010C)")
+      }
+      
+      await sendCANFrame({
+        interface: canInterface,
+        canId: canId.trim(),
+        data: data.trim(),
+      })
+      
+      setSuccess(`Trame envoyée: ${canFrame}`)
+      setCanFrame("")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur lors de l'envoi")
+    } finally {
+      setIsSending(false)
+    }
   }
+
+  const isInitialized = canStatus?.up ?? false
 
   return (
     <AppShell
@@ -52,6 +121,24 @@ export default function ControleCAN() {
       description="Configuration et contrôle des interfaces CAN"
     >
       <div className="grid gap-6 lg:grid-cols-2">
+        {/* Error/Success alerts */}
+        {(error || success) && (
+          <div className="lg:col-span-2">
+            {error && (
+              <Alert className="border-destructive/50 bg-destructive/10">
+                <AlertCircle className="h-4 w-4 text-destructive" />
+                <AlertDescription className="text-destructive">{error}</AlertDescription>
+              </Alert>
+            )}
+            {success && (
+              <Alert className="border-success/50 bg-success/10">
+                <CheckCircle2 className="h-4 w-4 text-success" />
+                <AlertDescription className="text-success">{success}</AlertDescription>
+              </Alert>
+            )}
+          </div>
+        )}
+
         {/* Card 1 - Initialisation CAN */}
         <Card className="border-border bg-card">
           <CardHeader>
@@ -73,7 +160,7 @@ export default function ControleCAN() {
                 <Label htmlFor="interface">Interface CAN</Label>
                 <Select
                   value={canInterface}
-                  onValueChange={setCanInterface}
+                  onValueChange={(v) => setCanInterface(v as "can0" | "can1")}
                   disabled={isInitialized}
                 >
                   <SelectTrigger id="interface">
@@ -106,32 +193,74 @@ export default function ControleCAN() {
               </div>
             </div>
 
-            {isInitialized && (
-              <div className="flex items-center gap-2 rounded-md bg-success/10 px-4 py-3 text-sm text-success">
-                <CheckCircle2 className="h-4 w-4" />
-                <span>
-                  Interface {canInterface} initialisée à{" "}
-                  {bitrates.find((b) => b.value === bitrate)?.label}
-                </span>
+            {/* Status display */}
+            {canStatus && (
+              <div className={`flex items-center gap-2 rounded-md px-4 py-3 text-sm ${
+                isInitialized 
+                  ? "bg-success/10 text-success" 
+                  : "bg-muted text-muted-foreground"
+              }`}>
+                {isInitialized ? (
+                  <>
+                    <CheckCircle2 className="h-4 w-4" />
+                    <span>
+                      Interface {canInterface} active à{" "}
+                      {canStatus.bitrate 
+                        ? bitrates.find((b) => parseInt(b.value) === canStatus.bitrate)?.label || `${canStatus.bitrate} bit/s`
+                        : "bitrate inconnu"}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <PowerOff className="h-4 w-4" />
+                    <span>Interface {canInterface} inactive</span>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Stats if up */}
+            {isInitialized && canStatus && (
+              <div className="grid grid-cols-3 gap-4 text-center">
+                <div className="rounded-lg bg-secondary p-3">
+                  <p className="text-lg font-bold text-foreground">{canStatus.txPackets}</p>
+                  <p className="text-xs text-muted-foreground">TX Packets</p>
+                </div>
+                <div className="rounded-lg bg-secondary p-3">
+                  <p className="text-lg font-bold text-foreground">{canStatus.rxPackets}</p>
+                  <p className="text-xs text-muted-foreground">RX Packets</p>
+                </div>
+                <div className="rounded-lg bg-secondary p-3">
+                  <p className="text-lg font-bold text-foreground">{canStatus.errors}</p>
+                  <p className="text-xs text-muted-foreground">Errors</p>
+                </div>
               </div>
             )}
 
             <div className="flex gap-3">
               <Button
                 onClick={handleInitialize}
-                disabled={isInitialized}
+                disabled={isInitialized || isInitializing}
                 className="flex-1 gap-2"
               >
-                <Power className="h-4 w-4" />
+                {isInitializing ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Power className="h-4 w-4" />
+                )}
                 Initialiser
               </Button>
               <Button
                 variant="destructive"
                 onClick={handleStop}
-                disabled={!isInitialized}
+                disabled={!isInitialized || isStopping}
                 className="flex-1 gap-2"
               >
-                <PowerOff className="h-4 w-4" />
+                {isStopping ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <PowerOff className="h-4 w-4" />
+                )}
                 Arrêter
               </Button>
             </div>
@@ -160,13 +289,61 @@ export default function ControleCAN() {
                 id="frame"
                 placeholder="7DF#02010C"
                 value={canFrame}
-                onChange={(e) => setCanFrame(e.target.value)}
+                onChange={(e) => setCanFrame(e.target.value.toUpperCase())}
                 className="font-mono"
                 disabled={!isInitialized}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && canFrame && isInitialized) {
+                    handleSendFrame()
+                  }
+                }}
               />
               <p className="text-xs text-muted-foreground">
                 Format: ID hexadécimal # données hexadécimales (ex: 7DF#02010C)
               </p>
+            </div>
+
+            {/* Quick send buttons */}
+            <div className="space-y-2">
+              <Label className="text-muted-foreground">Trames rapides</Label>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="font-mono text-xs bg-transparent"
+                  disabled={!isInitialized}
+                  onClick={() => setCanFrame("7DF#0100")}
+                >
+                  PIDs supportés
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="font-mono text-xs bg-transparent"
+                  disabled={!isInitialized}
+                  onClick={() => setCanFrame("7DF#02010C")}
+                >
+                  RPM
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="font-mono text-xs bg-transparent"
+                  disabled={!isInitialized}
+                  onClick={() => setCanFrame("7DF#02010D")}
+                >
+                  Vitesse
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="font-mono text-xs bg-transparent"
+                  disabled={!isInitialized}
+                  onClick={() => setCanFrame("7DF#020105")}
+                >
+                  Temp. moteur
+                </Button>
+              </div>
             </div>
 
             <Button
@@ -174,7 +351,11 @@ export default function ControleCAN() {
               disabled={!isInitialized || !canFrame || isSending}
               className="w-full gap-2"
             >
-              <Send className="h-4 w-4" />
+              {isSending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Send className="h-4 w-4" />
+              )}
               {isSending ? "Envoi en cours..." : "Envoyer"}
             </Button>
 

@@ -2,82 +2,82 @@
 AURIGE - CAN Bus Analysis API
 FastAPI backend for Raspberry Pi 5
 
-ARCHITECTURAL SEPARATION:
-- This backend is the ONLY component that executes system commands
-- All CAN operations go through the CANController
-- Frontend talks only to /api/* and /ws/* endpoints
-- No shell commands are executed from the frontend
+This is the AUTHORITATIVE system controller.
+All CAN commands are executed ONLY from this backend.
+The frontend NEVER executes shell commands.
 
-This file implements:
-- REST API for missions, logs, and system status
-- WebSocket for real-time CAN streaming
-- Filesystem-based mission persistence
+CAN commands use Linux can-utils:
+- ip link set can0 up/down type can bitrate X
+- candump can0 (for sniffing)
+- cansend can0 ID#DATA (for single frames)
+- canplayer -I file.log (for replay)
+- cangen can0 (for traffic generation)
 """
 
-import asyncio
-import json
-import logging
 import os
+import json
 import shutil
-from contextlib import asynccontextmanager
+import asyncio
+import subprocess
+import signal
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 from uuid import uuid4
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from can_controller import can_controller, CANFrame
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
-# ============================================================================
+# =============================================================================
 # Configuration
-# ============================================================================
+# =============================================================================
 
 DATA_DIR = Path(os.getenv("AURIGE_DATA_DIR", "/opt/aurige/data"))
 MISSIONS_DIR = DATA_DIR / "missions"
-LOGS_DIR = DATA_DIR / "logs"
 
 # Ensure directories exist
 MISSIONS_DIR.mkdir(parents=True, exist_ok=True)
-LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
+# Global state for running processes
+class ProcessState:
+    candump_process: Optional[asyncio.subprocess.Process] = None
+    candump_interface: Optional[str] = None
+    capture_process: Optional[asyncio.subprocess.Process] = None
+    capture_file: Optional[Path] = None
+    capture_start_time: Optional[datetime] = None
+    cangen_process: Optional[asyncio.subprocess.Process] = None
+    canplayer_process: Optional[asyncio.subprocess.Process] = None
+    fuzzing_process: Optional[asyncio.subprocess.Process] = None
+    websocket_clients: list[WebSocket] = []
 
-# ============================================================================
-# Lifespan Management
-# ============================================================================
+state = ProcessState()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan manager"""
-    logger.info("AURIGE API starting up...")
-    logger.info(f"Data directory: {DATA_DIR}")
+    """Cleanup on shutdown"""
     yield
-    logger.info("AURIGE API shutting down...")
-    await can_controller.cleanup()
+    # Stop all processes
+    for proc in [state.candump_process, state.capture_process, 
+                 state.cangen_process, state.canplayer_process, state.fuzzing_process]:
+        if proc and proc.returncode is None:
+            proc.terminate()
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=2.0)
+            except asyncio.TimeoutError:
+                proc.kill()
 
-
-# ============================================================================
-# FastAPI Application
-# ============================================================================
 
 app = FastAPI(
     title="AURIGE API",
-    description="CAN Bus Analysis API for Raspberry Pi - System Authority",
+    description="CAN Bus Analysis API for Raspberry Pi - System Controller",
     version="2.0.0",
     lifespan=lifespan,
 )
 
-# CORS middleware for frontend access
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -87,9 +87,9 @@ app.add_middleware(
 )
 
 
-# ============================================================================
+# =============================================================================
 # Pydantic Models
-# ============================================================================
+# =============================================================================
 
 class Vehicle(BaseModel):
     brand: str
@@ -132,8 +132,8 @@ class Mission(BaseModel):
     notes: Optional[str] = None
     vehicle: Vehicle
     can_config: CANConfig = Field(alias="canConfig")
-    created_at: str = Field(alias="createdAt")
-    updated_at: str = Field(alias="updatedAt")
+    created_at: datetime = Field(alias="createdAt")
+    updated_at: datetime = Field(alias="updatedAt")
     logs_count: int = Field(alias="logsCount")
     frames_count: int = Field(alias="framesCount")
 
@@ -143,11 +143,10 @@ class Mission(BaseModel):
 
 class LogEntry(BaseModel):
     id: str
-    mission_id: str = Field(alias="missionId")
     filename: str
     size: int
     frames_count: int = Field(alias="framesCount")
-    created_at: str = Field(alias="createdAt")
+    created_at: datetime = Field(alias="createdAt")
     duration_seconds: Optional[int] = Field(default=None, alias="durationSeconds")
     description: Optional[str] = None
 
@@ -155,14 +154,58 @@ class LogEntry(BaseModel):
         populate_by_name = True
 
 
-class CANInterfaceInfo(BaseModel):
-    name: str
-    is_up: bool = Field(alias="isUp")
-    bitrate: Optional[int] = None
-    tx_packets: int = Field(alias="txPackets")
-    rx_packets: int = Field(alias="rxPackets")
-    tx_errors: int = Field(alias="txErrors")
-    rx_errors: int = Field(alias="rxErrors")
+class CANFrame(BaseModel):
+    """Single CAN frame for sending"""
+    interface: str = "can0"
+    can_id: str = Field(alias="canId")  # Hex string like "7DF"
+    data: str  # Hex string like "02010C" or "02 01 0C"
+
+    class Config:
+        populate_by_name = True
+
+
+class CANInitRequest(BaseModel):
+    interface: str = "can0"
+    bitrate: int = 500000
+
+
+class CaptureStartRequest(BaseModel):
+    interface: str = "can0"
+    mission_id: str = Field(alias="missionId")
+    filename: Optional[str] = None
+    description: Optional[str] = None
+
+    class Config:
+        populate_by_name = True
+
+
+class ReplayRequest(BaseModel):
+    interface: str = "can0"
+    mission_id: str = Field(alias="missionId")
+    log_id: str = Field(alias="logId")
+    speed: float = 1.0  # Playback speed multiplier
+
+    class Config:
+        populate_by_name = True
+
+
+class FuzzingRequest(BaseModel):
+    interface: str = "can0"
+    id_start: str = Field(alias="idStart")  # Hex
+    id_end: str = Field(alias="idEnd")  # Hex
+    data_template: str = Field(alias="dataTemplate")  # Hex
+    iterations: int = 100
+    delay_ms: int = Field(alias="delayMs", default=10)
+
+    class Config:
+        populate_by_name = True
+
+
+class GeneratorRequest(BaseModel):
+    interface: str = "can0"
+    can_id: Optional[str] = Field(default=None, alias="canId")  # None = random
+    data_length: int = Field(alias="dataLength", default=8)
+    delay_ms: int = Field(alias="delayMs", default=100)
 
     class Config:
         populate_by_name = True
@@ -178,82 +221,55 @@ class SystemStatus(BaseModel):
     storage_used: float = Field(alias="storageUsed")
     storage_total: float = Field(alias="storageTotal")
     wifi_connected: bool = Field(alias="wifiConnected")
+    wifi_ip: Optional[str] = Field(default=None, alias="wifiIp")
     ethernet_connected: bool = Field(alias="ethernetConnected")
-    can_interfaces: list[CANInterfaceInfo] = Field(alias="canInterfaces")
-    api_version: str = Field(alias="apiVersion")
+    ethernet_ip: Optional[str] = Field(default=None, alias="ethernetIp")
+    can0_up: bool = Field(alias="can0Up")
+    can0_bitrate: Optional[int] = Field(default=None, alias="can0Bitrate")
+    can1_up: bool = Field(alias="can1Up")
+    can1_bitrate: Optional[int] = Field(default=None, alias="can1Bitrate")
+    api_running: bool = Field(alias="apiRunning")
+    web_running: bool = Field(alias="webRunning")
 
     class Config:
         populate_by_name = True
 
 
-class CANSetupRequest(BaseModel):
-    interface: str = "can0"
-    bitrate: int = 500000
-
-
-class CANSendRequest(BaseModel):
-    interface: str = "can0"
-    can_id: str = Field(alias="canId")
-    data: str
+class CANInterfaceStatus(BaseModel):
+    interface: str
+    up: bool
+    bitrate: Optional[int] = None
+    tx_packets: int = Field(alias="txPackets", default=0)
+    rx_packets: int = Field(alias="rxPackets", default=0)
+    errors: int = 0
 
     class Config:
         populate_by_name = True
 
 
-class CaptureStartRequest(BaseModel):
-    interface: str = "can0"
-    mission_id: str = Field(alias="missionId")
-    filename: str
-
-    class Config:
-        populate_by_name = True
-
-
-class ReplayStartRequest(BaseModel):
-    mission_id: str = Field(alias="missionId")
-    filename: str
-    interface: str = "can0"
-    speed: float = 1.0
-    loop: bool = False
-
-    class Config:
-        populate_by_name = True
-
-
-class GeneratorStartRequest(BaseModel):
-    interface: str = "can0"
-    can_id: Optional[str] = Field(default=None, alias="canId")
-    data_length: int = Field(default=8, alias="dataLength")
-    gap_ms: int = Field(default=100, alias="gapMs")
-    burst_count: Optional[int] = Field(default=None, alias="burstCount")
-
-    class Config:
-        populate_by_name = True
-
-
-# ============================================================================
-# Helper Functions - Mission Storage
-# ============================================================================
+# =============================================================================
+# Helper Functions - Filesystem
+# =============================================================================
 
 def get_mission_dir(mission_id: str) -> Path:
-    """Get the directory for a mission"""
+    """Get mission directory path"""
     return MISSIONS_DIR / mission_id
 
 
 def get_mission_file(mission_id: str) -> Path:
-    """Get the mission.json file path"""
+    """Get mission.json path"""
     return get_mission_dir(mission_id) / "mission.json"
 
 
 def get_mission_logs_dir(mission_id: str) -> Path:
-    """Get the logs directory for a mission"""
-    logs_dir = get_mission_dir(mission_id) / "logs"
-    logs_dir.mkdir(parents=True, exist_ok=True)
-    return logs_dir
+    """Get logs directory for a mission"""
+    path = get_mission_dir(mission_id) / "logs"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def load_mission(mission_id: str) -> dict:
-    """Load a mission from disk"""
+    """Load mission from filesystem"""
     file_path = get_mission_file(mission_id)
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Mission not found")
@@ -262,7 +278,7 @@ def load_mission(mission_id: str) -> dict:
 
 
 def save_mission(mission_id: str, data: dict):
-    """Save a mission to disk"""
+    """Save mission to filesystem"""
     mission_dir = get_mission_dir(mission_id)
     mission_dir.mkdir(parents=True, exist_ok=True)
     file_path = get_mission_file(mission_id)
@@ -271,7 +287,7 @@ def save_mission(mission_id: str, data: dict):
 
 
 def list_all_missions() -> list[dict]:
-    """List all missions from disk"""
+    """List all missions from filesystem"""
     missions = []
     for mission_dir in MISSIONS_DIR.iterdir():
         if mission_dir.is_dir():
@@ -280,53 +296,189 @@ def list_all_missions() -> list[dict]:
                 try:
                     with open(mission_file, "r") as f:
                         missions.append(json.load(f))
-                except Exception as e:
-                    logger.error(f"Failed to load mission {mission_dir.name}: {e}")
+                except Exception:
+                    continue
     return sorted(missions, key=lambda x: x.get("updatedAt", ""), reverse=True)
 
 
-def count_mission_logs(mission_id: str) -> int:
-    """Count log files in a mission"""
-    logs_dir = get_mission_dir(mission_id) / "logs"
-    if not logs_dir.exists():
+def count_log_frames(log_file: Path) -> int:
+    """Count frames in a candump log file"""
+    try:
+        with open(log_file, "r") as f:
+            return sum(1 for line in f if line.strip() and not line.startswith("#"))
+    except Exception:
         return 0
-    return len(list(logs_dir.glob("*.log")))
 
 
-def count_mission_frames(mission_id: str) -> int:
-    """Count total frames across all logs in a mission"""
-    logs_dir = get_mission_dir(mission_id) / "logs"
-    if not logs_dir.exists():
-        return 0
+def update_mission_stats(mission_id: str):
+    """Update mission log/frame counts"""
+    mission = load_mission(mission_id)
+    logs_dir = get_mission_logs_dir(mission_id)
     
-    total = 0
+    logs_count = 0
+    frames_count = 0
     for log_file in logs_dir.glob("*.log"):
+        logs_count += 1
+        frames_count += count_log_frames(log_file)
+    
+    mission["logsCount"] = logs_count
+    mission["framesCount"] = frames_count
+    mission["updatedAt"] = datetime.now().isoformat()
+    save_mission(mission_id, mission)
+
+
+# =============================================================================
+# Helper Functions - CAN Commands (Linux can-utils)
+# =============================================================================
+
+def run_command(cmd: list[str], check: bool = True) -> subprocess.CompletedProcess:
+    """
+    Execute a system command.
+    This is the ONLY place where shell commands are executed.
+    All CAN operations go through here.
+    """
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=check,
+        )
+        return result
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail=f"Command timeout: {' '.join(cmd)}")
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Command failed: {e.stderr or e.stdout or str(e)}"
+        )
+
+
+async def run_command_async(cmd: list[str]) -> asyncio.subprocess.Process:
+    """Start an async subprocess"""
+    return await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+
+
+def get_can_interface_status(interface: str) -> CANInterfaceStatus:
+    """
+    Get CAN interface status using `ip -details link show`
+    Parses the output to extract state and bitrate.
+    """
+    try:
+        result = run_command(["ip", "-details", "-json", "link", "show", interface], check=False)
+        if result.returncode != 0:
+            return CANInterfaceStatus(interface=interface, up=False)
+        
+        data = json.loads(result.stdout)
+        if not data:
+            return CANInterfaceStatus(interface=interface, up=False)
+        
+        iface_data = data[0]
+        operstate = iface_data.get("operstate", "DOWN")
+        up = operstate.upper() == "UP"
+        
+        # Extract bitrate from linkinfo
+        bitrate = None
+        linkinfo = iface_data.get("linkinfo", {})
+        info_data = linkinfo.get("info_data", {})
+        bitrate = info_data.get("bittiming", {}).get("bitrate")
+        
+        # Get stats
+        stats = iface_data.get("stats64", iface_data.get("stats", {}))
+        
+        return CANInterfaceStatus(
+            interface=interface,
+            up=up,
+            bitrate=bitrate,
+            txPackets=stats.get("tx", {}).get("packets", 0),
+            rxPackets=stats.get("rx", {}).get("packets", 0),
+            errors=stats.get("rx", {}).get("errors", 0) + stats.get("tx", {}).get("errors", 0),
+        )
+    except Exception:
+        return CANInterfaceStatus(interface=interface, up=False)
+
+
+def can_interface_up(interface: str, bitrate: int):
+    """
+    Bring up a CAN interface with specified bitrate.
+    Uses: ip link set can0 down && ip link set can0 type can bitrate 500000 && ip link set can0 up
+    """
+    # First bring down if already up
+    run_command(["ip", "link", "set", interface, "down"], check=False)
+    
+    # Set bitrate
+    run_command(["ip", "link", "set", interface, "type", "can", "bitrate", str(bitrate)])
+    
+    # Bring up
+    run_command(["ip", "link", "set", interface, "up"])
+
+
+def can_interface_down(interface: str):
+    """
+    Bring down a CAN interface.
+    Uses: ip link set can0 down
+    """
+    run_command(["ip", "link", "set", interface, "down"])
+
+
+def can_send_frame(interface: str, can_id: str, data: str):
+    """
+    Send a single CAN frame.
+    Uses: cansend can0 7DF#02010C
+    
+    Args:
+        interface: CAN interface (can0, can1)
+        can_id: CAN ID in hex (e.g., "7DF", "18DAF110")
+        data: Data bytes in hex (e.g., "02010C" or "02 01 0C")
+    """
+    # Clean up data - remove spaces
+    data_clean = data.replace(" ", "").upper()
+    can_id_clean = can_id.replace("0x", "").upper()
+    
+    frame = f"{can_id_clean}#{data_clean}"
+    run_command(["cansend", interface, frame])
+
+
+async def broadcast_to_websockets(message: str):
+    """Send message to all connected WebSocket clients"""
+    disconnected = []
+    for ws in state.websocket_clients:
         try:
-            with open(log_file, "r") as f:
-                total += sum(1 for _ in f)
+            await ws.send_text(message)
         except Exception:
-            continue
-    return total
+            disconnected.append(ws)
+    for ws in disconnected:
+        state.websocket_clients.remove(ws)
 
 
-# ============================================================================
+# =============================================================================
 # System Status Endpoints
-# ============================================================================
+# =============================================================================
 
 @app.get("/api/status", response_model=SystemStatus)
 async def get_system_status():
     """
-    Get comprehensive Raspberry Pi system status.
-    
-    Returns hostname, uptime, CPU, memory, storage, network, and CAN interface states.
+    Get complete Raspberry Pi system status.
+    Reads from /proc and /sys filesystems and uses ip commands.
     """
-    import subprocess
-    
     # Hostname
     try:
-        hostname = os.uname().nodename
+        with open("/etc/hostname", "r") as f:
+            hostname = f.read().strip()
     except Exception:
         hostname = "aurige-pi"
+    
+    # Uptime
+    try:
+        with open("/proc/uptime", "r") as f:
+            uptime_seconds = int(float(f.read().split()[0]))
+    except Exception:
+        uptime_seconds = 0
     
     # CPU usage
     try:
@@ -335,7 +487,7 @@ async def get_system_status():
             cpu_values = [int(x) for x in cpu_line.split()[1:]]
             idle = cpu_values[3]
             total = sum(cpu_values)
-            cpu_usage = 100.0 * (1 - idle / total)
+            cpu_usage = 100.0 * (1 - idle / total) if total > 0 else 0.0
     except Exception:
         cpu_usage = 0.0
     
@@ -354,7 +506,7 @@ async def get_system_status():
                 parts = line.split()
                 if len(parts) >= 2:
                     meminfo[parts[0].rstrip(":")] = int(parts[1])
-            memory_total = meminfo.get("MemTotal", 0) / 1024  # MB
+            memory_total = meminfo.get("MemTotal", 0) / 1024
             memory_free = meminfo.get("MemAvailable", meminfo.get("MemFree", 0)) / 1024
             memory_used = memory_total - memory_free
     except Exception:
@@ -364,54 +516,56 @@ async def get_system_status():
     # Storage
     try:
         statvfs = os.statvfs("/")
-        storage_total = (statvfs.f_frsize * statvfs.f_blocks) / (1024 ** 3)  # GB
+        storage_total = (statvfs.f_frsize * statvfs.f_blocks) / (1024 ** 3)
         storage_free = (statvfs.f_frsize * statvfs.f_bavail) / (1024 ** 3)
         storage_used = storage_total - storage_free
     except Exception:
         storage_total = 64.0
         storage_used = 32.0
     
-    # Uptime
+    # Network - WiFi
+    wifi_connected = False
+    wifi_ip = None
     try:
-        with open("/proc/uptime", "r") as f:
-            uptime_seconds = int(float(f.read().split()[0]))
+        result = run_command(["ip", "-json", "addr", "show", "wlan0"], check=False)
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            if data:
+                for addr_info in data[0].get("addr_info", []):
+                    if addr_info.get("family") == "inet":
+                        wifi_ip = addr_info.get("local")
+                        wifi_connected = True
+                        break
     except Exception:
-        uptime_seconds = 0
+        pass
     
-    # Network
+    # Network - Ethernet
+    ethernet_connected = False
+    ethernet_ip = None
     try:
-        result = subprocess.run(["ip", "addr"], capture_output=True, text=True, timeout=5)
-        output = result.stdout
-        wifi_connected = "wlan0" in output and "inet " in output.split("wlan0")[1].split("wlan")[0] if "wlan0" in output else False
-        ethernet_connected = "eth0" in output and "inet " in output.split("eth0")[1].split("eth")[0] if "eth0" in output else False
+        result = run_command(["ip", "-json", "addr", "show", "eth0"], check=False)
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            if data:
+                for addr_info in data[0].get("addr_info", []):
+                    if addr_info.get("family") == "inet":
+                        ethernet_ip = addr_info.get("local")
+                        ethernet_connected = True
+                        break
     except Exception:
-        wifi_connected = False
-        ethernet_connected = True
+        pass
     
-    # CAN interfaces status
-    can_interfaces = []
-    for iface in ["can0", "can1"]:
-        try:
-            status = await can_controller.get_interface_status(iface)
-            can_interfaces.append(CANInterfaceInfo(
-                name=status.name,
-                isUp=status.is_up,
-                bitrate=status.bitrate,
-                txPackets=status.tx_packets,
-                rxPackets=status.rx_packets,
-                txErrors=status.tx_errors,
-                rxErrors=status.rx_errors,
-            ))
-        except Exception:
-            can_interfaces.append(CANInterfaceInfo(
-                name=iface,
-                isUp=False,
-                bitrate=None,
-                txPackets=0,
-                rxPackets=0,
-                txErrors=0,
-                rxErrors=0,
-            ))
+    # CAN interfaces
+    can0_status = get_can_interface_status("can0")
+    can1_status = get_can_interface_status("can1")
+    
+    # Services
+    api_running = True  # We're running
+    try:
+        result = run_command(["systemctl", "is-active", "aurige-web"], check=False)
+        web_running = result.stdout.strip() == "active"
+    except Exception:
+        web_running = True
     
     return SystemStatus(
         hostname=hostname,
@@ -423,324 +577,399 @@ async def get_system_status():
         storageUsed=round(storage_used, 1),
         storageTotal=round(storage_total, 1),
         wifiConnected=wifi_connected,
+        wifiIp=wifi_ip,
         ethernetConnected=ethernet_connected,
-        canInterfaces=can_interfaces,
-        apiVersion="2.0.0",
+        ethernetIp=ethernet_ip,
+        can0Up=can0_status.up,
+        can0Bitrate=can0_status.bitrate,
+        can1Up=can1_status.up,
+        can1Bitrate=can1_status.bitrate,
+        apiRunning=api_running,
+        webRunning=web_running,
     )
 
 
-@app.get("/api/health")
-async def health_check():
-    """Health check endpoint"""
+@app.get("/api/can/{interface}/status", response_model=CANInterfaceStatus)
+async def get_can_status(interface: str):
+    """Get status of a specific CAN interface"""
+    if interface not in ["can0", "can1"]:
+        raise HTTPException(status_code=400, detail="Invalid interface. Use can0 or can1.")
+    return get_can_interface_status(interface)
+
+
+# =============================================================================
+# CAN Control Endpoints
+# =============================================================================
+
+@app.post("/api/can/init")
+async def initialize_can(request: CANInitRequest):
+    """
+    Initialize a CAN interface with specified bitrate.
+    
+    Executes:
+    - ip link set canX down
+    - ip link set canX type can bitrate BITRATE
+    - ip link set canX up
+    """
+    if request.interface not in ["can0", "can1"]:
+        raise HTTPException(status_code=400, detail="Invalid interface")
+    
+    if request.bitrate not in [20000, 50000, 100000, 125000, 250000, 500000, 800000, 1000000]:
+        raise HTTPException(status_code=400, detail="Invalid bitrate")
+    
+    can_interface_up(request.interface, request.bitrate)
+    
     return {
-        "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
-        "version": "2.0.0",
+        "status": "initialized",
+        "interface": request.interface,
+        "bitrate": request.bitrate,
     }
 
 
-# ============================================================================
-# CAN Interface Endpoints
-# ============================================================================
-
-@app.post("/api/can/setup")
-async def setup_can_interface(request: CANSetupRequest):
+@app.post("/api/can/stop")
+async def stop_can(interface: str = "can0"):
     """
-    Initialize a CAN interface with the specified bitrate.
+    Stop a CAN interface.
     
-    This endpoint configures the CAN interface using ip link commands.
-    Only the backend is authorized to execute these system commands.
+    Executes: ip link set canX down
     """
-    try:
-        success = await can_controller.setup_interface(request.interface, request.bitrate)
-        if not success:
-            raise HTTPException(status_code=500, detail="Failed to setup interface")
-        
-        status = await can_controller.get_interface_status(request.interface)
-        return {
-            "status": "success",
-            "interface": request.interface,
-            "bitrate": request.bitrate,
-            "isUp": status.is_up,
-        }
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"CAN setup error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/can/down")
-async def bring_can_down(interface: str = "can0"):
-    """Bring a CAN interface down"""
-    try:
-        success = await can_controller.bring_interface_down(interface)
-        return {"status": "success" if success else "failed", "interface": interface}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    if interface not in ["can0", "can1"]:
+        raise HTTPException(status_code=400, detail="Invalid interface")
+    
+    can_interface_down(interface)
+    
+    return {"status": "stopped", "interface": interface}
 
 
 @app.post("/api/can/send")
-async def send_can_frame(request: CANSendRequest):
+async def send_can_frame(frame: CANFrame):
     """
     Send a single CAN frame.
     
-    Uses cansend to transmit the frame on the specified interface.
+    Executes: cansend canX ID#DATA
     """
-    try:
-        success = await can_controller.send_frame(
-            request.interface,
-            request.can_id,
-            request.data
-        )
-        if not success:
-            raise HTTPException(status_code=500, detail="Failed to send frame")
-        return {
-            "status": "success",
-            "interface": request.interface,
-            "canId": request.can_id,
-            "data": request.data,
-        }
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"CAN send error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    if frame.interface not in ["can0", "can1"]:
+        raise HTTPException(status_code=400, detail="Invalid interface")
+    
+    can_send_frame(frame.interface, frame.can_id, frame.data)
+    
+    return {
+        "status": "sent",
+        "interface": frame.interface,
+        "canId": frame.can_id,
+        "data": frame.data,
+    }
 
 
-# ============================================================================
+# =============================================================================
 # Capture Endpoints
-# ============================================================================
+# =============================================================================
 
-# Track active captures
-active_captures: dict[str, str] = {}  # capture_id -> mission_id
-
-
-@app.post("/api/can/capture/start")
+@app.post("/api/capture/start")
 async def start_capture(request: CaptureStartRequest):
     """
-    Start capturing CAN frames to a log file.
+    Start capturing CAN traffic to a log file.
     
-    Uses candump to capture all frames on the interface.
-    Logs are stored in the mission's logs directory.
+    Executes: candump -L canX > mission/logs/filename.log
     """
-    try:
-        capture_id = await can_controller.start_capture(
-            request.interface,
-            request.mission_id,
-            request.filename
-        )
-        active_captures[capture_id] = request.mission_id
-        
-        return {
-            "status": "capturing",
-            "captureId": capture_id,
+    if state.capture_process and state.capture_process.returncode is None:
+        raise HTTPException(status_code=409, detail="Capture already running")
+    
+    # Verify mission exists
+    load_mission(request.mission_id)
+    
+    # Generate filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = request.filename or f"capture_{timestamp}.log"
+    if not filename.endswith(".log"):
+        filename += ".log"
+    
+    logs_dir = get_mission_logs_dir(request.mission_id)
+    log_path = logs_dir / filename
+    
+    # Start candump with log format
+    # candump -L outputs in standard log format that canplayer can replay
+    state.capture_process = await asyncio.create_subprocess_exec(
+        "candump", "-L", request.interface,
+        stdout=open(log_path, "w"),
+        stderr=asyncio.subprocess.PIPE,
+    )
+    state.capture_file = log_path
+    state.capture_start_time = datetime.now()
+    
+    # Save metadata
+    meta_path = log_path.with_suffix(".meta.json")
+    with open(meta_path, "w") as f:
+        json.dump({
+            "description": request.description,
             "interface": request.interface,
-            "filename": request.filename,
-        }
-    except Exception as e:
-        logger.error(f"Capture start error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+            "startTime": state.capture_start_time.isoformat(),
+        }, f)
+    
+    return {
+        "status": "started",
+        "missionId": request.mission_id,
+        "filename": filename,
+        "interface": request.interface,
+    }
 
 
-@app.post("/api/can/capture/stop")
-async def stop_capture(capture_id: str):
-    """Stop an active capture session"""
+@app.post("/api/capture/stop")
+async def stop_capture():
+    """Stop the running capture"""
+    if not state.capture_process or state.capture_process.returncode is not None:
+        raise HTTPException(status_code=404, detail="No capture running")
+    
+    # Calculate duration
+    duration = 0
+    if state.capture_start_time:
+        duration = int((datetime.now() - state.capture_start_time).total_seconds())
+    
+    # Stop process
+    state.capture_process.terminate()
     try:
-        success = await can_controller.stop_capture(capture_id)
+        await asyncio.wait_for(state.capture_process.wait(), timeout=5.0)
+    except asyncio.TimeoutError:
+        state.capture_process.kill()
+    
+    # Update metadata with duration
+    if state.capture_file:
+        meta_path = state.capture_file.with_suffix(".meta.json")
+        if meta_path.exists():
+            with open(meta_path, "r") as f:
+                meta = json.load(f)
+            meta["durationSeconds"] = duration
+            meta["endTime"] = datetime.now().isoformat()
+            with open(meta_path, "w") as f:
+                json.dump(meta, f)
         
         # Update mission stats
-        if capture_id in active_captures:
-            mission_id = active_captures[capture_id]
-            try:
-                mission = load_mission(mission_id)
-                mission["logsCount"] = count_mission_logs(mission_id)
-                mission["framesCount"] = count_mission_frames(mission_id)
-                mission["updatedAt"] = datetime.now().isoformat()
-                save_mission(mission_id, mission)
-            except Exception:
-                pass
-            del active_captures[capture_id]
+        mission_id = state.capture_file.parent.parent.name
+        update_mission_stats(mission_id)
         
-        return {"status": "stopped" if success else "not_found", "captureId": capture_id}
-    except Exception as e:
-        logger.error(f"Capture stop error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ============================================================================
-# Replay Endpoints
-# ============================================================================
-
-active_replays: dict[str, str] = {}
-
-
-@app.post("/api/can/replay/start")
-async def start_replay(request: ReplayStartRequest):
-    """
-    Start replaying a captured log file.
+        filename = state.capture_file.name
+    else:
+        filename = None
     
-    Uses canplayer to replay the log at the specified speed.
+    # Clear state
+    state.capture_process = None
+    state.capture_file = None
+    state.capture_start_time = None
+    
+    return {
+        "status": "stopped",
+        "filename": filename,
+        "durationSeconds": duration,
+    }
+
+
+@app.get("/api/capture/status")
+async def get_capture_status():
+    """Get current capture status"""
+    is_running = state.capture_process and state.capture_process.returncode is None
+    duration = 0
+    if is_running and state.capture_start_time:
+        duration = int((datetime.now() - state.capture_start_time).total_seconds())
+    
+    return {
+        "running": is_running,
+        "filename": state.capture_file.name if state.capture_file else None,
+        "durationSeconds": duration,
+    }
+
+
+# =============================================================================
+# Replay Endpoints
+# =============================================================================
+
+@app.post("/api/replay/start")
+async def start_replay(request: ReplayRequest):
     """
-    try:
-        replay_id = await can_controller.start_replay(
-            request.mission_id,
-            request.filename,
-            request.interface,
-            request.speed,
-            request.loop
-        )
-        active_replays[replay_id] = request.mission_id
-        
-        return {
-            "status": "replaying",
-            "replayId": replay_id,
-            "interface": request.interface,
-            "filename": request.filename,
-            "speed": request.speed,
-            "loop": request.loop,
-        }
-    except FileNotFoundError:
+    Start replaying a log file.
+    
+    Executes: canplayer -I logfile canX=canX
+    """
+    if state.canplayer_process and state.canplayer_process.returncode is None:
+        raise HTTPException(status_code=409, detail="Replay already running")
+    
+    # Get log file
+    logs_dir = get_mission_logs_dir(request.mission_id)
+    log_file = logs_dir / f"{request.log_id}.log"
+    
+    if not log_file.exists():
         raise HTTPException(status_code=404, detail="Log file not found")
-    except Exception as e:
-        logger.error(f"Replay start error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    
+    # Build canplayer command
+    # -I: input file, -l i: loop count (1 = once), -g gap: gap between frames
+    cmd = ["canplayer", "-I", str(log_file)]
+    
+    if request.speed != 1.0:
+        # Adjust timing - canplayer doesn't have direct speed control
+        # but we can use -g for gap multiplier
+        gap = int(1000 / request.speed)  # microseconds
+        cmd.extend(["-g", str(gap)])
+    
+    # Map interface
+    cmd.append(f"{request.interface}={request.interface}")
+    
+    state.canplayer_process = await run_command_async(cmd)
+    
+    return {
+        "status": "started",
+        "missionId": request.mission_id,
+        "logId": request.log_id,
+        "speed": request.speed,
+    }
 
 
-@app.post("/api/can/replay/stop")
-async def stop_replay(replay_id: str):
-    """Stop an active replay session"""
+@app.post("/api/replay/stop")
+async def stop_replay():
+    """Stop replay"""
+    if not state.canplayer_process or state.canplayer_process.returncode is not None:
+        raise HTTPException(status_code=404, detail="No replay running")
+    
+    state.canplayer_process.terminate()
     try:
-        success = await can_controller.stop_replay(replay_id)
-        if replay_id in active_replays:
-            del active_replays[replay_id]
-        return {"status": "stopped" if success else "not_found", "replayId": replay_id}
-    except Exception as e:
-        logger.error(f"Replay stop error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        await asyncio.wait_for(state.canplayer_process.wait(), timeout=5.0)
+    except asyncio.TimeoutError:
+        state.canplayer_process.kill()
+    
+    state.canplayer_process = None
+    
+    return {"status": "stopped"}
 
 
-# ============================================================================
-# Generator Endpoints
-# ============================================================================
+@app.get("/api/replay/status")
+async def get_replay_status():
+    """Get replay status"""
+    is_running = state.canplayer_process and state.canplayer_process.returncode is None
+    return {"running": is_running}
 
-active_generators: dict[str, dict] = {}
 
+# =============================================================================
+# Generator / Fuzzing Endpoints
+# =============================================================================
 
-@app.post("/api/can/generator/start")
-async def start_generator(request: GeneratorStartRequest):
+@app.post("/api/generator/start")
+async def start_generator(request: GeneratorRequest):
     """
     Start generating CAN traffic.
     
-    Uses cangen to generate frames for testing.
+    Executes: cangen canX -g delay -L length [-I id]
     """
+    if state.cangen_process and state.cangen_process.returncode is None:
+        raise HTTPException(status_code=409, detail="Generator already running")
+    
+    cmd = [
+        "cangen", request.interface,
+        "-g", str(request.delay_ms),
+        "-L", str(request.data_length),
+    ]
+    
+    if request.can_id:
+        # Fixed ID mode
+        cmd.extend(["-I", request.can_id])
+    
+    state.cangen_process = await run_command_async(cmd)
+    
+    return {
+        "status": "started",
+        "interface": request.interface,
+        "delayMs": request.delay_ms,
+    }
+
+
+@app.post("/api/generator/stop")
+async def stop_generator():
+    """Stop generator"""
+    if not state.cangen_process or state.cangen_process.returncode is not None:
+        raise HTTPException(status_code=404, detail="No generator running")
+    
+    state.cangen_process.terminate()
     try:
-        generator_id = await can_controller.start_generator(
-            request.interface,
-            request.can_id,
-            request.data_length,
-            request.gap_ms,
-            request.burst_count
-        )
-        active_generators[generator_id] = {
-            "interface": request.interface,
-            "canId": request.can_id,
-            "gapMs": request.gap_ms,
-        }
-        
-        return {
-            "status": "generating",
-            "generatorId": generator_id,
-            "interface": request.interface,
-        }
-    except Exception as e:
-        logger.error(f"Generator start error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        await asyncio.wait_for(state.cangen_process.wait(), timeout=5.0)
+    except asyncio.TimeoutError:
+        state.cangen_process.kill()
+    
+    state.cangen_process = None
+    
+    return {"status": "stopped"}
 
 
-@app.post("/api/can/generator/stop")
-async def stop_generator(generator_id: str):
-    """Stop an active traffic generator"""
-    try:
-        success = await can_controller.stop_generator(generator_id)
-        if generator_id in active_generators:
-            del active_generators[generator_id]
-        return {"status": "stopped" if success else "not_found", "generatorId": generator_id}
-    except Exception as e:
-        logger.error(f"Generator stop error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+@app.get("/api/generator/status")
+async def get_generator_status():
+    """Get generator status"""
+    is_running = state.cangen_process and state.cangen_process.returncode is None
+    return {"running": is_running}
 
 
-# ============================================================================
-# WebSocket - Real-time CAN Streaming
-# ============================================================================
-
-@app.websocket("/ws/candump")
-async def websocket_candump(
-    websocket: WebSocket,
-    interface: str = Query(default="can0")
-):
+@app.post("/api/fuzzing/start")
+async def start_fuzzing(request: FuzzingRequest):
     """
-    WebSocket endpoint for real-time CAN frame streaming.
-    
-    Streams live candump output to connected clients.
-    
-    Query params:
-        interface: CAN interface to monitor (default: can0)
-    
-    Messages sent:
-        {"type": "frame", "data": {...frame data...}}
-        {"type": "error", "message": "..."}
-        {"type": "status", "status": "connected/disconnected"}
+    Start fuzzing - sends frames with incrementing IDs.
+    This uses a Python loop with cansend for precise control.
     """
-    await websocket.accept()
-    logger.info(f"WebSocket client connected for {interface}")
+    if state.fuzzing_process and state.fuzzing_process.returncode is None:
+        raise HTTPException(status_code=409, detail="Fuzzing already running")
     
+    # Create a temporary script for fuzzing
+    script_content = f'''#!/bin/bash
+start_id=$((16#{request.id_start}))
+end_id=$((16#{request.id_end}))
+data="{request.data_template}"
+delay_sec=$(echo "scale=6; {request.delay_ms}/1000" | bc)
+
+for ((i=0; i<{request.iterations}; i++)); do
+    current_id=$((start_id + (end_id - start_id) * i / {request.iterations}))
+    hex_id=$(printf "%03X" $current_id)
+    cansend {request.interface} "${{hex_id}}#${{data}}"
+    sleep $delay_sec
+done
+'''
+    
+    script_path = Path("/tmp/aurige_fuzz.sh")
+    with open(script_path, "w") as f:
+        f.write(script_content)
+    script_path.chmod(0o755)
+    
+    state.fuzzing_process = await run_command_async(["bash", str(script_path)])
+    
+    return {
+        "status": "started",
+        "interface": request.interface,
+        "idRange": f"{request.id_start}-{request.id_end}",
+        "iterations": request.iterations,
+    }
+
+
+@app.post("/api/fuzzing/stop")
+async def stop_fuzzing():
+    """Stop fuzzing"""
+    if not state.fuzzing_process or state.fuzzing_process.returncode is not None:
+        raise HTTPException(status_code=404, detail="No fuzzing running")
+    
+    # Kill the script and any child cansend processes
+    state.fuzzing_process.terminate()
     try:
-        # Validate interface
-        try:
-            can_controller._validate_interface(interface)
-        except ValueError as e:
-            await websocket.send_json({"type": "error", "message": str(e)})
-            await websocket.close()
-            return
-        
-        # Send connected status
-        await websocket.send_json({"type": "status", "status": "connected", "interface": interface})
-        
-        # Stream candump output
-        async for frame in can_controller.stream_candump(interface):
-            await websocket.send_json({
-                "type": "frame",
-                "data": {
-                    "timestamp": frame.timestamp,
-                    "interface": frame.interface,
-                    "canId": frame.can_id,
-                    "data": frame.data,
-                    "delta": frame.delta,
-                }
-            })
-            
-    except WebSocketDisconnect:
-        logger.info(f"WebSocket client disconnected from {interface}")
-    except asyncio.CancelledError:
-        logger.info(f"WebSocket stream cancelled for {interface}")
-    except Exception as e:
-        logger.error(f"WebSocket error: {e}")
-        try:
-            await websocket.send_json({"type": "error", "message": str(e)})
-        except:
-            pass
-    finally:
-        try:
-            await websocket.close()
-        except:
-            pass
+        await asyncio.wait_for(state.fuzzing_process.wait(), timeout=5.0)
+    except asyncio.TimeoutError:
+        state.fuzzing_process.kill()
+    
+    state.fuzzing_process = None
+    
+    return {"status": "stopped"}
 
 
-# ============================================================================
-# Mission Endpoints
-# ============================================================================
+@app.get("/api/fuzzing/status")
+async def get_fuzzing_status():
+    """Get fuzzing status"""
+    is_running = state.fuzzing_process and state.fuzzing_process.returncode is None
+    return {"running": is_running}
+
+
+# =============================================================================
+# Mission CRUD Endpoints
+# =============================================================================
 
 @app.get("/api/missions", response_model=list[Mission])
 async def list_missions():
@@ -770,19 +999,15 @@ async def create_mission(mission_data: MissionCreate):
     save_mission(mission_id, mission)
     get_mission_logs_dir(mission_id)  # Create logs directory
     
-    logger.info(f"Created mission {mission_id}: {mission_data.name}")
     return Mission(**mission)
 
 
 @app.get("/api/missions/{mission_id}", response_model=Mission)
 async def get_mission(mission_id: str):
-    """Get a single mission with updated counts"""
+    """Get a single mission"""
     mission = load_mission(mission_id)
-    
-    # Update counts from filesystem
-    mission["logsCount"] = count_mission_logs(mission_id)
-    mission["framesCount"] = count_mission_frames(mission_id)
-    
+    update_mission_stats(mission_id)
+    mission = load_mission(mission_id)  # Reload after stats update
     return Mission(**mission)
 
 
@@ -791,17 +1016,17 @@ async def update_mission(mission_id: str, updates: MissionUpdate):
     """Update a mission"""
     mission = load_mission(mission_id)
     
-    update_data = updates.model_dump(exclude_unset=True, by_alias=True)
-    if "vehicle" in update_data and update_data["vehicle"]:
-        update_data["vehicle"] = updates.vehicle.model_dump()
-    if "canConfig" in update_data and update_data["canConfig"]:
-        update_data["canConfig"] = updates.can_config.model_dump()
+    if updates.name is not None:
+        mission["name"] = updates.name
+    if updates.notes is not None:
+        mission["notes"] = updates.notes
+    if updates.vehicle is not None:
+        mission["vehicle"] = updates.vehicle.model_dump()
+    if updates.can_config is not None:
+        mission["canConfig"] = updates.can_config.model_dump()
     
-    mission.update(update_data)
     mission["updatedAt"] = datetime.now().isoformat()
-    
     save_mission(mission_id, mission)
-    logger.info(f"Updated mission {mission_id}")
     
     return Mission(**mission)
 
@@ -813,9 +1038,7 @@ async def delete_mission(mission_id: str):
     if not mission_dir.exists():
         raise HTTPException(status_code=404, detail="Mission not found")
     
-    # Delete entire mission directory (including logs)
     shutil.rmtree(mission_dir)
-    logger.info(f"Deleted mission {mission_id}")
     
     return {"status": "deleted", "id": mission_id}
 
@@ -840,37 +1063,29 @@ async def duplicate_mission(mission_id: str):
     
     save_mission(new_id, new_mission)
     get_mission_logs_dir(new_id)
-    logger.info(f"Duplicated mission {mission_id} -> {new_id}")
     
     return Mission(**new_mission)
 
 
-# ============================================================================
+# =============================================================================
 # Log Endpoints
-# ============================================================================
+# =============================================================================
 
 @app.get("/api/missions/{mission_id}/logs", response_model=list[LogEntry])
 async def list_mission_logs(mission_id: str):
     """List all logs for a mission"""
-    # Verify mission exists
-    load_mission(mission_id)
+    load_mission(mission_id)  # Verify exists
     
     logs_dir = get_mission_logs_dir(mission_id)
     logs = []
     
     for log_file in logs_dir.glob("*.log"):
         stat = log_file.stat()
+        frames_count = count_log_frames(log_file)
         
-        # Count frames in log
-        try:
-            with open(log_file, "r") as f:
-                frames_count = sum(1 for _ in f)
-        except Exception:
-            frames_count = 0
-        
-        # Try to read metadata
-        meta_file = log_file.with_suffix(".meta.json")
+        # Load metadata if exists
         meta = {}
+        meta_file = log_file.with_suffix(".meta.json")
         if meta_file.exists():
             try:
                 with open(meta_file, "r") as f:
@@ -880,11 +1095,10 @@ async def list_mission_logs(mission_id: str):
         
         logs.append(LogEntry(
             id=log_file.stem,
-            missionId=mission_id,
             filename=log_file.name,
             size=stat.st_size,
             framesCount=frames_count,
-            createdAt=datetime.fromtimestamp(stat.st_ctime).isoformat(),
+            createdAt=datetime.fromtimestamp(stat.st_ctime),
             durationSeconds=meta.get("durationSeconds"),
             description=meta.get("description"),
         ))
@@ -926,20 +1140,153 @@ async def delete_log(mission_id: str, log_id: str):
     if meta_file.exists():
         meta_file.unlink()
     
-    # Update mission counts
-    mission = load_mission(mission_id)
-    mission["logsCount"] = count_mission_logs(mission_id)
-    mission["framesCount"] = count_mission_frames(mission_id)
-    mission["updatedAt"] = datetime.now().isoformat()
-    save_mission(mission_id, mission)
+    update_mission_stats(mission_id)
     
-    logger.info(f"Deleted log {log_id} from mission {mission_id}")
     return {"status": "deleted", "id": log_id}
 
 
-# ============================================================================
-# Main Entry Point
-# ============================================================================
+# =============================================================================
+# WebSocket - Live CAN Sniffer
+# =============================================================================
+
+@app.websocket("/ws/candump")
+async def websocket_candump(websocket: WebSocket, interface: str = Query(default="can0")):
+    """
+    WebSocket endpoint for live CAN traffic streaming.
+    
+    Starts candump and streams output to connected clients.
+    Multiple clients can connect and receive the same stream.
+    
+    Message format (JSON):
+    {
+        "timestamp": "1706000000.123456",
+        "interface": "can0",
+        "canId": "7DF",
+        "data": "02 01 0C"
+    }
+    """
+    await websocket.accept()
+    state.websocket_clients.append(websocket)
+    
+    try:
+        # Start candump if not already running for this interface
+        if state.candump_process is None or state.candump_interface != interface:
+            # Stop existing if different interface
+            if state.candump_process and state.candump_process.returncode is None:
+                state.candump_process.terminate()
+                await state.candump_process.wait()
+            
+            # Start new candump
+            # -ta: absolute timestamps
+            state.candump_process = await asyncio.create_subprocess_exec(
+                "candump", "-ta", interface,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            state.candump_interface = interface
+        
+        # Read and broadcast
+        while True:
+            if state.candump_process.stdout:
+                line = await state.candump_process.stdout.readline()
+                if not line:
+                    break
+                
+                # Parse candump output
+                # Format: (1706000000.123456) can0 7DF#02010C
+                try:
+                    decoded = line.decode().strip()
+                    if decoded:
+                        parts = decoded.split()
+                        if len(parts) >= 3:
+                            timestamp = parts[0].strip("()")
+                            iface = parts[1]
+                            frame_parts = parts[2].split("#")
+                            if len(frame_parts) == 2:
+                                can_id = frame_parts[0]
+                                data = frame_parts[1]
+                                # Format data with spaces
+                                data_formatted = " ".join(
+                                    data[i:i+2] for i in range(0, len(data), 2)
+                                )
+                                
+                                message = json.dumps({
+                                    "timestamp": timestamp,
+                                    "interface": iface,
+                                    "canId": can_id,
+                                    "data": data_formatted,
+                                })
+                                await broadcast_to_websockets(message)
+                except Exception:
+                    pass
+            else:
+                await asyncio.sleep(0.1)
+                
+    except WebSocketDisconnect:
+        pass
+    finally:
+        if websocket in state.websocket_clients:
+            state.websocket_clients.remove(websocket)
+        
+        # Stop candump if no more clients
+        if not state.websocket_clients and state.candump_process:
+            state.candump_process.terminate()
+            state.candump_process = None
+            state.candump_interface = None
+
+
+@app.post("/api/sniffer/start")
+async def start_sniffer(interface: str = "can0"):
+    """Start the CAN sniffer (for clients that will connect via WebSocket)"""
+    if state.candump_process and state.candump_process.returncode is None:
+        if state.candump_interface == interface:
+            return {"status": "already_running", "interface": interface}
+        # Stop existing
+        state.candump_process.terminate()
+        await state.candump_process.wait()
+    
+    state.candump_process = await asyncio.create_subprocess_exec(
+        "candump", "-ta", interface,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    state.candump_interface = interface
+    
+    return {"status": "started", "interface": interface}
+
+
+@app.post("/api/sniffer/stop")
+async def stop_sniffer():
+    """Stop the CAN sniffer"""
+    if not state.candump_process or state.candump_process.returncode is not None:
+        return {"status": "not_running"}
+    
+    state.candump_process.terminate()
+    try:
+        await asyncio.wait_for(state.candump_process.wait(), timeout=5.0)
+    except asyncio.TimeoutError:
+        state.candump_process.kill()
+    
+    state.candump_process = None
+    state.candump_interface = None
+    
+    return {"status": "stopped"}
+
+
+# =============================================================================
+# Health Check
+# =============================================================================
+
+@app.get("/api/health")
+async def health_check():
+    """Health check endpoint"""
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "version": "2.0.0",
+        "dataDir": str(DATA_DIR),
+    }
+
 
 if __name__ == "__main__":
     import uvicorn

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import {
@@ -12,47 +12,116 @@ import {
   ChevronDown,
   ChevronUp,
   Terminal,
+  AlertCircle,
 } from "lucide-react"
+import { startSniffer, stopSniffer, createCANWebSocket, type CANMessage } from "@/lib/api"
 
-const mockSnifferData = [
-  { time: "14:32:01.123", id: "0x7E8", data: "03 41 0C 1A F8 00 00 00", delta: "0.000" },
-  { time: "14:32:01.156", id: "0x7E8", data: "03 41 0D 32 00 00 00 00", delta: "0.033" },
-  { time: "14:32:01.189", id: "0x7DF", data: "02 01 0C 00 00 00 00 00", delta: "0.033" },
-  { time: "14:32:01.223", id: "0x7E8", data: "03 41 0C 1B 10 00 00 00", delta: "0.034" },
-  { time: "14:32:01.256", id: "0x18DAF110", data: "03 7F 01 12 00 00 00 00", delta: "0.033" },
-  { time: "14:32:01.290", id: "0x7E8", data: "03 41 05 7A 00 00 00 00", delta: "0.034" },
-  { time: "14:32:01.323", id: "0x7DF", data: "02 01 05 00 00 00 00 00", delta: "0.033" },
-  { time: "14:32:01.356", id: "0x7E8", data: "03 41 0F 3C 00 00 00 00", delta: "0.033" },
-]
+interface TerminalLine {
+  timestamp: string
+  canId: string
+  data: string
+  delta: string
+}
 
 export function FloatingTerminal() {
   const [isRunning, setIsRunning] = useState(false)
   const [isMinimized, setIsMinimized] = useState(false)
   const [isExpanded, setIsExpanded] = useState(false)
-  const [lines, setLines] = useState<typeof mockSnifferData>([])
-  const [selectedInterface, setSelectedInterface] = useState("can0")
+  const [lines, setLines] = useState<TerminalLine[]>([])
+  const [selectedInterface, setSelectedInterface] = useState<"can0" | "can1">("can0")
+  const [error, setError] = useState<string | null>(null)
+  const [isConnecting, setIsConnecting] = useState(false)
   const terminalRef = useRef<HTMLDivElement>(null)
+  const wsRef = useRef<WebSocket | null>(null)
+  const lastTimestampRef = useRef<number>(0)
 
-  useEffect(() => {
-    if (!isRunning) return
+  // Handle incoming CAN messages from WebSocket
+  const handleMessage = useCallback((msg: CANMessage) => {
+    const currentTime = parseFloat(msg.timestamp) || Date.now() / 1000
+    const delta = lastTimestampRef.current > 0 
+      ? (currentTime - lastTimestampRef.current).toFixed(3)
+      : "0.000"
+    lastTimestampRef.current = currentTime
+    
+    // Format timestamp as HH:MM:SS.mmm
+    const date = new Date(currentTime * 1000)
+    const timeStr = date.toLocaleTimeString("fr-FR", {
+      hour12: false,
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    }) + "." + date.getMilliseconds().toString().padStart(3, "0")
+    
+    const newLine: TerminalLine = {
+      timestamp: timeStr,
+      canId: `0x${msg.canId}`,
+      data: msg.data,
+      delta,
+    }
+    
+    setLines((prev) => [...prev.slice(-500), newLine]) // Keep last 500 lines
+  }, [])
 
-    const interval = setInterval(() => {
-      const randomData = mockSnifferData[Math.floor(Math.random() * mockSnifferData.length)]
-      const newLine = {
-        ...randomData,
-        time: new Date().toLocaleTimeString("fr-FR", {
-          hour12: false,
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-        }) + "." + String(Math.floor(Math.random() * 1000)).padStart(3, "0"),
+  // Start sniffing
+  const handleStart = async () => {
+    setError(null)
+    setIsConnecting(true)
+    
+    try {
+      // Start backend sniffer
+      await startSniffer(selectedInterface)
+      
+      // Connect WebSocket
+      const ws = createCANWebSocket(
+        selectedInterface,
+        handleMessage,
+        (err) => {
+          console.error("[v0] WebSocket error:", err)
+          setError("Connection lost")
+          setIsRunning(false)
+        },
+        () => {
+          setIsRunning(false)
+        }
+      )
+      
+      ws.onopen = () => {
+        setIsRunning(true)
+        setIsConnecting(false)
+        lastTimestampRef.current = 0
       }
-      setLines((prev) => [...prev.slice(-100), newLine])
-    }, 100 + Math.random() * 200)
+      
+      wsRef.current = ws
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to start sniffer")
+      setIsConnecting(false)
+    }
+  }
 
-    return () => clearInterval(interval)
-  }, [isRunning])
+  // Stop sniffing
+  const handleStop = async () => {
+    try {
+      if (wsRef.current) {
+        wsRef.current.close()
+        wsRef.current = null
+      }
+      await stopSniffer()
+    } catch {
+      // Ignore stop errors
+    }
+    setIsRunning(false)
+  }
 
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close()
+      }
+    }
+  }, [])
+
+  // Auto-scroll to bottom
   useEffect(() => {
     if (terminalRef.current) {
       terminalRef.current.scrollTop = terminalRef.current.scrollHeight
@@ -61,6 +130,7 @@ export function FloatingTerminal() {
 
   const clearTerminal = () => {
     setLines([])
+    lastTimestampRef.current = 0
   }
 
   if (isMinimized) {
@@ -72,6 +142,9 @@ export function FloatingTerminal() {
         >
           <Terminal className="h-4 w-4" />
           <span>Terminal CAN Sniffer</span>
+          {isRunning && (
+            <span className="h-2 w-2 animate-pulse rounded-full bg-success" />
+          )}
           <ChevronUp className="h-4 w-4" />
         </Button>
       </div>
@@ -101,8 +174,9 @@ export function FloatingTerminal() {
         <div className="flex items-center gap-1">
           <select
             value={selectedInterface}
-            onChange={(e) => setSelectedInterface(e.target.value)}
-            className="mr-2 rounded border border-border bg-secondary px-2 py-1 text-xs text-foreground"
+            onChange={(e) => setSelectedInterface(e.target.value as "can0" | "can1")}
+            disabled={isRunning}
+            className="mr-2 rounded border border-border bg-secondary px-2 py-1 text-xs text-foreground disabled:opacity-50"
           >
             <option value="can0">can0</option>
             <option value="can1">can1</option>
@@ -126,6 +200,22 @@ export function FloatingTerminal() {
         </div>
       </div>
 
+      {/* Error banner */}
+      {error && (
+        <div className="flex items-center gap-2 bg-destructive/20 px-4 py-2 text-xs text-destructive">
+          <AlertCircle className="h-3 w-3" />
+          <span>{error}</span>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="ml-auto h-5 px-2 text-xs"
+            onClick={() => setError(null)}
+          >
+            Dismiss
+          </Button>
+        </div>
+      )}
+
       {/* Terminal content */}
       <div
         ref={terminalRef}
@@ -133,14 +223,18 @@ export function FloatingTerminal() {
       >
         {lines.length === 0 ? (
           <div className="flex h-full items-center justify-center text-muted-foreground">
-            <p>Click &quot;Start&quot; to begin capturing CAN frames...</p>
+            <p>
+              {isConnecting 
+                ? "Connecting to CAN interface..." 
+                : "Click \"Start\" to begin capturing CAN frames..."}
+            </p>
           </div>
         ) : (
           <div className="space-y-0.5">
             {lines.map((line, index) => (
               <div key={index} className="flex gap-4 hover:bg-accent/30 px-1 rounded">
-                <span className="text-muted-foreground w-24 flex-shrink-0">{line.time}</span>
-                <span className="text-primary w-20 flex-shrink-0">{line.id}</span>
+                <span className="text-muted-foreground w-24 flex-shrink-0">{line.timestamp}</span>
+                <span className="text-primary w-20 flex-shrink-0">{line.canId}</span>
                 <span className="text-terminal-foreground">{line.data}</span>
                 <span className="text-muted-foreground ml-auto">+{line.delta}s</span>
               </div>
@@ -153,7 +247,8 @@ export function FloatingTerminal() {
       <div className="flex items-center gap-2 border-t border-border bg-card/50 px-4 py-2">
         <Button
           size="sm"
-          onClick={() => setIsRunning(!isRunning)}
+          onClick={isRunning ? handleStop : handleStart}
+          disabled={isConnecting}
           className={cn(
             "gap-2",
             isRunning
@@ -165,6 +260,8 @@ export function FloatingTerminal() {
             <>
               <Square className="h-3 w-3" /> Stop
             </>
+          ) : isConnecting ? (
+            "Connecting..."
           ) : (
             <>
               <Play className="h-3 w-3" /> Start
@@ -184,7 +281,7 @@ export function FloatingTerminal() {
           {isRunning && (
             <span className="flex items-center gap-1">
               <span className="h-2 w-2 animate-pulse rounded-full bg-success" />
-              Capturing
+              Live
             </span>
           )}
         </div>

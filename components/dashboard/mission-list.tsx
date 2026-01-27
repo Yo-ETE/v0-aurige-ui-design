@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -33,6 +33,8 @@ import {
   Calendar,
   Tag,
   Car,
+  Loader2,
+  RefreshCw,
 } from "lucide-react"
 
 type SortOption = "recent" | "az"
@@ -126,6 +128,9 @@ function MissionRow({
 export function MissionList() {
   const router = useRouter()
   const missions = useMissionStore((state) => state.missions)
+  const isLoading = useMissionStore((state) => state.isLoading)
+  const error = useMissionStore((state) => state.error)
+  const fetchMissions = useMissionStore((state) => state.fetchMissions)
   const deleteMission = useMissionStore((state) => state.deleteMission)
   const duplicateMission = useMissionStore((state) => state.duplicateMission)
   const setCurrentMission = useMissionStore((state) => state.setCurrentMission)
@@ -133,6 +138,12 @@ export function MissionList() {
   const [search, setSearch] = useState("")
   const [sort, setSort] = useState<SortOption>("recent")
   const [deleteTarget, setDeleteTarget] = useState<Mission | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
+
+  // Fetch missions on mount
+  useEffect(() => {
+    fetchMissions()
+  }, [fetchMissions])
 
   const filteredMissions = useMemo(() => {
     let result = [...missions]
@@ -165,15 +176,17 @@ export function MissionList() {
     router.push(`/missions/${mission.id}`)
   }
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (deleteTarget) {
-      deleteMission(deleteTarget.id)
+      setIsDeleting(true)
+      await deleteMission(deleteTarget.id)
+      setIsDeleting(false)
       setDeleteTarget(null)
     }
   }
 
-  const handleDuplicate = (mission: Mission) => {
-    const newMission = duplicateMission(mission.id)
+  const handleDuplicate = async (mission: Mission) => {
+    const newMission = await duplicateMission(mission.id)
     if (newMission) {
       setCurrentMission(newMission.id)
       router.push(`/missions/${newMission.id}`)
@@ -199,6 +212,16 @@ export function MissionList() {
                 className="bg-input border-border pl-9"
               />
             </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => fetchMissions()}
+              disabled={isLoading}
+              className="h-10 w-10"
+              title="Rafraîchir"
+            >
+              <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
+            </Button>
             <Select value={sort} onValueChange={(v) => setSort(v as SortOption)}>
               <SelectTrigger className="w-[140px] bg-input border-border">
                 <SelectValue />
@@ -210,8 +233,21 @@ export function MissionList() {
             </Select>
           </div>
 
+          {error && (
+            <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+              {error}
+            </div>
+          )}
+
           <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1">
-            {filteredMissions.length === 0 ? (
+            {isLoading && missions.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-8 text-center">
+                <Loader2 className="h-10 w-10 text-primary animate-spin mb-3" />
+                <p className="text-sm text-muted-foreground">
+                  Chargement des missions...
+                </p>
+              </div>
+            ) : filteredMissions.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-8 text-center">
                 <Tag className="h-10 w-10 text-muted-foreground/50 mb-3" />
                 <p className="text-sm text-muted-foreground">
@@ -248,9 +284,17 @@ export function MissionList() {
             <AlertDialogCancel className="border-border">Annuler</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDelete}
+              disabled={isDeleting}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              Supprimer
+              {isDeleting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  Suppression...
+                </>
+              ) : (
+                "Supprimer"
+              )}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
