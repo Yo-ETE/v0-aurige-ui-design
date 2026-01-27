@@ -63,6 +63,73 @@ function parseMissionDates(mission: Mission): Mission {
   }
 }
 
+// Initial mock missions for demo/fallback when API is unavailable
+const mockMissions: Mission[] = [
+  {
+    id: "1",
+    name: "BMW Série 1 - Diagnostic ABS",
+    notes: "Véhicule client - diagnostic ABS",
+    vehicle: {
+      brand: "BMW",
+      model: "Série 1",
+      year: 2019,
+      vin: "WBA1234567890ABCD",
+      fuel: "Diesel",
+      engine: "2.0L 150ch",
+    },
+    canInterface: "can0",
+    bitrate: 500000,
+    createdAt: new Date("2025-01-15"),
+    updatedAt: new Date("2025-01-27"),
+    lastActivity: new Date("2025-01-27"),
+    logsCount: 12,
+    framesCount: 847,
+    lastCaptureDate: new Date("2025-01-26"),
+  },
+  {
+    id: "2",
+    name: "Peugeot 308 - Analyse BSI",
+    vehicle: {
+      brand: "Peugeot",
+      model: "308",
+      year: 2021,
+      fuel: "Essence",
+    },
+    canInterface: "can0",
+    bitrate: 500000,
+    createdAt: new Date("2025-01-20"),
+    updatedAt: new Date("2025-01-22"),
+    lastActivity: new Date("2025-01-22"),
+    logsCount: 3,
+    framesCount: 234,
+  },
+  {
+    id: "3",
+    name: "Renault Clio V - Test ECU",
+    notes: "Test communication ECU moteur",
+    vehicle: {
+      brand: "Renault",
+      model: "Clio V",
+      year: 2022,
+      vin: "VF1RJA00067890123",
+      fuel: "Essence",
+      engine: "1.0L TCe 100ch",
+      trim: "Intens",
+    },
+    canInterface: "can1",
+    bitrate: 250000,
+    createdAt: new Date("2025-01-10"),
+    updatedAt: new Date("2025-01-12"),
+    lastActivity: new Date("2025-01-12"),
+    logsCount: 5,
+    framesCount: 412,
+    lastCaptureDate: new Date("2025-01-11"),
+  },
+]
+
+// Track if we're using mock mode (API unavailable)
+let useMockMode = false
+
 export const useMissionStore = create<MissionStore>((set, get) => ({
   missions: [],
   currentMissionId: null,
@@ -72,19 +139,52 @@ export const useMissionStore = create<MissionStore>((set, get) => ({
   fetchMissions: async () => {
     set({ isLoading: true, error: null })
     try {
-      const response = await fetch(`${getRaspberryPiUrl()}/api/missions`)
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 2000)
+      
+      const response = await fetch(`${getRaspberryPiUrl()}/api/missions`, {
+        signal: controller.signal,
+      })
+      clearTimeout(timeoutId)
+      
       if (!response.ok) throw new Error("Failed to fetch missions")
       const data = await response.json()
       const missions = data.missions.map(parseMissionDates)
+      useMockMode = false
       set({ missions, isLoading: false })
-    } catch (error) {
-      console.error("Failed to fetch missions:", error)
-      set({ error: "Impossible de récupérer les missions", isLoading: false })
+    } catch {
+      // Fallback to mock data when API is unavailable
+      useMockMode = true
+      set({ missions: mockMissions, isLoading: false, error: null })
     }
   },
 
   addMission: async (missionData) => {
     set({ isLoading: true, error: null })
+    
+    // If in mock mode, create locally
+    if (useMockMode) {
+      const now = new Date()
+      const newMission: Mission = {
+        id: crypto.randomUUID(),
+        name: missionData.name,
+        notes: missionData.notes,
+        vehicle: missionData.vehicle,
+        canInterface: missionData.canInterface ?? "can0",
+        bitrate: missionData.bitrate ?? 500000,
+        createdAt: now,
+        updatedAt: now,
+        lastActivity: now,
+        logsCount: 0,
+        framesCount: 0,
+      }
+      set((state) => ({
+        missions: [newMission, ...state.missions],
+        isLoading: false,
+      }))
+      return newMission
+    }
+    
     try {
       const response = await fetch(`${getRaspberryPiUrl()}/api/missions`, {
         method: "POST",
@@ -107,6 +207,17 @@ export const useMissionStore = create<MissionStore>((set, get) => ({
 
   updateMission: async (id, updates) => {
     set({ error: null })
+    
+    // If in mock mode, update locally
+    if (useMockMode) {
+      set((state) => ({
+        missions: state.missions.map((m) =>
+          m.id === id ? { ...m, ...updates, updatedAt: new Date(), lastActivity: new Date() } : m
+        ),
+      }))
+      return
+    }
+    
     try {
       const response = await fetch(`${getRaspberryPiUrl()}/api/missions/${id}`, {
         method: "PUT",
@@ -130,6 +241,16 @@ export const useMissionStore = create<MissionStore>((set, get) => ({
 
   deleteMission: async (id) => {
     set({ error: null })
+    
+    // If in mock mode, delete locally
+    if (useMockMode) {
+      set((state) => ({
+        missions: state.missions.filter((m) => m.id !== id),
+        currentMissionId: state.currentMissionId === id ? null : state.currentMissionId,
+      }))
+      return
+    }
+    
     try {
       const response = await fetch(`${getRaspberryPiUrl()}/api/missions/${id}`, {
         method: "DELETE",
