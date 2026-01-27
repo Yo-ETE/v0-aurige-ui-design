@@ -1,0 +1,18 @@
+[Unit]
+Description=AURIGE API Backend (FastAPI)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/aurige/backend
+Environment=AURIGE_DATA_DIR=/opt/aurige/data
+ExecStart=/opt/aurige/backend/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aurige-api
+
+[Install]
+WantedBy=multi-user.target
