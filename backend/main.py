@@ -320,7 +320,7 @@ async def list_missions():
     return [Mission(**m) for m in missions]
 
 
-@app.post("/api/missions", response_model=Mission)
+@app.post("/missions", response_model=Mission)
 async def create_mission(mission_data: MissionCreate):
     """Create a new mission"""
     mission_id = str(uuid4())
@@ -359,7 +359,7 @@ async def get_mission(mission_id: str):
     return Mission(**mission)
 
 
-@app.patch("/api/missions/{mission_id}", response_model=Mission)
+@app.patch("/missions/{mission_id}", response_model=Mission)
 async def update_mission(mission_id: str, updates: MissionUpdate):
     """Update a mission"""
     mission = load_mission(mission_id)
@@ -377,7 +377,7 @@ async def update_mission(mission_id: str, updates: MissionUpdate):
     return Mission(**mission)
 
 
-@app.delete("/api/missions/{mission_id}")
+@app.delete("/missions/{mission_id}")
 async def delete_mission(mission_id: str):
     """Delete a mission and all its logs"""
     file_path = get_mission_file(mission_id)
@@ -395,7 +395,7 @@ async def delete_mission(mission_id: str):
     return {"status": "deleted", "id": mission_id}
 
 
-@app.post("/api/missions/{mission_id}/duplicate", response_model=Mission)
+@app.post("/missions/{mission_id}/duplicate", response_model=Mission)
 async def duplicate_mission(mission_id: str):
     """Duplicate a mission"""
     original = load_mission(mission_id)
@@ -486,7 +486,7 @@ async def download_log(mission_id: str, log_id: str):
     )
 
 
-@app.delete("/api/missions/{mission_id}/logs/{log_id}")
+@app.delete("/missions/{mission_id}/logs/{log_id}")
 async def delete_log(mission_id: str, log_id: str):
     """Delete a log file"""
     load_mission(mission_id)
