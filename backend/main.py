@@ -315,9 +315,9 @@ async def get_system_status():
 
 @app.get("/missions", response_model=list[Mission])
 async def list_missions():
-    """List all missions"""
     missions = list_all_missions()
     return [Mission(**m) for m in missions]
+
 
 
 @app.post("/missions", response_model=Mission)
