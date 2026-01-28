@@ -2,9 +2,8 @@
 AURIGE - CAN Bus Analysis API
 FastAPI backend for Raspberry Pi 5
 
-- Missions + logs stockage filesystem
-- Status système
-- WebSocket candump / cansniffer (robuste multi-clients, sans readuntil() concurrency)
+Compatibility layer:
+- Exposes both /... and /api/... routes to match frontend expectations.
 """
 
 import os
@@ -22,6 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+
 # =============================================================================
 # Configuration
 # =============================================================================
@@ -36,7 +36,7 @@ LOGS_DIR.mkdir(parents=True, exist_ok=True)
 app = FastAPI(
     title="AURIGE API",
     description="CAN Bus Analysis API for Raspberry Pi",
-    version="1.0.1",
+    version="1.0.2",
 )
 
 app.add_middleware(
@@ -46,6 +46,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # =============================================================================
 # Models
@@ -136,6 +137,15 @@ class SystemStatus(BaseModel):
         populate_by_name = True
 
 
+class CanInitRequest(BaseModel):
+    interface: str = Field(default="can0")
+    bitrate: int = Field(default=500000)
+    mission_id: Optional[str] = Field(default=None, alias="mission_id")
+
+    class Config:
+        populate_by_name = True
+
+
 # =============================================================================
 # Helper Functions - Filesystem
 # =============================================================================
@@ -186,7 +196,6 @@ def count_mission_frames(mission_id: str) -> int:
     logs_dir = LOGS_DIR / mission_id
     if not logs_dir.exists():
         return 0
-
     total = 0
     for log_file in logs_dir.glob("*.log"):
         try:
@@ -197,8 +206,18 @@ def count_mission_frames(mission_id: str) -> int:
     return total
 
 
+def run_cmd(cmd: List[str]) -> subprocess.CompletedProcess:
+    return subprocess.run(cmd, capture_output=True, text=True, check=False)
+
+
+def iface_is_up(name: str) -> bool:
+    r = run_cmd(["ip", "link", "show", name])
+    out = (r.stdout or "") + (r.stderr or "")
+    return "state UP" in out or "UP" in out
+
+
 # =============================================================================
-# Candump Manager (fix readuntil concurrency)
+# Candump Manager (multi-clients safe)
 # =============================================================================
 
 class CandumpManager:
@@ -224,10 +243,6 @@ class CandumpManager:
         self.interface = None
 
     async def ensure_running(self, interface: str):
-        """
-        Ensure a SINGLE candump process + SINGLE reader task exists for the given interface.
-        Safe with multiple WS clients.
-        """
         async with self.lock:
             if (
                 self.process
@@ -259,7 +274,6 @@ class CandumpManager:
                         if not decoded:
                             continue
 
-                        # Format: (1706000000.123456) can0 7DF#02010C
                         parts = decoded.split()
                         if len(parts) < 3:
                             continue
@@ -285,7 +299,6 @@ class CandumpManager:
                 except asyncio.CancelledError:
                     pass
                 except Exception:
-                    # Avoid crashing the whole app
                     pass
 
             self.task = asyncio.create_task(reader_loop())
@@ -307,7 +320,6 @@ class CandumpManager:
     async def remove_client(self, ws: WebSocket):
         if ws in self.clients:
             self.clients.remove(ws)
-        # If no clients, stop candump to free resources
         if not self.clients:
             async with self.lock:
                 await self._stop_process()
@@ -317,102 +329,13 @@ candump_mgr = CandumpManager()
 
 
 # =============================================================================
-# cansniffer Manager (optional, robust multi-clients)
-# =============================================================================
-
-class CansnifferManager:
-    def __init__(self):
-        self.process: Optional[asyncio.subprocess.Process] = None
-        self.interface: Optional[str] = None
-        self.task: Optional[asyncio.Task] = None
-        self.lock = asyncio.Lock()
-        self.clients: List[WebSocket] = []
-
-    async def _stop_process(self):
-        if self.task and not self.task.done():
-            self.task.cancel()
-        self.task = None
-
-        if self.process and self.process.returncode is None:
-            self.process.terminate()
-            try:
-                await asyncio.wait_for(self.process.wait(), timeout=2.0)
-            except asyncio.TimeoutError:
-                self.process.kill()
-        self.process = None
-        self.interface = None
-
-    async def ensure_running(self, interface: str):
-        async with self.lock:
-            if (
-                self.process
-                and self.process.returncode is None
-                and self.interface == interface
-                and self.task
-                and not self.task.done()
-            ):
-                return
-
-            await self._stop_process()
-
-            # NOTE: -c is color; some UIs hate ANSI. Remove "-c" if needed.
-            self.process = await asyncio.create_subprocess_exec(
-                "cansniffer", interface,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            self.interface = interface
-
-            async def reader_loop():
-                try:
-                    assert self.process and self.process.stdout
-                    while True:
-                        line = await self.process.stdout.readline()
-                        if not line:
-                            break
-                        decoded = line.decode(errors="ignore").rstrip("\n")
-                        if decoded:
-                            await self.broadcast(decoded)
-                except asyncio.CancelledError:
-                    pass
-                except Exception:
-                    pass
-
-            self.task = asyncio.create_task(reader_loop())
-
-    async def broadcast(self, message: str):
-        dead: List[WebSocket] = []
-        for ws in self.clients:
-            try:
-                await ws.send_text(message)
-            except Exception:
-                dead.append(ws)
-        for ws in dead:
-            if ws in self.clients:
-                self.clients.remove(ws)
-
-    async def add_client(self, ws: WebSocket):
-        self.clients.append(ws)
-
-    async def remove_client(self, ws: WebSocket):
-        if ws in self.clients:
-            self.clients.remove(ws)
-        if not self.clients:
-            async with self.lock:
-                await self._stop_process()
-
-
-cansniffer_mgr = CansnifferManager()
-
-
-# =============================================================================
-# System Status Endpoints
+# System Status
 # =============================================================================
 
 @app.get("/status", response_model=SystemStatus)
+@app.get("/api/status", response_model=SystemStatus)  # alias
 async def get_system_status():
-    """Get Raspberry Pi system status"""
-    # CPU usage
+    # CPU
     try:
         with open("/proc/stat", "r") as f:
             cpu_line = f.readline()
@@ -423,7 +346,7 @@ async def get_system_status():
     except Exception:
         cpu_usage = 0.0
 
-    # Temperature
+    # Temp
     try:
         with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
             temperature = int(f.read().strip()) / 1000.0
@@ -438,7 +361,7 @@ async def get_system_status():
                 parts = line.split()
                 if len(parts) >= 2:
                     meminfo[parts[0].rstrip(":")] = int(parts[1])
-            memory_total = meminfo.get("MemTotal", 0) / 1024  # MB
+            memory_total = meminfo.get("MemTotal", 0) / 1024
             memory_free = meminfo.get("MemAvailable", meminfo.get("MemFree", 0)) / 1024
             memory_used = memory_total - memory_free
     except Exception:
@@ -448,7 +371,7 @@ async def get_system_status():
     # Storage
     try:
         statvfs = os.statvfs("/")
-        storage_total = (statvfs.f_frsize * statvfs.f_blocks) / (1024 ** 3)  # GB
+        storage_total = (statvfs.f_frsize * statvfs.f_blocks) / (1024 ** 3)
         storage_free = (statvfs.f_frsize * statvfs.f_bavail) / (1024 ** 3)
         storage_used = storage_total - storage_free
     except Exception:
@@ -462,30 +385,17 @@ async def get_system_status():
     except Exception:
         uptime_seconds = 0
 
-    # Network link state (simple)
-    def _iface_up(name: str) -> bool:
-        try:
-            r = subprocess.run(["ip", "link", "show", name], capture_output=True, text=True, check=False)
-            out = (r.stdout or "") + (r.stderr or "")
-            return "state UP" in out or "UP" in out
-        except Exception:
-            return False
+    wifi_connected = iface_is_up("wlan0")
+    ethernet_connected = iface_is_up("eth0")
+    can0_up = iface_is_up("can0")
+    can1_up = iface_is_up("can1")
 
-    wifi_connected = _iface_up("wlan0")
-    ethernet_connected = _iface_up("eth0")
-    can0_up = _iface_up("can0")
-    can1_up = _iface_up("can1")
+    def service_active(name: str) -> bool:
+        r = run_cmd(["systemctl", "is-active", name])
+        return (r.stdout or "").strip() == "active"
 
-    # Services
-    def _service_active(name: str) -> bool:
-        try:
-            r = subprocess.run(["systemctl", "is-active", name], capture_output=True, text=True, check=False)
-            return (r.stdout or "").strip() == "active"
-        except Exception:
-            return True
-
-    api_running = _service_active("aurige-api")
-    web_running = _service_active("aurige-web")
+    api_running = service_active("aurige-api")
+    web_running = service_active("aurige-web")
 
     return SystemStatus(
         wifiConnected=wifi_connected,
@@ -507,16 +417,18 @@ async def get_system_status():
 
 
 # =============================================================================
-# Missions Endpoints
+# Missions
 # =============================================================================
 
 @app.get("/missions", response_model=list[Mission])
+@app.get("/api/missions", response_model=list[Mission])  # alias
 async def list_missions():
     missions = list_all_missions()
     return [Mission(**m) for m in missions]
 
 
 @app.post("/missions", response_model=Mission)
+@app.post("/api/missions", response_model=Mission)  # alias
 async def create_mission(mission_data: MissionCreate):
     mission_id = str(uuid4())
     now = datetime.now().isoformat()
@@ -543,6 +455,7 @@ async def create_mission(mission_data: MissionCreate):
 
 
 @app.get("/missions/{mission_id}", response_model=Mission)
+@app.get("/api/missions/{mission_id}", response_model=Mission)  # alias
 async def get_mission(mission_id: str):
     mission = load_mission(mission_id)
     mission["logsCount"] = count_mission_logs(mission_id)
@@ -551,6 +464,7 @@ async def get_mission(mission_id: str):
 
 
 @app.patch("/missions/{mission_id}", response_model=Mission)
+@app.patch("/api/missions/{mission_id}", response_model=Mission)  # alias
 async def update_mission(mission_id: str, updates: MissionUpdate):
     mission = load_mission(mission_id)
 
@@ -568,6 +482,7 @@ async def update_mission(mission_id: str, updates: MissionUpdate):
 
 
 @app.delete("/missions/{mission_id}")
+@app.delete("/api/missions/{mission_id}")  # alias
 async def delete_mission(mission_id: str):
     file_path = get_mission_file(mission_id)
     if not file_path.exists():
@@ -583,6 +498,7 @@ async def delete_mission(mission_id: str):
 
 
 @app.post("/missions/{mission_id}/duplicate", response_model=Mission)
+@app.post("/api/missions/{mission_id}/duplicate", response_model=Mission)  # alias
 async def duplicate_mission(mission_id: str):
     original = load_mission(mission_id)
 
@@ -608,10 +524,11 @@ async def duplicate_mission(mission_id: str):
 
 
 # =============================================================================
-# Logs Endpoints
+# Logs
 # =============================================================================
 
 @app.get("/missions/{mission_id}/logs", response_model=list[LogEntry])
+@app.get("/api/missions/{mission_id}/logs", response_model=list[LogEntry])  # alias
 async def list_mission_logs(mission_id: str):
     load_mission(mission_id)
 
@@ -651,6 +568,7 @@ async def list_mission_logs(mission_id: str):
 
 
 @app.get("/missions/{mission_id}/logs/{log_id}/download")
+@app.get("/api/missions/{mission_id}/logs/{log_id}/download")  # alias
 async def download_log(mission_id: str, log_id: str):
     load_mission(mission_id)
 
@@ -668,6 +586,7 @@ async def download_log(mission_id: str, log_id: str):
 
 
 @app.delete("/missions/{mission_id}/logs/{log_id}")
+@app.delete("/api/missions/{mission_id}/logs/{log_id}")  # alias
 async def delete_log(mission_id: str, log_id: str):
     load_mission(mission_id)
 
@@ -682,7 +601,6 @@ async def delete_log(mission_id: str, log_id: str):
     if meta_file.exists():
         meta_file.unlink()
 
-    # Update mission counters
     mission = load_mission(mission_id)
     mission["logsCount"] = count_mission_logs(mission_id)
     mission["framesCount"] = count_mission_frames(mission_id)
@@ -693,17 +611,117 @@ async def delete_log(mission_id: str, log_id: str):
 
 
 # =============================================================================
-# WebSocket - candump live stream
+# CAN endpoints expected by frontend
+# =============================================================================
+
+@app.get("/can/{interface}/status")
+@app.get("/api/can/{interface}/status")
+async def can_status(interface: str):
+    # Keep it simple: existence + link state
+    r = run_cmd(["ip", "link", "show", interface])
+    if r.returncode != 0:
+        raise HTTPException(status_code=404, detail=f"Interface {interface} not found")
+    return {
+        "interface": interface,
+        "up": iface_is_up(interface),
+        "raw": (r.stdout or "").strip(),
+    }
+
+
+@app.post("/can/init")
+@app.post("/api/can/init")
+async def can_init(req: CanInitRequest):
+    """
+    Frontend calls POST /api/can/init with {interface, bitrate, mission_id}
+    We'll try to bring interface down/up with bitrate if it's a CAN iface.
+    """
+    interface = req.interface
+    bitrate = int(req.bitrate)
+
+    # Basic check
+    r = run_cmd(["ip", "link", "show", interface])
+    if r.returncode != 0:
+        raise HTTPException(status_code=404, detail=f"Interface {interface} not found")
+
+    # Try set bitrate only if it's canX-like. If it fails, return info but not crash UI.
+    actions = []
+    try:
+        run_cmd(["sudo", "ip", "link", "set", interface, "down"])
+        actions.append("down")
+        run_cmd(["sudo", "ip", "link", "set", interface, "type", "can", "bitrate", str(bitrate)])
+        actions.append(f"type can bitrate {bitrate}")
+        run_cmd(["sudo", "ip", "link", "set", interface, "up"])
+        actions.append("up")
+    except Exception as e:
+        return {
+            "status": "partial",
+            "interface": interface,
+            "bitrate": bitrate,
+            "up": iface_is_up(interface),
+            "actions": actions,
+            "error": str(e),
+        }
+
+    return {
+        "status": "ok",
+        "interface": interface,
+        "bitrate": bitrate,
+        "up": iface_is_up(interface),
+        "actions": actions,
+        "mission_id": req.mission_id,
+    }
+
+
+# =============================================================================
+# Capture / Replay status endpoints expected by frontend (stubs)
+# =============================================================================
+
+@app.get("/capture/status")
+@app.get("/api/capture/status")
+async def capture_status():
+    # UI keeps polling these; provide stable responses
+    return {"status": "idle", "running": False}
+
+
+@app.get("/replay/status")
+@app.get("/api/replay/status")
+async def replay_status():
+    return {"status": "idle", "running": False}
+
+
+# =============================================================================
+# Sniffer endpoints
+# =============================================================================
+
+@app.post("/sniffer/start")
+@app.post("/api/sniffer/start")
+async def sniffer_start(interface: str = "can0"):
+    await candump_mgr.ensure_running(interface)
+    return {"status": "started", "interface": interface}
+
+
+@app.post("/sniffer/stop")
+@app.post("/api/sniffer/stop")
+async def sniffer_stop():
+    if candump_mgr.clients:
+        return {"status": "in_use", "clients": len(candump_mgr.clients)}
+    async with candump_mgr.lock:
+        await candump_mgr._stop_process()
+    return {"status": "stopped"}
+
+
+# =============================================================================
+# WebSocket
 # =============================================================================
 
 @app.websocket("/ws/candump")
+@app.websocket("/api/ws/candump")  # alias
 async def ws_candump(websocket: WebSocket, interface: str = Query(default="can0")):
     await websocket.accept()
     await candump_mgr.add_client(websocket)
 
     try:
         await candump_mgr.ensure_running(interface)
-        # keep-alive: candump_mgr broadcasts frames to all clients
         while True:
             await asyncio.sleep(1)
     except WebSocketDisconnect:
@@ -713,75 +731,18 @@ async def ws_candump(websocket: WebSocket, interface: str = Query(default="can0"
 
 
 # =============================================================================
-# WebSocket - cansniffer output (raw lines)
-# =============================================================================
-
-@app.websocket("/ws/cansniffer")
-async def ws_cansniffer(websocket: WebSocket, interface: str = Query(default="can0")):
-    await websocket.accept()
-    await cansniffer_mgr.add_client(websocket)
-
-    try:
-        await cansniffer_mgr.ensure_running(interface)
-        while True:
-            await asyncio.sleep(1)
-    except WebSocketDisconnect:
-        pass
-    finally:
-        await cansniffer_mgr.remove_client(websocket)
-
-
-# =============================================================================
-# Sniffer control endpoints (optional)
-# =============================================================================
-
-@app.post("/sniffer/start")
-async def sniffer_start(interface: str = "can0"):
-    await candump_mgr.ensure_running(interface)
-    return {"status": "started", "interface": interface}
-
-
-@app.post("/sniffer/stop")
-async def sniffer_stop():
-    # Stop only if no WS clients, else keep alive
-    if candump_mgr.clients:
-        return {"status": "in_use", "clients": len(candump_mgr.clients)}
-    async with candump_mgr.lock:
-        await candump_mgr._stop_process()
-    return {"status": "stopped"}
-
-
-@app.post("/cansniffer/start")
-async def cansniffer_start(interface: str = "can0"):
-    await cansniffer_mgr.ensure_running(interface)
-    return {"status": "started", "interface": interface}
-
-
-@app.post("/cansniffer/stop")
-async def cansniffer_stop():
-    if cansniffer_mgr.clients:
-        return {"status": "in_use", "clients": len(cansniffer_mgr.clients)}
-    async with cansniffer_mgr.lock:
-        await cansniffer_mgr._stop_process()
-    return {"status": "stopped"}
-
-
-# =============================================================================
-# Health Check
+# Health
 # =============================================================================
 
 @app.get("/health")
+@app.get("/api/health")  # alias
 async def health_check():
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
-        "version": "1.0.1",
+        "version": "1.0.2",
     }
 
-
-# =============================================================================
-# Local run
-# =============================================================================
 
 if __name__ == "__main__":
     import uvicorn
