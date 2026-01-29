@@ -21,8 +21,14 @@ export interface IsolationLog {
 }
 
 interface IsolationStore {
-  // Current logs being analyzed
+  // Current mission context
+  currentMissionId: string | null
+  
+  // Current logs being analyzed (filtered by mission)
   logs: IsolationLog[]
+  
+  // Set current mission (clears logs if mission changes)
+  setMission: (missionId: string) => void
   
   // Import a log from a mission
   importLog: (log: IsolationLog) => void
@@ -83,7 +89,16 @@ function removeLogRecursive(logs: IsolationLog[], logId: string): IsolationLog[]
 export const useIsolationStore = create<IsolationStore>()(
   persist(
     (set, get) => ({
+      currentMissionId: null,
       logs: [],
+
+      setMission: (missionId) => {
+        const current = get().currentMissionId
+        if (current !== missionId) {
+          // Clear logs when switching missions
+          set({ currentMissionId: missionId, logs: [] })
+        }
+      },
 
       importLog: (log) => {
         // Check if already imported

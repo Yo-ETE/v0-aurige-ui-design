@@ -44,7 +44,6 @@
     "cmdk": "1.0.4",
     "date-fns": "4.1.0",
     "embla-carousel-react": "8.5.1",
-    "immer": "latest",
     "input-otp": "1.4.1",
     "lucide-react": "^0.454.0",
     "next": "16.0.10",
@@ -58,7 +57,6 @@
     "sonner": "^1.7.4",
     "tailwind-merge": "^3.3.1",
     "tailwindcss-animate": "^1.0.7",
-    "use-sync-external-store": "latest",
     "vaul": "^1.1.2",
     "zod": "3.25.76",
     "zustand": "5.0.10"

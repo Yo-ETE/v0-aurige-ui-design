@@ -214,7 +214,7 @@ function LogTreeItem({
 
 export default function Isolation() {
   const router = useRouter()
-  const { logs, importLog, addChildLog, removeLog, updateLogTags, updateLogName, clearLogs } = useIsolationStore()
+  const { logs, importLog, addChildLog, removeLog, updateLogTags, updateLogName, clearLogs, setMission, currentMissionId: storeMissionId } = useIsolationStore()
   
   // Mission context
   const currentMissionId = useMissionStore((state) => state.currentMissionId)
@@ -228,25 +228,34 @@ export default function Isolation() {
   const [isReplaying, setIsReplaying] = useState<string | null>(null)
   const [renamingLog, setRenamingLog] = useState<string | null>(null)
   const [newLogName, setNewLogName] = useState("")
+  const [importMissionId, setImportMissionId] = useState<string>("")
   
-  // Get mission ID from localStorage
+  // Get mission ID from localStorage and sync with store
   useEffect(() => {
     const localId = localStorage.getItem("activeMissionId")
-    if (localId) {
-      setMissionId(localId)
-    } else if (currentMissionId) {
-      setMissionId(currentMissionId)
+    const effectiveMissionId = localId || currentMissionId
+    
+    if (effectiveMissionId) {
+      setMissionId(effectiveMissionId)
+      // Sync isolation store with current mission - clears logs if mission changed
+      setMission(effectiveMissionId)
     }
-  }, [currentMissionId])
+  }, [currentMissionId, setMission])
   
   // Load mission logs when dialog opens
   const handleOpenImport = async () => {
     setShowImportDialog(true)
+    setImportMissionId(missionId) // Default to current mission
     if (!missionId) return
-    
+    await loadMissionLogs(missionId)
+  }
+
+  // Load logs for a specific mission
+  const loadMissionLogs = async (targetMissionId: string) => {
+    if (!targetMissionId) return
     setIsLoadingLogs(true)
     try {
-      const fetchedLogs = await listMissionLogs(missionId)
+      const fetchedLogs = await listMissionLogs(targetMissionId)
       setMissionLogs(fetchedLogs)
     } catch {
       setMissionLogs([])
@@ -254,13 +263,19 @@ export default function Isolation() {
       setIsLoadingLogs(false)
     }
   }
+
+  // Handle mission change in import dialog
+  const handleImportMissionChange = async (newMissionId: string) => {
+    setImportMissionId(newMissionId)
+    await loadMissionLogs(newMissionId)
+  }
   
   const handleImportLog = (log: LogEntry) => {
     importLog({
       id: log.id,
       name: log.filename,
       filename: log.filename,
-      missionId: missionId,
+      missionId: importMissionId,
       tags: ["original"],
       frameCount: log.frameCount,
     })
@@ -488,10 +503,33 @@ export default function Isolation() {
           <DialogHeader>
             <DialogTitle>Importer un log</DialogTitle>
             <DialogDescription>
-              Selectionnez un log de la mission a importer pour l&apos;isolation
+              Selectionnez un log a importer pour l&apos;isolation
             </DialogDescription>
           </DialogHeader>
-          <div className="mt-4">
+          <div className="mt-4 space-y-4">
+            {/* Mission Selector */}
+            <div className="space-y-2">
+              <Label htmlFor="import-mission">Mission source</Label>
+              <Select
+                value={importMissionId}
+                onValueChange={handleImportMissionChange}
+              >
+                <SelectTrigger id="import-mission">
+                  <SelectValue placeholder="Selectionnez une mission" />
+                </SelectTrigger>
+                <SelectContent>
+                  {missions.map((mission) => (
+                    <SelectItem key={mission.id} value={mission.id}>
+                      {mission.name}
+                      {mission.id === missionId && " (courante)"}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            
+            {/* Logs List */}
+            <div>
             {isLoadingLogs ? (
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -540,6 +578,7 @@ export default function Isolation() {
                 })}
               </div>
             )}
+            </div>
           </div>
         </DialogContent>
       </Dialog>
