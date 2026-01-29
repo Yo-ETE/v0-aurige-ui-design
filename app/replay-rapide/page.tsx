@@ -9,7 +9,8 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Zap, Keyboard, Send, AlertTriangle, Loader2 } from "lucide-react"
-import { sendCANFrame } from "@/lib/api"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { sendCANFrame, type CANInterface } from "@/lib/api"
 import { SentFramesHistory, useSentFramesHistory } from "@/components/sent-frames-history"
 
 interface QuickSlot {
@@ -20,6 +21,7 @@ interface QuickSlot {
 }
 
 export default function ReplayRapide() {
+  const [canInterface, setCanInterface] = useState<CANInterface>("can0")
   const [slots, setSlots] = useState<QuickSlot[]>([
     { key: "a", label: "A", id: "7DF", data: "02010C00000000" },
     { key: "z", label: "Z", id: "7DF", data: "02010D00000000" },
@@ -49,12 +51,12 @@ export default function ReplayRapide() {
     setIsLoading(`slot-${index}`)
     
     await trackFrame(
-      { canId: slot.id, data: slot.data, interface: "can0", description: `Slot ${slot.label}` },
-      () => sendCANFrame({ interface: "can0", canId: slot.id, data: slot.data })
+      { canId: slot.id, data: slot.data, interface: canInterface, description: `Slot ${slot.label}` },
+      () => sendCANFrame({ interface: canInterface, canId: slot.id, data: slot.data })
     )
     
     setIsLoading(null)
-  }, [slots, trackFrame])
+  }, [slots, trackFrame, canInterface])
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -82,8 +84,8 @@ export default function ReplayRapide() {
       
       for (let i = 0; i < count; i++) {
         await trackFrame(
-          { canId: burstId, data: burstData, interface: "can0", description: `Burst ${i + 1}/${count}` },
-          () => sendCANFrame({ interface: "can0", canId: burstId, data: burstData })
+          { canId: burstId, data: burstData, interface: canInterface, description: `Burst ${i + 1}/${count}` },
+          () => sendCANFrame({ interface: canInterface, canId: burstId, data: burstData })
         )
         if (interval > 0 && i < count - 1) {
           await new Promise((resolve) => setTimeout(resolve, interval))
@@ -108,6 +110,28 @@ export default function ReplayRapide() {
             <AlertDescription className="text-destructive">{error}</AlertDescription>
           </Alert>
         )}
+
+        {/* Interface Selector */}
+        <Card className="lg:col-span-2 border-border bg-card">
+          <CardContent className="py-4">
+            <div className="flex items-center gap-4">
+              <Label htmlFor="can-interface" className="whitespace-nowrap">Interface CAN:</Label>
+              <Select
+                value={canInterface}
+                onValueChange={(v) => setCanInterface(v as CANInterface)}
+              >
+                <SelectTrigger id="can-interface" className="w-48">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="can0">can0</SelectItem>
+                  <SelectItem value="can1">can1</SelectItem>
+                  <SelectItem value="vcan0">vcan0 (test)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Quick Replay Slots Card */}
         <Card className="border-border bg-card">

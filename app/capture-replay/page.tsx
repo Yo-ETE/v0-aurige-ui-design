@@ -12,8 +12,9 @@ import {
   Video, FolderOpen, Play, Trash2, Download, Circle, Square, FileText, 
   AlertCircle, Loader2, CheckCircle2, ArrowLeft, FlaskConical
 } from "lucide-react"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { 
-  startCapture, stopCapture, getCaptureStatus, 
+  startCapture, stopCapture, getCaptureStatus, type CANInterface, 
   listMissionLogs, deleteLog, getLogDownloadUrl,
   startReplay, stopReplay, getReplayStatus,
   type LogEntry, type CaptureStatus, type ProcessStatus
@@ -42,6 +43,7 @@ export default function CaptureReplay() {
   
   const currentMission = missions.find((m) => m.id === missionId)
   
+  const [canInterface, setCanInterface] = useState<CANInterface>("can0")
   const [captureStatus, setCaptureStatus] = useState<CaptureStatus>({ running: false, durationSeconds: 0 })
   const [replayStatus, setReplayStatus] = useState<ProcessStatus>({ running: false })
   const [logs, setLogs] = useState<LogEntry[]>([])
@@ -117,7 +119,7 @@ export default function CaptureReplay() {
     setSuccess(null)
     
     try {
-      const result = await startCapture(missionId, "can0", undefined, captureDescription || undefined)
+      const result = await startCapture(missionId, canInterface, undefined, captureDescription || undefined)
       setSuccess(`Capture démarrée: ${result.filename}`)
       setDisplayDuration(0)
       setCaptureDescription("")
@@ -147,7 +149,7 @@ export default function CaptureReplay() {
     setSuccess(null)
     
     try {
-      await startReplay(missionId, logId, "can0")
+      await startReplay(missionId, logId, canInterface)
       setReplayingLogId(logId)
       setSuccess("Replay démarré")
       await fetchStatuses()
@@ -264,6 +266,32 @@ export default function CaptureReplay() {
             </Alert>
           </div>
         )}
+
+        {/* Interface Selector */}
+        <Card className="lg:col-span-2 border-border bg-card">
+          <CardContent className="py-4">
+            <div className="flex items-center gap-4">
+              <Label htmlFor="can-interface" className="whitespace-nowrap">Interface CAN:</Label>
+              <Select
+                value={canInterface}
+                onValueChange={(v) => setCanInterface(v as CANInterface)}
+                disabled={captureStatus.running || replayStatus.running}
+              >
+                <SelectTrigger id="can-interface" className="w-48">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="can0">can0</SelectItem>
+                  <SelectItem value="can1">can1</SelectItem>
+                  <SelectItem value="vcan0">vcan0 (test)</SelectItem>
+                </SelectContent>
+              </Select>
+              <span className="text-xs text-muted-foreground">
+                Capture et replay sur cette interface
+              </span>
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Capture CAN Card */}
         <Card className="border-border bg-card">

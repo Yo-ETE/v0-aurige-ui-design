@@ -9,10 +9,12 @@ import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Progress } from "@/components/ui/progress"
 import { Flame, AlertTriangle, Play, Square, AlertCircle, CheckCircle2, Loader2 } from "lucide-react"
-import { startFuzzing, stopFuzzing, getFuzzingStatus, type ProcessStatus } from "@/lib/api"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { startFuzzing, stopFuzzing, getFuzzingStatus, type ProcessStatus, type CANInterface } from "@/lib/api"
 import { SentFramesHistory, useSentFramesHistory } from "@/components/sent-frames-history"
 
 export default function Fuzzing() {
+  const [canInterface, setCanInterface] = useState<CANInterface>("can0")
   const [idStart, setIdStart] = useState("000")
   const [idEnd, setIdEnd] = useState("7FF")
   const [dataTemplate, setDataTemplate] = useState("0000000000000000")
@@ -84,13 +86,13 @@ export default function Fuzzing() {
     const frameId = addFrame({
       canId: `${idStart}-${idEnd}`,
       data: dataTemplate,
-      interface: "can0",
+      interface: canInterface,
       description: `Fuzzing ${iterations} iterations`,
     })
     
     try {
       await startFuzzing(
-        "can0",
+        canInterface,
         idStart,
         idEnd,
         dataTemplate,
@@ -177,6 +179,24 @@ export default function Fuzzing() {
             </div>
           </CardHeader>
           <CardContent className="space-y-6">
+            <div className="space-y-2 mb-4">
+              <Label htmlFor="can-interface">Interface CAN</Label>
+              <Select
+                value={canInterface}
+                onValueChange={(v) => setCanInterface(v as CANInterface)}
+                disabled={status.running}
+              >
+                <SelectTrigger id="can-interface" className="w-48">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="can0">can0</SelectItem>
+                  <SelectItem value="can1">can1</SelectItem>
+                  <SelectItem value="vcan0">vcan0 (test)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <div className="space-y-2">
                 <Label htmlFor="id-start">ID Start (hex)</Label>

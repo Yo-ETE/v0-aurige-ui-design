@@ -9,10 +9,12 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Cpu, Play, Square, Shuffle, AlertCircle, CheckCircle2, Loader2 } from "lucide-react"
-import { startGenerator, stopGenerator, getGeneratorStatus, createCandumpWebSocket, type ProcessStatus } from "@/lib/api"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { startGenerator, stopGenerator, getGeneratorStatus, createCandumpWebSocket, type ProcessStatus, type CANInterface } from "@/lib/api"
 import { SentFramesHistory, useSentFramesHistory } from "@/components/sent-frames-history"
 
 export default function Generateur() {
+  const [canInterface, setCanInterface] = useState<CANInterface>("can0")
   const [canId, setCanId] = useState("")
   const [useRandomId, setUseRandomId] = useState(true)
   const [frameLength, setFrameLength] = useState("8")
@@ -64,7 +66,7 @@ export default function Generateur() {
 
     // Connect to candump WebSocket to see generated frames
     const ws = createCandumpWebSocket(
-      "can0",
+      canInterface,
       (msg) => {
         setLastFrame({ id: msg.canId, data: msg.data })
         setFrameCount((prev) => prev + 1)
@@ -85,7 +87,7 @@ export default function Generateur() {
         wsRef.current = null
       }
     }
-  }, [status.running])
+  }, [status.running, canInterface])
 
   const handleStart = async () => {
     setError(null)
@@ -96,13 +98,13 @@ export default function Generateur() {
     const frameId = addFrame({
       canId: useRandomId ? "RANDOM" : (canId || "7DF"),
       data: `${frameLength} octets @ ${delay}ms`,
-      interface: "can0",
+      interface: canInterface,
       description: `Generateur cangen ${useRandomId ? "ID aleatoire" : `ID fixe ${canId}`}`,
     })
     
     try {
       await startGenerator(
-        "can0",
+        canInterface,
         parseInt(delay) || 100,
         parseInt(frameLength) || 8,
         useRandomId ? undefined : canId || undefined
@@ -174,6 +176,24 @@ export default function Generateur() {
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="can-interface">Interface CAN</Label>
+                <Select
+                  value={canInterface}
+                  onValueChange={(v) => setCanInterface(v as CANInterface)}
+                  disabled={status.running}
+                >
+                  <SelectTrigger id="can-interface">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="can0">can0</SelectItem>
+                    <SelectItem value="can1">can1</SelectItem>
+                    <SelectItem value="vcan0">vcan0 (test)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
                   <Label>ID aléatoire</Label>
