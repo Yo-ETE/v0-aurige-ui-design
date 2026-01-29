@@ -127,9 +127,12 @@ export default function OBDII() {
         { canId: "7DF", data: "SCAN", interface: canInterface, description: "Full OBD Scan (VIN + PIDs + DTCs)" },
         async () => {
           const result = await fullOBDScan(canInterface)
+          if (result.status === "error") {
+            throw new Error(result.message || "Erreur lors du scan")
+          }
           setScanResult(result)
           // Extract VIN if found
-          if (result.results.vin && result.results.vin.length > 0) {
+          if (result.results?.vin && result.results.vin.length > 0) {
             setVin(result.results.vin[0])
           }
         }

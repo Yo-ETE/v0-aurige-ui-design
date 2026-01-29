@@ -1483,45 +1483,60 @@ async def obd_send_with_flow_control(interface: str, request_id: str, request_da
     
     # Start candump to capture response
     log_file = Path(f"/tmp/obd_response_{int(time.time())}.log")
+    log_handle = None
+    candump = None
     
     try:
+        log_handle = open(log_file, "w")
         candump = await asyncio.create_subprocess_exec(
             "candump", "-L", "-ta", interface,
-            stdout=open(log_file, "w"),
+            stdout=log_handle,
             stderr=asyncio.subprocess.DEVNULL,
         )
     except Exception as e:
+        if log_handle:
+            log_handle.close()
         return {"success": False, "responses": [], "error": f"Failed to start candump: {e}"}
     
+    send_error = None
     try:
-        await asyncio.sleep(0.05)  # Let candump start
+        await asyncio.sleep(0.1)  # Let candump start
         
         # Send the OBD request
         if not can_send_frame(interface, request_id, request_data):
-            return {"success": False, "responses": [], "error": f"Failed to send frame on {interface}"}
-        
-        await asyncio.sleep(0.05)
-        
-        # Send flow control for multi-frame responses
-        can_send_frame(interface, flow_target, "3000000000000000")
-        
-        # Wait for response
-        await asyncio.sleep(1.0)
+            send_error = f"Failed to send frame on {interface}"
+        else:
+            await asyncio.sleep(0.1)
+            
+            # Send flow control for multi-frame responses
+            can_send_frame(interface, flow_target, "3000000000000000")
+            
+            # Wait for response
+            await asyncio.sleep(0.5)
         
     finally:
-        candump.terminate()
-        try:
-            await asyncio.wait_for(candump.wait(), timeout=2.0)
-        except asyncio.TimeoutError:
-            candump.kill()
+        if candump:
+            candump.terminate()
+            try:
+                await asyncio.wait_for(candump.wait(), timeout=2.0)
+            except asyncio.TimeoutError:
+                candump.kill()
+        if log_handle:
+            log_handle.close()
+    
+    if send_error:
+        if log_file.exists():
+            log_file.unlink()
+        return {"success": False, "responses": [], "error": send_error}
     
     # Read captured response
     responses = []
     if log_file.exists():
         with open(log_file, "r") as f:
             for line in f:
-                # Include all captured frames for debugging
-                responses.append(line.strip())
+                line = line.strip()
+                if line:
+                    responses.append(line)
         log_file.unlink()
     
     return {"success": True, "responses": responses, "error": None}
