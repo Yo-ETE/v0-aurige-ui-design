@@ -6,7 +6,7 @@
  * All CAN operations are delegated to the backend.
  */
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || ""
+import { getApiBaseUrl, getWsBaseUrl } from "./api-config"
 
 // =============================================================================
 // Types
@@ -132,7 +132,7 @@ async function fetchApi<T>(
   endpoint: string,
   options?: RequestInit
 ): Promise<T> {
-  const url = `${API_BASE}/api${endpoint}`
+  const url = `${getApiBaseUrl()}/api${endpoint}`
   
   const response = await fetch(url, {
     ...options,
@@ -385,7 +385,7 @@ export async function listMissionLogs(missionId: string): Promise<LogEntry[]> {
 }
 
 export function getLogDownloadUrl(missionId: string, logId: string): string {
-  return `${API_BASE}/api/missions/${missionId}/logs/${logId}/download`
+  return `${getApiBaseUrl()}/api/missions/${missionId}/logs/${logId}/download`
 }
 
 export async function deleteLog(missionId: string, logId: string): Promise<void> {
@@ -404,9 +404,8 @@ export function createCANWebSocket(
   onError?: (error: Event) => void,
   onClose?: () => void
 ): WebSocket {
-  const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:"
-  const wsHost = process.env.NEXT_PUBLIC_WS_URL || `${wsProtocol}//${window.location.host}`
-  const ws = new WebSocket(`${wsHost}/ws/candump?interface=${iface}`)
+  const wsBaseUrl = getWsBaseUrl()
+  const ws = new WebSocket(`${wsBaseUrl}/ws/candump?interface=${iface}`)
   
   ws.onmessage = (event) => {
     try {

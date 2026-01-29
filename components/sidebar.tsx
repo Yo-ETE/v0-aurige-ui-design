@@ -7,6 +7,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { useMissionStore } from "@/lib/mission-store"
+import { getApiHost } from "@/lib/api-config"
 import {
   Car,
   Settings,
@@ -196,7 +197,7 @@ export function Sidebar() {
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-xs font-medium text-sidebar-foreground">Raspberry Pi</p>
-              <p className="text-[10px] text-muted-foreground truncate">192.168.1.100</p>
+              <p className="text-[10px] text-muted-foreground truncate">{typeof window !== "undefined" ? getApiHost() : "..."}</p>
             </div>
           </div>
         </div>

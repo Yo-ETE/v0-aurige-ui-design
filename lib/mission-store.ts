@@ -6,15 +6,10 @@
  * All mission data is stored on the Raspberry Pi filesystem.
  * This store communicates ONLY with the FastAPI backend.
  * NO mock data, NO localStorage, NO in-memory persistence.
- * 
- * Configure API URL via environment variable:
- * NEXT_PUBLIC_API_URL=http://192.168.1.100:8000
  */
 
 import { create } from "zustand"
-
-// API base URL - defaults to same origin in production
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || ""
+import { getApiBaseUrl } from "./api-config"
 
 export interface Vehicle {
   brand: string
@@ -60,6 +55,7 @@ interface MissionStore {
   fetchMissions: () => Promise<void>
   addMission: (mission: MissionCreateInput) => Promise<Mission | null>
   updateMission: (id: string, updates: Partial<MissionCreateInput>) => Promise<void>
+  updateMissionVehicle: (id: string, vehicle: Vehicle) => Promise<void>
   deleteMission: (id: string) => Promise<void>
   duplicateMission: (id: string) => Promise<Mission | null>
   
@@ -78,7 +74,7 @@ export const useMissionStore = create<MissionStore>((set, get) => ({
   fetchMissions: async () => {
     set({ isLoading: true, error: null })
     try {
-      const response = await fetch(`${API_BASE}/api/missions`, {
+      const response = await fetch(`${getApiBaseUrl()}/api/missions`, {
         signal: AbortSignal.timeout(5000),
       })
       
@@ -101,7 +97,7 @@ export const useMissionStore = create<MissionStore>((set, get) => ({
   addMission: async (missionData) => {
     set({ isLoading: true, error: null })
     try {
-      const response = await fetch(`${API_BASE}/api/missions`, {
+      const response = await fetch(`${getApiBaseUrl()}/api/missions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -132,7 +128,7 @@ export const useMissionStore = create<MissionStore>((set, get) => ({
   updateMission: async (id, updates) => {
     set({ error: null })
     try {
-      const response = await fetch(`${API_BASE}/api/missions/${id}`, {
+      const response = await fetch(`${getApiBaseUrl()}/api/missions/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updates),
@@ -152,10 +148,14 @@ export const useMissionStore = create<MissionStore>((set, get) => ({
     }
   },
 
+  updateMissionVehicle: async (id, vehicle) => {
+    await get().updateMission(id, { vehicle })
+  },
+
   deleteMission: async (id) => {
     set({ error: null })
     try {
-      const response = await fetch(`${API_BASE}/api/missions/${id}`, {
+      const response = await fetch(`${getApiBaseUrl()}/api/missions/${id}`, {
         method: "DELETE",
       })
       
@@ -176,7 +176,7 @@ export const useMissionStore = create<MissionStore>((set, get) => ({
   duplicateMission: async (id) => {
     set({ isLoading: true, error: null })
     try {
-      const response = await fetch(`${API_BASE}/api/missions/${id}/duplicate`, {
+      const response = await fetch(`${getApiBaseUrl()}/api/missions/${id}/duplicate`, {
         method: "POST",
       })
       

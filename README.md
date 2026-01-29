@@ -46,15 +46,25 @@ cd /opt/aurige
 sudo git clone https://github.com/YOUR_REPO/aurige.git .
 ```
 
-4. **Setup frontend:**
+4. **Configure environment:**
 
 ```bash
-cd /opt/aurige/frontend
+# Copy and edit the environment file
+sudo cp /opt/aurige/.env.example /opt/aurige/.env.local
+
+# For production with nginx (recommended):
+# Leave NEXT_PUBLIC_API_URL empty in .env.local
+```
+
+5. **Setup frontend:**
+
+```bash
+cd /opt/aurige
 sudo npm install --legacy-peer-deps
 sudo npm run build
 ```
 
-5. **Setup backend:**
+6. **Setup backend:**
 
 ```bash
 cd /opt/aurige/backend
@@ -62,7 +72,7 @@ sudo python3 -m venv venv
 sudo ./venv/bin/pip install -r requirements.txt
 ```
 
-6. **Install systemd services:**
+7. **Install systemd services:**
 
 ```bash
 sudo cp /opt/aurige/deploy/*.service /etc/systemd/system/
@@ -71,7 +81,7 @@ sudo systemctl enable aurige-web aurige-api
 sudo systemctl start aurige-web aurige-api
 ```
 
-7. **Configure nginx:**
+8. **Configure nginx:**
 
 ```bash
 sudo cp /opt/aurige/deploy/nginx-aurige.conf /etc/nginx/sites-available/aurige
