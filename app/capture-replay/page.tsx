@@ -200,7 +200,6 @@ const handleDeleteLog = async (logId: string) => {
     setRenamingLogId(log.id)
     setNewLogName(log.filename.replace(".log", ""))
   }
-  }
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60)
