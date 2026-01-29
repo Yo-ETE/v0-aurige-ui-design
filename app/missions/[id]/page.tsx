@@ -132,14 +132,24 @@ export default function MissionPage() {
   const [showEditVehicle, setShowEditVehicle] = useState(false)
   const [newName, setNewName] = useState("")
 
+  // Set active mission ID immediately when entering this page
+  useEffect(() => {
+    if (id) {
+      // Store in localStorage for persistence across page reloads
+      localStorage.setItem("activeMissionId", id)
+      // Also update zustand store
+      setCurrentMission(id)
+    }
+  }, [id, setCurrentMission])
+
+  // Find mission data from store
   useEffect(() => {
     const found = missions.find((m) => m.id === id)
     if (found) {
       setMission(found)
-      setCurrentMission(found.id)
       setNewName(found.name)
     }
-  }, [id, missions, setCurrentMission])
+  }, [id, missions])
 
   if (!mission) {
     return (

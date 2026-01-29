@@ -22,10 +22,23 @@ import { useMissionStore } from "@/lib/mission-store"
 
 export default function CaptureReplay() {
   const router = useRouter()
-  const currentMissionId = useMissionStore((state) => state.currentMissionId)
+  const storeMissionId = useMissionStore((state) => state.currentMissionId)
   const missions = useMissionStore((state) => state.missions)
-  const currentMission = missions.find((m) => m.id === currentMissionId)
-  const missionId = currentMissionId || ""
+  
+  // Use localStorage as primary source (persists across page reloads)
+  const [missionId, setMissionId] = useState<string>("")
+  
+  useEffect(() => {
+    // Read from localStorage first (most reliable)
+    const localId = localStorage.getItem("activeMissionId")
+    if (localId) {
+      setMissionId(localId)
+    } else if (storeMissionId) {
+      setMissionId(storeMissionId)
+    }
+  }, [storeMissionId])
+  
+  const currentMission = missions.find((m) => m.id === missionId)
   
   const [captureStatus, setCaptureStatus] = useState<CaptureStatus>({ running: false, durationSeconds: 0 })
   const [replayStatus, setReplayStatus] = useState<ProcessStatus>({ running: false })
