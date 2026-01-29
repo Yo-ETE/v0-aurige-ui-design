@@ -14,31 +14,6 @@ interface LogItem {
   children?: LogItem[]
 }
 
-const mockLogTree: LogItem[] = [
-  {
-    id: "1",
-    name: "capture_door_unlock.log",
-    tags: ["original"],
-    children: [
-      {
-        id: "1-1",
-        name: "capture_door_unlock_part1.log",
-        tags: ["success"],
-        children: [
-          { id: "1-1-1", name: "capture_door_unlock_p1_a.log", tags: ["success"] },
-          { id: "1-1-2", name: "capture_door_unlock_p1_b.log", tags: ["failed"] },
-        ],
-      },
-      { id: "1-2", name: "capture_door_unlock_part2.log", tags: ["failed"] },
-    ],
-  },
-  {
-    id: "2",
-    name: "capture_window_control.log",
-    tags: ["original"],
-  },
-]
-
 const steps = [
   { number: 1, title: "Capturer une action", description: "Enregistrez le trafic CAN pendant une action véhicule" },
   { number: 2, title: "Importer le log", description: "Importez le fichier de capture dans l'outil" },
@@ -105,7 +80,8 @@ function LogTreeItem({ item, depth = 0 }: { item: LogItem; depth?: number }) {
 }
 
 export default function Isolation() {
-  const [logs] = useState<LogItem[]>(mockLogTree)
+  // Empty by default - logs will be loaded from mission when implemented
+  const [logs] = useState<LogItem[]>([])
 
   return (
     <AppShell

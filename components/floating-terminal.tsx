@@ -14,7 +14,7 @@ import {
   Terminal,
   AlertCircle,
 } from "lucide-react"
-import { startSniffer, stopSniffer, createCANWebSocket, type CANMessage } from "@/lib/api"
+import { createCANWebSocket, type CANMessage } from "@/lib/api"
 
 interface TerminalLine {
   timestamp: string
@@ -62,26 +62,24 @@ export function FloatingTerminal() {
     setLines((prev) => [...prev.slice(-500), newLine]) // Keep last 500 lines
   }, [])
 
-  // Start sniffing
-  const handleStart = async () => {
+  // Start sniffing - WebSocket connection starts candump automatically
+  const handleStart = () => {
     setError(null)
     setIsConnecting(true)
     
     try {
-      // Start backend sniffer
-      await startSniffer(selectedInterface)
-      
-      // Connect WebSocket
+      // Connect WebSocket - the backend starts candump when WS connects
       const ws = createCANWebSocket(
         selectedInterface,
         handleMessage,
-        (err) => {
-          console.error("[v0] WebSocket error:", err)
-          setError("Connection lost")
+        () => {
+          setError("Connexion perdue avec le Raspberry Pi")
           setIsRunning(false)
+          setIsConnecting(false)
         },
         () => {
           setIsRunning(false)
+          setIsConnecting(false)
         }
       )
       
@@ -89,25 +87,21 @@ export function FloatingTerminal() {
         setIsRunning(true)
         setIsConnecting(false)
         lastTimestampRef.current = 0
+        setError(null)
       }
       
       wsRef.current = ws
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to start sniffer")
+      setError(err instanceof Error ? err.message : "Impossible de demarrer le sniffer")
       setIsConnecting(false)
     }
   }
 
-  // Stop sniffing
-  const handleStop = async () => {
-    try {
-      if (wsRef.current) {
-        wsRef.current.close()
-        wsRef.current = null
-      }
-      await stopSniffer()
-    } catch {
-      // Ignore stop errors
+  // Stop sniffing - closing WebSocket stops candump on backend
+  const handleStop = () => {
+    if (wsRef.current) {
+      wsRef.current.close()
+      wsRef.current = null
     }
     setIsRunning(false)
   }
