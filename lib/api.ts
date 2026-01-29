@@ -438,10 +438,47 @@ export async function resetECU(iface: "can0" | "can1" = "can0"): Promise<OBDResp
 }
 
 // =============================================================================
-// WebSocket Helper
+// WebSocket Helpers
 // =============================================================================
 
-export function createCANWebSocket(
+/**
+ * Create WebSocket for cansniffer (live view only, no recording)
+ * Used by the floating terminal for real-time CAN traffic monitoring
+ */
+export function createSnifferWebSocket(
+  iface: "can0" | "can1",
+  onMessage: (msg: CANMessage) => void,
+  onError?: (error: Event) => void,
+  onClose?: () => void
+): WebSocket {
+  const wsBaseUrl = getWsBaseUrl()
+  const ws = new WebSocket(`${wsBaseUrl}/ws/cansniffer?interface=${iface}`)
+  
+  ws.onmessage = (event) => {
+    try {
+      const msg = JSON.parse(event.data) as CANMessage
+      onMessage(msg)
+    } catch {
+      // Ignore parse errors
+    }
+  }
+  
+  if (onError) {
+    ws.onerror = onError
+  }
+  
+  if (onClose) {
+    ws.onclose = onClose
+  }
+  
+  return ws
+}
+
+/**
+ * Create WebSocket for candump (used during capture for live preview)
+ * Note: For actual capture/recording, use startCapture() API
+ */
+export function createCandumpWebSocket(
   iface: "can0" | "can1",
   onMessage: (msg: CANMessage) => void,
   onError?: (error: Event) => void,
@@ -469,3 +506,6 @@ export function createCANWebSocket(
   
   return ws
 }
+
+// Alias for backward compatibility
+export const createCANWebSocket = createCandumpWebSocket
