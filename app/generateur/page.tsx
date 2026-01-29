@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { AppShell } from "@/components/app-shell"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Cpu, Play, Square, Shuffle, AlertCircle, CheckCircle2, Loader2 } from "lucide-react"
-import { startGenerator, stopGenerator, getGeneratorStatus, type ProcessStatus } from "@/lib/api"
+import { startGenerator, stopGenerator, getGeneratorStatus, createCandumpWebSocket, type ProcessStatus } from "@/lib/api"
 import { SentFramesHistory, useSentFramesHistory } from "@/components/sent-frames-history"
 
 export default function Generateur() {
@@ -49,25 +49,43 @@ export default function Generateur() {
     return () => clearInterval(interval)
   }, [fetchStatus])
 
-  // Simulate frame generation display when running
+  // Connect to WebSocket to see actual generated frames
+  const wsRef = useRef<WebSocket | null>(null)
+  
   useEffect(() => {
-    if (!status.running) return
+    if (!status.running) {
+      // Close WebSocket when generator stops
+      if (wsRef.current) {
+        wsRef.current.close()
+        wsRef.current = null
+      }
+      return
+    }
 
-    const interval = setInterval(() => {
-      const id = useRandomId
-        ? Math.floor(Math.random() * 0x7ff).toString(16).toUpperCase().padStart(3, "0")
-        : canId || "7DF"
-      const length = parseInt(frameLength) || 8
-      const data = Array.from({ length }, () =>
-        Math.floor(Math.random() * 256).toString(16).toUpperCase().padStart(2, "0")
-      ).join(" ")
+    // Connect to candump WebSocket to see generated frames
+    const ws = createCandumpWebSocket(
+      "can0",
+      (msg) => {
+        setLastFrame({ id: msg.canId, data: msg.data })
+        setFrameCount((prev) => prev + 1)
+      },
+      () => {
+        // WebSocket error - ignore
+      },
+      () => {
+        wsRef.current = null
+      }
+    )
+    
+    wsRef.current = ws
 
-      setLastFrame({ id, data })
-      setFrameCount((prev) => prev + 1)
-    }, parseInt(delay) || 100)
-
-    return () => clearInterval(interval)
-  }, [status.running, useRandomId, canId, frameLength, delay])
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close()
+        wsRef.current = null
+      }
+    }
+  }, [status.running])
 
   const handleStart = async () => {
     setError(null)

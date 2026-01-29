@@ -136,6 +136,7 @@ class Mission(BaseModel):
     updated_at: datetime = Field(alias="updatedAt")
     logs_count: int = Field(alias="logsCount")
     frames_count: int = Field(alias="framesCount")
+    last_capture_date: Optional[datetime] = Field(default=None, alias="lastCaptureDate")
 
     class Config:
         populate_by_name = True
@@ -310,20 +311,34 @@ def count_log_frames(log_file: Path) -> int:
         return 0
 
 
-def update_mission_stats(mission_id: str):
-    """Update mission log/frame counts"""
+def update_mission_stats(mission_id: str, new_capture: bool = False):
+    """Update mission log/frame counts and optionally lastCaptureDate"""
     mission = load_mission(mission_id)
     logs_dir = get_mission_logs_dir(mission_id)
     
     logs_count = 0
     frames_count = 0
+    latest_log_time = None
+    
     for log_file in logs_dir.glob("*.log"):
         logs_count += 1
         frames_count += count_log_frames(log_file)
+        # Track latest log modification time
+        log_mtime = log_file.stat().st_mtime
+        if latest_log_time is None or log_mtime > latest_log_time:
+            latest_log_time = log_mtime
     
     mission["logsCount"] = logs_count
     mission["framesCount"] = frames_count
     mission["updatedAt"] = datetime.now().isoformat()
+    
+    # Update lastCaptureDate if we have logs
+    if new_capture or (latest_log_time and not mission.get("lastCaptureDate")):
+        mission["lastCaptureDate"] = datetime.now().isoformat()
+    elif latest_log_time and logs_count > 0:
+        # Set from latest log file if not set
+        mission["lastCaptureDate"] = datetime.fromtimestamp(latest_log_time).isoformat()
+    
     save_mission(mission_id, mission)
 
 
@@ -743,9 +758,9 @@ async def stop_capture():
             with open(meta_path, "w") as f:
                 json.dump(meta, f)
         
-        # Update mission stats
+        # Update mission stats with new capture flag
         mission_id = state.capture_file.parent.parent.name
-        update_mission_stats(mission_id)
+        update_mission_stats(mission_id, new_capture=True)
         
         filename = state.capture_file.name
     else:

@@ -8,8 +8,8 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Zap, Keyboard, Send, AlertTriangle, RotateCcw, Trash2, Loader2 } from "lucide-react"
-import { sendCANFrame, clearDTCs, resetECU } from "@/lib/api"
+import { Zap, Keyboard, Send, AlertTriangle, Loader2 } from "lucide-react"
+import { sendCANFrame } from "@/lib/api"
 import { SentFramesHistory, useSentFramesHistory } from "@/components/sent-frames-history"
 
 interface QuickSlot {
@@ -96,26 +96,6 @@ export default function ReplayRapide() {
     }
   }
 
-  const handleClearDTC = async () => {
-    setIsLoading("dtc")
-    setError(null)
-    await trackFrame(
-      { canId: "7DF", data: "0104", interface: "can0", description: "Clear DTC" },
-      () => clearDTCs("can0")
-    )
-    setIsLoading(null)
-  }
-
-  const handleResetECU = async () => {
-    setIsLoading("reset")
-    setError(null)
-    await trackFrame(
-      { canId: "7DF", data: "1101", interface: "can0", description: "Reset ECU" },
-      () => resetECU("can0")
-    )
-    setIsLoading(null)
-  }
-
   return (
     <AppShell
       title="Replay Rapide"
@@ -190,59 +170,6 @@ export default function ReplayRapide() {
                 Raccourcis clavier actives - Appuyez sur A, Z ou E pour envoyer
               </p>
             )}
-          </CardContent>
-        </Card>
-
-        {/* Diagnostic Functions Card */}
-        <Card className="border-border bg-card">
-          <CardHeader>
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                <RotateCcw className="h-5 w-5 text-primary" />
-              </div>
-              <div>
-                <CardTitle className="text-lg">Fonctions Diagnostic</CardTitle>
-                <CardDescription>
-                  Actions OBD-II rapides
-                </CardDescription>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <Button
-              onClick={handleClearDTC}
-              disabled={isLoading !== null}
-              variant="outline"
-              className="w-full justify-start gap-3 bg-transparent"
-            >
-              {isLoading === "dtc" ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Trash2 className="h-4 w-4" />
-              )}
-              Effacer les codes erreur (DTC)
-            </Button>
-            <Button
-              onClick={handleResetECU}
-              disabled={isLoading !== null}
-              variant="destructive"
-              className="w-full justify-start gap-3"
-            >
-              {isLoading === "reset" ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <RotateCcw className="h-4 w-4" />
-              )}
-              Reset ECU
-            </Button>
-            <Alert className="border-warning/50 bg-warning/10">
-              <AlertTriangle className="h-4 w-4 text-warning" />
-              <AlertTitle className="text-warning">Attention</AlertTitle>
-              <AlertDescription className="text-warning/80">
-                Le reset ECU peut affecter le fonctionnement du vehicule. 
-                Utilisez uniquement sur un vehicule de test.
-              </AlertDescription>
-            </Alert>
           </CardContent>
         </Card>
 
