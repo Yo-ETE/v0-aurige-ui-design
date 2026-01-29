@@ -2,7 +2,7 @@
 
 import React from "react"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
@@ -20,7 +20,10 @@ import {
   ChevronDown,
   Radio,
   Home,
+  Menu,
+  X,
 } from "lucide-react"
+import { Button } from "@/components/ui/button"
 
 interface NavItem {
   name: string
@@ -82,6 +85,12 @@ export function Sidebar() {
   const [expandedSections, setExpandedSections] = useState<string[]>(
     baseNavigation.map((section) => section.title)
   )
+  const [mobileOpen, setMobileOpen] = useState(false)
+
+  // Close mobile menu on route change
+  useEffect(() => {
+    setMobileOpen(false)
+  }, [pathname])
 
   const toggleSection = (title: string) => {
     setExpandedSections((prev) =>
@@ -110,10 +119,33 @@ export function Sidebar() {
   })
 
   return (
-    <aside className="fixed left-0 top-0 z-40 h-screen w-64 border-r border-sidebar-border bg-sidebar">
-      <div className="flex h-full flex-col">
-        {/* Logo */}
-        <div className="flex h-16 items-center gap-3 border-b border-sidebar-border px-6">
+    <>
+      {/* Mobile menu button */}
+      <Button
+        variant="ghost"
+        size="icon"
+        className="fixed left-4 top-4 z-50 lg:hidden"
+        onClick={() => setMobileOpen(!mobileOpen)}
+      >
+        {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+      </Button>
+
+      {/* Overlay for mobile */}
+      {mobileOpen && (
+        <div 
+          className="fixed inset-0 z-40 bg-black/50 lg:hidden" 
+          onClick={() => setMobileOpen(false)}
+        />
+      )}
+
+      <aside className={cn(
+        "fixed left-0 top-0 z-40 h-screen w-64 border-r border-sidebar-border bg-sidebar transition-transform duration-300",
+        "lg:translate-x-0",
+        mobileOpen ? "translate-x-0" : "-translate-x-full"
+      )}>
+        <div className="flex h-full flex-col">
+          {/* Logo */}
+          <div className="flex h-16 items-center gap-3 border-b border-sidebar-border px-6">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary">
             <Radio className="h-5 w-5 text-primary-foreground" />
           </div>
@@ -198,8 +230,9 @@ export function Sidebar() {
               <p className="text-[10px] text-muted-foreground truncate">{typeof window !== "undefined" ? getApiHost() : "..."}</p>
             </div>
           </div>
+</div>
         </div>
-      </div>
-    </aside>
+      </aside>
+    </>
   )
 }
