@@ -225,12 +225,12 @@ class SystemStatus(BaseModel):
     wifi_ip: Optional[str] = Field(default=None, alias="wifiIp")
     ethernet_connected: bool = Field(alias="ethernetConnected")
     ethernet_ip: Optional[str] = Field(default=None, alias="ethernetIp")
-can0_up: bool = Field(alias="can0Up")
-  can0_bitrate: Optional[int] = Field(default=None, alias="can0Bitrate")
-  can1_up: bool = Field(alias="can1Up")
-  can1_bitrate: Optional[int] = Field(default=None, alias="can1Bitrate")
-  vcan0_up: bool = Field(alias="vcan0Up")
-  api_running: bool = Field(alias="apiRunning")
+    can0_up: bool = Field(alias="can0Up")
+    can0_bitrate: Optional[int] = Field(default=None, alias="can0Bitrate")
+    can1_up: bool = Field(alias="can1Up")
+    can1_bitrate: Optional[int] = Field(default=None, alias="can1Bitrate")
+    vcan0_up: bool = Field(alias="vcan0Up")
+    api_running: bool = Field(alias="apiRunning")
     web_running: bool = Field(alias="webRunning")
 
     class Config:
