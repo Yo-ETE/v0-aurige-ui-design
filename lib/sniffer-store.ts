@@ -75,7 +75,6 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
     
     // Prevent multiple starts
     if (isRunning || isConnecting) {
-      console.log("[v0] Sniffer already running or connecting, ignoring start")
       return
     }
     
@@ -90,7 +89,6 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
     }
     
     set({ isConnecting: true, error: null })
-    console.log("[v0] Starting sniffer on", selectedInterface)
     
     try {
       const ws = createSnifferWebSocket(
@@ -119,8 +117,7 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
             lastTimestamp: now,
           })
         },
-        (err) => {
-          console.log("[v0] Sniffer WebSocket error:", err)
+        () => {
           set({
             error: "Connexion perdue avec le Raspberry Pi",
             isRunning: false,
@@ -129,13 +126,11 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
           })
         },
         () => {
-          console.log("[v0] Sniffer WebSocket closed")
           set({ isRunning: false, isConnecting: false, ws: null })
         }
       )
       
       ws.onopen = () => {
-        console.log("[v0] Sniffer WebSocket connected")
         set({
           isRunning: true,
           isConnecting: false,
@@ -146,8 +141,7 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
       }
       
       // Also handle onerror in case connection fails immediately
-      ws.onerror = (err) => {
-        console.log("[v0] Sniffer WebSocket connection error:", err)
+      ws.onerror = () => {
         set({
           error: "Impossible de se connecter au Raspberry Pi",
           isRunning: false,
@@ -156,8 +150,7 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
         })
       }
       
-    } catch (err) {
-      console.log("[v0] Sniffer start exception:", err)
+    } catch {
       set({
         error: err instanceof Error ? err.message : "Impossible de demarrer le sniffer",
         isConnecting: false,
@@ -168,7 +161,6 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
   
   stop: () => {
     const { ws } = get()
-    console.log("[v0] Stopping sniffer")
     if (ws) {
       try {
         ws.close()

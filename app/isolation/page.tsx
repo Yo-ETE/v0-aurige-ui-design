@@ -47,6 +47,7 @@ function LogTreeItem({
   onRemove,
   onTagChange,
   isReplaying,
+  isSplitting,
 }: {
   item: IsolationLog
   depth?: number

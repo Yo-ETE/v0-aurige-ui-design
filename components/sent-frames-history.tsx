@@ -1,11 +1,16 @@
 "use client"
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useRef } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Send, Trash2, CheckCircle2, XCircle, Clock } from "lucide-react"
+
+// Generate unique ID without crypto.randomUUID (not available in HTTP context)
+function generateId(): string {
+  return `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`
+}
 
 export interface SentFrame {
   id: string
@@ -28,7 +33,7 @@ export function useSentFramesHistory(maxItems = 50) {
   const addFrame = useCallback((frame: Omit<SentFrame, "id" | "timestamp" | "status">) => {
     const newFrame: SentFrame = {
       ...frame,
-      id: crypto.randomUUID(),
+      id: generateId(),
       timestamp: new Date(),
       status: "pending",
     }

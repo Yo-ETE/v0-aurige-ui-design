@@ -307,7 +307,7 @@ export default function MissionPage() {
                 <Radio className="h-5 w-5 text-primary" />
                 <div>
                   <p className="text-sm font-medium text-foreground">
-                    {mission.canInterface} @ {(mission.bitrate / 1000).toFixed(0)}k
+                    {mission.canInterface || "can0"} @ {mission.bitrate ? `${(mission.bitrate / 1000).toFixed(0)}k` : "500k"}
                   </p>
                   <p className="text-xs text-muted-foreground">Interface / Bitrate</p>
                 </div>

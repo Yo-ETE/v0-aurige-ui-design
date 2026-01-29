@@ -1470,7 +1470,7 @@ async def read_obd_pid(
 
 
 # =============================================================================
-# WebSocket - cansniffer (filtered/aggregated view)
+# WebSocket - cansniffer (live CAN view for terminal)
 # =============================================================================
 
 class SnifferState:
@@ -1484,61 +1484,83 @@ sniffer_state = SnifferState()
 @app.websocket("/ws/cansniffer")
 async def websocket_cansniffer(websocket: WebSocket, interface: str = Query(default="can0")):
     """
-    WebSocket endpoint for cansniffer (aggregated CAN view).
+    WebSocket endpoint for live CAN traffic view.
     
-    cansniffer shows unique CAN IDs and highlights changing bytes.
-    Useful for identifying which IDs correspond to specific functions.
+    Uses candump with timestamp for live monitoring.
+    This is for the floating terminal, NOT for recording.
     """
     await websocket.accept()
     sniffer_state.clients.append(websocket)
     
+    # Each client gets its own candump process for isolation
+    process = None
+    
     try:
-        # Start cansniffer if not already running
-        if sniffer_state.process is None or sniffer_state.interface != interface:
-            if sniffer_state.process and sniffer_state.process.returncode is None:
-                sniffer_state.process.terminate()
-                await sniffer_state.process.wait()
-            
-            # -c: colorize, -t a: absolute time
-            sniffer_state.process = await asyncio.create_subprocess_exec(
-                "cansniffer", "-c", interface,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            sniffer_state.interface = interface
+        # Start candump for this client
+        # -t a: absolute timestamp, -x: extended info
+        process = await asyncio.create_subprocess_exec(
+            "candump", "-ta", interface,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
         
-        # Read and broadcast
+        # Read and send to this websocket
         while True:
-            if sniffer_state.process and sniffer_state.process.stdout:
-                line = await sniffer_state.process.stdout.readline()
+            if process and process.stdout:
+                line = await process.stdout.readline()
                 if not line:
+                    # Process ended
                     break
                 
                 try:
                     decoded = line.decode().strip()
-                    if decoded:
-                        # Send raw cansniffer output
-                        # Frontend can parse the format
-                        for client in sniffer_state.clients:
+                    if decoded and not decoded.startswith("interface"):
+                        # Parse candump output: (timestamp) interface canid#data
+                        # Example: (1234567890.123456)  can0  7DF   [8]  02 01 0C 00 00 00 00 00
+                        parts = decoded.split()
+                        if len(parts) >= 4:
+                            timestamp = parts[0].strip("()")
+                            can_id = parts[2]
+                            # Find data after [dlc]
                             try:
-                                await client.send_text(decoded)
-                            except Exception:
-                                pass
-                except Exception:
+                                dlc_idx = decoded.index("[")
+                                dlc_end = decoded.index("]")
+                                dlc = int(decoded[dlc_idx+1:dlc_end])
+                                data_part = decoded[dlc_end+1:].strip().replace(" ", "")
+                            except (ValueError, IndexError):
+                                dlc = 8
+                                data_part = "".join(parts[4:]) if len(parts) > 4 else ""
+                            
+                            msg = json.dumps({
+                                "timestamp": float(timestamp) if timestamp else time.time(),
+                                "canId": can_id,
+                                "data": data_part.upper(),
+                                "dlc": dlc,
+                            })
+                            await websocket.send_text(msg)
+                except Exception as e:
+                    # Skip malformed lines
                     pass
             else:
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.01)
                 
     except WebSocketDisconnect:
         pass
+    except Exception as e:
+        try:
+            await websocket.send_text(json.dumps({"error": str(e)}))
+        except:
+            pass
     finally:
         if websocket in sniffer_state.clients:
             sniffer_state.clients.remove(websocket)
         
-        if not sniffer_state.clients and sniffer_state.process:
-            sniffer_state.process.terminate()
-            sniffer_state.process = None
-            sniffer_state.interface = None
+        if process and process.returncode is None:
+            process.terminate()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=2.0)
+            except asyncio.TimeoutError:
+                process.kill()
 
 
 # =============================================================================
