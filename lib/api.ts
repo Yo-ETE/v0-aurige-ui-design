@@ -394,6 +394,21 @@ export async function deleteLog(missionId: string, logId: string): Promise<void>
   })
 }
 
+export interface SplitLogResult {
+  logAId: string
+  logAName: string
+  logAFrames: number
+  logBId: string
+  logBName: string
+  logBFrames: number
+}
+
+export async function splitLog(missionId: string, logId: string): Promise<SplitLogResult> {
+  return fetchApi<SplitLogResult>(`/missions/${missionId}/logs/${logId}/split`, {
+    method: "POST",
+  })
+}
+
 // =============================================================================
 // OBD-II Diagnostics
 // =============================================================================

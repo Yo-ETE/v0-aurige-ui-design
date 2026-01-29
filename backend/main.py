@@ -1145,6 +1145,92 @@ async def delete_log(mission_id: str, log_id: str):
     return {"status": "deleted", "id": log_id}
 
 
+class SplitLogRequest(BaseModel):
+    """Request to split a log file in half"""
+    pass  # No extra params needed, we split in half
+
+
+class SplitLogResponse(BaseModel):
+    """Response with the two new log IDs"""
+    log_a_id: str = Field(alias="logAId")
+    log_a_name: str = Field(alias="logAName")
+    log_a_frames: int = Field(alias="logAFrames")
+    log_b_id: str = Field(alias="logBId")
+    log_b_name: str = Field(alias="logBName")
+    log_b_frames: int = Field(alias="logBFrames")
+    
+    class Config:
+        populate_by_name = True
+
+
+@app.post("/api/missions/{mission_id}/logs/{log_id}/split", response_model=SplitLogResponse)
+async def split_log(mission_id: str, log_id: str):
+    """
+    Split a log file in half for binary isolation.
+    
+    Creates two new log files:
+    - {log_id}_A.log - First half of frames
+    - {log_id}_B.log - Second half of frames
+    
+    The original log is preserved.
+    """
+    load_mission(mission_id)
+    
+    logs_dir = get_mission_logs_dir(mission_id)
+    source_file = logs_dir / f"{log_id}.log"
+    
+    if not source_file.exists():
+        raise HTTPException(status_code=404, detail="Log not found")
+    
+    # Read all lines from source
+    with open(source_file, "r") as f:
+        lines = f.readlines()
+    
+    if len(lines) < 2:
+        raise HTTPException(status_code=400, detail="Log has too few frames to split")
+    
+    # Split in half
+    mid = len(lines) // 2
+    lines_a = lines[:mid]
+    lines_b = lines[mid:]
+    
+    # Generate IDs for new logs
+    log_a_id = f"{log_id}_A"
+    log_b_id = f"{log_id}_B"
+    
+    # Write first half
+    file_a = logs_dir / f"{log_a_id}.log"
+    with open(file_a, "w") as f:
+        f.writelines(lines_a)
+    
+    # Write second half
+    file_b = logs_dir / f"{log_b_id}.log"
+    with open(file_b, "w") as f:
+        f.writelines(lines_b)
+    
+    # Save metadata
+    now = datetime.now().isoformat()
+    for log_new_id, parent in [(log_a_id, log_id), (log_b_id, log_id)]:
+        meta = {
+            "createdAt": now,
+            "parentLog": parent,
+            "splitFrom": log_id,
+        }
+        with open(logs_dir / f"{log_new_id}.meta.json", "w") as f:
+            json.dump(meta, f, indent=2)
+    
+    update_mission_stats(mission_id)
+    
+    return SplitLogResponse(
+        logAId=log_a_id,
+        logAName=f"{log_a_id}.log",
+        logAFrames=len(lines_a),
+        logBId=log_b_id,
+        logBName=f"{log_b_id}.log",
+        logBFrames=len(lines_b),
+    )
+
+
 # =============================================================================
 # WebSocket - Live CAN Sniffer
 # =============================================================================

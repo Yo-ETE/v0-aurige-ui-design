@@ -28,7 +28,7 @@ import {
   CheckCircle2,
 } from "lucide-react"
 import { useIsolationStore, type IsolationLog } from "@/lib/isolation-store"
-import { listMissionLogs, startReplay, stopReplay, type LogEntry } from "@/lib/api"
+import { listMissionLogs, startReplay, stopReplay, splitLog, type LogEntry } from "@/lib/api"
 import { useMissionStore } from "@/lib/mission-store"
 
 const steps = [
@@ -55,6 +55,7 @@ function LogTreeItem({
   onRemove: (logId: string) => void
   onTagChange: (logId: string, tag: "success" | "failed") => void
   isReplaying: string | null
+  isSplitting: string | null
 }) {
   const [isExpanded, setIsExpanded] = useState(true)
   const hasChildren = item.children && item.children.length > 0
@@ -114,15 +115,21 @@ function LogTreeItem({
             >
               <CheckCircle2 className="h-3 w-3" />
             </Button>
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-7 w-7"
-              onClick={() => onSplit(item)}
-              title="Diviser"
-            >
-              <FlaskConical className="h-3 w-3" />
-            </Button>
+            {isSplitting === item.id ? (
+              <Button size="icon" variant="ghost" className="h-7 w-7">
+                <Loader2 className="h-3 w-3 animate-spin" />
+              </Button>
+            ) : (
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-7 w-7"
+                onClick={() => onSplit(item)}
+                title="Diviser"
+              >
+                <FlaskConical className="h-3 w-3" />
+              </Button>
+            )}
             <Button
               size="icon"
               variant="ghost"
@@ -157,7 +164,7 @@ function LogTreeItem({
 
 export default function Isolation() {
   const router = useRouter()
-  const { logs, importLog, removeLog, updateLogTags, clearLogs } = useIsolationStore()
+  const { logs, importLog, addChildLog, removeLog, updateLogTags, clearLogs } = useIsolationStore()
   
   // Mission context
   const currentMissionId = useMissionStore((state) => state.currentMissionId)
@@ -225,10 +232,38 @@ export default function Isolation() {
     }
   }
   
-  const handleSplit = (log: IsolationLog) => {
-    // TODO: Implement log splitting via backend API
-    // This would create two child logs from the parent
-    alert(`Fonction de division a implementer pour: ${log.name}`)
+  const [isSplitting, setIsSplitting] = useState<string | null>(null)
+  
+  const handleSplit = async (log: IsolationLog) => {
+    setIsSplitting(log.id)
+    try {
+      const result = await splitLog(log.missionId, log.id)
+      
+      // Add the two new child logs to the store
+      addChildLog(log.id, {
+        id: result.logAId,
+        name: result.logAName,
+        filename: result.logAName,
+        missionId: log.missionId,
+        tags: [],
+        frameCount: result.logAFrames,
+        parentId: log.id,
+      })
+      
+      addChildLog(log.id, {
+        id: result.logBId,
+        name: result.logBName,
+        filename: result.logBName,
+        missionId: log.missionId,
+        tags: [],
+        frameCount: result.logBFrames,
+        parentId: log.id,
+      })
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Erreur lors de la division")
+    } finally {
+      setIsSplitting(null)
+    }
   }
   
   const handleTagChange = (logId: string, tag: "success" | "failed") => {
