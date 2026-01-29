@@ -32,6 +32,9 @@ export default function OBDII() {
         async () => {
           const response = await requestVIN(canInterface)
           setLastResponse(response)
+          if (response.status === "error") {
+            throw new Error(response.message || "Erreur d'envoi")
+          }
           if (response.data) {
             setVin(response.data)
           }
@@ -53,7 +56,10 @@ export default function OBDII() {
         async () => {
           const response = await readDTCs(canInterface)
           setLastResponse(response)
-          if (response.status === "sent") {
+          if (response.status === "error") {
+            throw new Error(response.message || "Erreur d'envoi")
+          }
+          if (response.status === "sent" || response.status === "success") {
             setDtcCodes(null)
           }
         }
@@ -74,6 +80,9 @@ export default function OBDII() {
         async () => {
           const response = await clearDTCs(canInterface)
           setLastResponse(response)
+          if (response.status === "error") {
+            throw new Error(response.message || "Erreur d'envoi")
+          }
           if (response.status === "sent") {
             setDtcCodes([])
           }
@@ -95,6 +104,9 @@ export default function OBDII() {
         async () => {
           const response = await resetECU(canInterface)
           setLastResponse(response)
+          if (response.status === "error") {
+            throw new Error(response.message || "Erreur d'envoi")
+          }
           setVin(null)
           setDtcCodes(null)
         }

@@ -449,22 +449,29 @@ def can_interface_down(interface: str):
     run_command(["ip", "link", "set", interface, "down"])
 
 
-def can_send_frame(interface: str, can_id: str, data: str):
+def can_send_frame(interface: str, can_id: str, data: str) -> bool:
     """
     Send a single CAN frame.
     Uses: cansend can0 7DF#02010C
     
     Args:
-        interface: CAN interface (can0, can1)
+        interface: CAN interface (can0, can1, vcan0)
         can_id: CAN ID in hex (e.g., "7DF", "18DAF110")
         data: Data bytes in hex (e.g., "02010C" or "02 01 0C")
+    
+    Returns:
+        True if frame was sent successfully, False otherwise
     """
     # Clean up data - remove spaces
     data_clean = data.replace(" ", "").upper()
     can_id_clean = can_id.replace("0x", "").upper()
     
     frame = f"{can_id_clean}#{data_clean}"
-    run_command(["cansend", interface, frame])
+    try:
+        result = run_command(["cansend", interface, frame], check=False)
+        return result.returncode == 0
+    except Exception:
+        return False
 
 
 async def broadcast_to_websockets(message: str):
@@ -1415,7 +1422,7 @@ class OBDRequest(BaseModel):
         populate_by_name = True
 
 
-async def obd_send_with_flow_control(interface: str, request_id: str, request_data: str, response_id: str = "7E8") -> list[str]:
+async def obd_send_with_flow_control(interface: str, request_id: str, request_data: str, response_id: str = "7E8") -> dict:
     """
     Send an OBD-II request and handle ISO-TP flow control for multi-frame responses.
     
@@ -1423,6 +1430,9 @@ async def obd_send_with_flow_control(interface: str, request_id: str, request_da
     1. First frame starts with 0x10 (indicates more frames coming)
     2. We send flow control: targetID#3000000000000000
     3. Consecutive frames start with 0x21, 0x22, etc.
+    
+    Returns:
+        dict with 'success', 'responses', and 'error' keys
     """
     # Calculate flow control target (response_id - 8)
     flow_target = f"{int(response_id, 16) - 8:03X}"
@@ -1430,17 +1440,22 @@ async def obd_send_with_flow_control(interface: str, request_id: str, request_da
     # Start candump to capture response
     log_file = Path(f"/tmp/obd_response_{int(time.time())}.log")
     
-    candump = await asyncio.create_subprocess_exec(
-        "candump", "-L", "-ta", f"{interface},{request_id}:7FF,{response_id}:{response_id}",
-        stdout=open(log_file, "w"),
-        stderr=asyncio.subprocess.DEVNULL,
-    )
+    try:
+        candump = await asyncio.create_subprocess_exec(
+            "candump", "-L", "-ta", interface,
+            stdout=open(log_file, "w"),
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+    except Exception as e:
+        return {"success": False, "responses": [], "error": f"Failed to start candump: {e}"}
     
     try:
         await asyncio.sleep(0.05)  # Let candump start
         
         # Send the OBD request
-        can_send_frame(interface, request_id, request_data)
+        if not can_send_frame(interface, request_id, request_data):
+            return {"success": False, "responses": [], "error": f"Failed to send frame on {interface}"}
+        
         await asyncio.sleep(0.05)
         
         # Send flow control for multi-frame responses
@@ -1461,11 +1476,11 @@ async def obd_send_with_flow_control(interface: str, request_id: str, request_da
     if log_file.exists():
         with open(log_file, "r") as f:
             for line in f:
-                if response_id.lower() in line.lower():
-                    responses.append(line.strip())
+                # Include all captured frames for debugging
+                responses.append(line.strip())
         log_file.unlink()
     
-    return responses
+    return {"success": True, "responses": responses, "error": None}
 
 
 @app.post("/api/obd/vin")
@@ -1478,13 +1493,22 @@ async def read_vin(request: OBDRequest):
     2. Send: 7E0#3000000000000000 (Flow control)
     3. Receive multi-frame response on 7E8
     """
-    responses = await obd_send_with_flow_control(
+    result = await obd_send_with_flow_control(
         request.interface,
         "7DF",
         "0209020000000000",
         "7E8"
     )
     
+    if not result["success"]:
+        return {
+            "status": "error",
+            "message": result["error"],
+            "data": None,
+            "frames": [],
+        }
+    
+    responses = result["responses"]
     return {
         "status": "success" if responses else "sent",
         "message": "VIN request completed" if responses else "VIN request sent, waiting for response",
@@ -1503,13 +1527,21 @@ async def read_dtc(request: OBDRequest):
     2. Send: 7E0#3000000000000000 (Flow control)
     3. Receive response on 7E8
     """
-    responses = await obd_send_with_flow_control(
+    result = await obd_send_with_flow_control(
         request.interface,
         "7DF",
         "0103000000000000",
         "7E8"
     )
     
+    if not result["success"]:
+        return {
+            "status": "error",
+            "message": result["error"],
+            "frames": [],
+        }
+    
+    responses = result["responses"]
     return {
         "status": "success" if responses else "sent",
         "message": "DTC read completed" if responses else "DTC request sent",
@@ -1525,8 +1557,14 @@ async def clear_dtc(request: OBDRequest):
     Sends: 7DF#0104000000000000 (Service 04 - Clear DTCs)
     WARNING: This clears all stored DTCs and freeze frame data!
     """
-    can_send_frame(request.interface, "7DF", "0104000000000000")
+    success = can_send_frame(request.interface, "7DF", "0104000000000000")
     await asyncio.sleep(0.1)
+    
+    if not success:
+        return {
+            "status": "error",
+            "message": f"Failed to send frame on {request.interface}",
+        }
     
     return {
         "status": "sent",
@@ -1543,7 +1581,13 @@ async def reset_ecu(request: OBDRequest):
     Sends: 7DF#0211010000000000 (Service 11, subfunction 01 - Hard reset)
     WARNING: This may cause the vehicle to enter a temporary non-operational state!
     """
-    can_send_frame(request.interface, "7DF", "0211010000000000")
+    success = can_send_frame(request.interface, "7DF", "0211010000000000")
+    
+    if not success:
+        return {
+            "status": "error",
+            "message": f"Failed to send frame on {request.interface}",
+        }
     
     return {
         "status": "sent",
@@ -1635,12 +1679,16 @@ async def full_obd_scan(request: OBDRequest):
         f.write("########## VIN DU VEHICULE ##########\n")
         
         # 1. Request VIN
-        vin_responses = await obd_send_with_flow_control(
+        vin_result = await obd_send_with_flow_control(
             request.interface, "7DF", "0209020000000000", "7E8"
         )
-        for line in vin_responses:
-            f.write(line + "\n")
-        results["vin"] = vin_responses
+        if vin_result["success"]:
+            for line in vin_result["responses"]:
+                f.write(line + "\n")
+            results["vin"] = vin_result["responses"]
+        else:
+            f.write(f"Error: {vin_result['error']}\n")
+            results["vin"] = []
         
         f.write("\n########## SCAN DES PIDS ##########\n")
         
@@ -1666,12 +1714,16 @@ async def full_obd_scan(request: OBDRequest):
         f.write("\n########## DTCs DU VEHICULE ##########\n")
         
         # 3. Request DTCs
-        dtc_responses = await obd_send_with_flow_control(
+        dtc_result = await obd_send_with_flow_control(
             request.interface, "7DF", "0103000000000000", "7E8"
         )
-        for line in dtc_responses:
-            f.write(line + "\n")
-        results["dtcs"] = dtc_responses
+        if dtc_result["success"]:
+            for line in dtc_result["responses"]:
+                f.write(line + "\n")
+            results["dtcs"] = dtc_result["responses"]
+        else:
+            f.write(f"Error: {dtc_result['error']}\n")
+            results["dtcs"] = []
     
     results["logFile"] = str(log_path)
     
