@@ -449,7 +449,7 @@ def can_interface_down(interface: str):
     run_command(["ip", "link", "set", interface, "down"])
 
 
-def can_send_frame(interface: str, can_id: str, data: str) -> bool:
+def can_send_frame(interface: str, can_id: str, data: str) -> tuple[bool, str]:
     """
     Send a single CAN frame.
     Uses: cansend can0 7DF#02010C
@@ -460,7 +460,7 @@ def can_send_frame(interface: str, can_id: str, data: str) -> bool:
         data: Data bytes in hex (e.g., "02010C" or "02 01 0C")
     
     Returns:
-        True if frame was sent successfully, False otherwise
+        Tuple of (success: bool, error_message: str)
     """
     # Clean up data - remove spaces
     data_clean = data.replace(" ", "").upper()
@@ -469,9 +469,13 @@ def can_send_frame(interface: str, can_id: str, data: str) -> bool:
     frame = f"{can_id_clean}#{data_clean}"
     try:
         result = run_command(["cansend", interface, frame], check=False)
-        return result.returncode == 0
-    except Exception:
-        return False
+        if result.returncode == 0:
+            return True, ""
+        else:
+            error = result.stderr.strip() if result.stderr else f"cansend returned code {result.returncode}"
+            return False, error
+    except Exception as e:
+        return False, str(e)
 
 
 async def broadcast_to_websockets(message: str):
@@ -701,7 +705,10 @@ async def send_can_frame(frame: CANFrame):
     if frame.interface not in ["can0", "can1", "vcan0"]:
         raise HTTPException(status_code=400, detail="Invalid interface")
     
-    can_send_frame(frame.interface, frame.can_id, frame.data)
+    success, error = can_send_frame(frame.interface, frame.can_id, frame.data)
+    
+    if not success:
+        raise HTTPException(status_code=500, detail=f"Failed to send frame: {error}")
     
     return {
         "status": "sent",
@@ -1503,8 +1510,9 @@ async def obd_send_with_flow_control(interface: str, request_id: str, request_da
         await asyncio.sleep(0.1)  # Let candump start
         
         # Send the OBD request
-        if not can_send_frame(interface, request_id, request_data):
-            send_error = f"Failed to send frame on {interface}"
+        success, error = can_send_frame(interface, request_id, request_data)
+        if not success:
+            send_error = f"Failed to send frame on {interface}: {error}"
         else:
             await asyncio.sleep(0.1)
             
@@ -1616,13 +1624,13 @@ async def clear_dtc(request: OBDRequest):
     Sends: 7DF#0104000000000000 (Service 04 - Clear DTCs)
     WARNING: This clears all stored DTCs and freeze frame data!
     """
-    success = can_send_frame(request.interface, "7DF", "0104000000000000")
+    success, error = can_send_frame(request.interface, "7DF", "0104000000000000")
     await asyncio.sleep(0.1)
     
     if not success:
         return {
             "status": "error",
-            "message": f"Failed to send frame on {request.interface}",
+            "message": f"Failed to send frame on {request.interface}: {error}",
         }
     
     return {
@@ -1640,12 +1648,12 @@ async def reset_ecu(request: OBDRequest):
     Sends: 7DF#0211010000000000 (Service 11, subfunction 01 - Hard reset)
     WARNING: This may cause the vehicle to enter a temporary non-operational state!
     """
-    success = can_send_frame(request.interface, "7DF", "0211010000000000")
+    success, error = can_send_frame(request.interface, "7DF", "0211010000000000")
     
     if not success:
         return {
             "status": "error",
-            "message": f"Failed to send frame on {request.interface}",
+            "message": f"Failed to send frame on {request.interface}: {error}",
         }
     
     return {

@@ -32,7 +32,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useIsolationStore, type IsolationLog } from "@/lib/isolation-store"
-import { listMissionLogs, startReplay, stopReplay, splitLog, renameLog, type LogEntry, type CANInterface } from "@/lib/api"
+import { listMissionLogs, startReplay, stopReplay, getReplayStatus, splitLog, renameLog, type LogEntry, type CANInterface } from "@/lib/api"
 import { useMissionStore } from "@/lib/mission-store"
 
 const steps = [
@@ -271,15 +271,21 @@ export default function Isolation() {
     setIsReplaying(log.id)
     try {
       await startReplay(log.missionId, log.id, canInterface)
-      // Auto-stop after a reasonable time or let user stop manually
-      setTimeout(async () => {
+      
+      // Poll for completion instead of fixed timeout
+      const pollInterval = setInterval(async () => {
         try {
-          await stopReplay()
+          const status = await getReplayStatus()
+          if (!status.running) {
+            clearInterval(pollInterval)
+            setIsReplaying(null)
+          }
         } catch {
-          // Ignore
+          clearInterval(pollInterval)
+          setIsReplaying(null)
         }
-        setIsReplaying(null)
-      }, 10000)
+      }, 500)
+      
     } catch {
       setIsReplaying(null)
     }
