@@ -26,9 +26,13 @@ import {
   ArrowLeft,
   Loader2,
   CheckCircle2,
+  Pencil,
 } from "lucide-react"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { useIsolationStore, type IsolationLog } from "@/lib/isolation-store"
-import { listMissionLogs, startReplay, stopReplay, splitLog, type LogEntry } from "@/lib/api"
+import { listMissionLogs, startReplay, stopReplay, splitLog, renameLog, type LogEntry, type CANInterface } from "@/lib/api"
 import { useMissionStore } from "@/lib/mission-store"
 
 const steps = [
@@ -46,8 +50,13 @@ function LogTreeItem({
   onSplit,
   onRemove,
   onTagChange,
+  onRename,
   isReplaying,
   isSplitting,
+  renamingLog,
+  newLogName,
+  setNewLogName,
+  setRenamingLog,
 }: {
   item: IsolationLog
   depth?: number
@@ -55,8 +64,13 @@ function LogTreeItem({
   onSplit: (log: IsolationLog) => void
   onRemove: (logId: string) => void
   onTagChange: (logId: string, tag: "success" | "failed") => void
+  onRename: (log: IsolationLog) => void
   isReplaying: string | null
   isSplitting: string | null
+  renamingLog: string | null
+  newLogName: string
+  setNewLogName: (name: string) => void
+  setRenamingLog: (id: string | null) => void
 }) {
   const [isExpanded, setIsExpanded] = useState(true)
   const hasChildren = item.children && item.children.length > 0
@@ -80,7 +94,24 @@ function LogTreeItem({
           <div className="w-6" />
         )}
         <FileText className="h-4 w-4 text-muted-foreground" />
-        <span className="flex-1 truncate font-mono text-sm">{item.name}</span>
+        {renamingLog === item.id ? (
+          <div className="flex-1 flex items-center gap-2">
+            <Input
+              value={newLogName}
+              onChange={(e) => setNewLogName(e.target.value)}
+              className="h-7 text-sm"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === "Enter") onRename(item)
+                if (e.key === "Escape") setRenamingLog(null)
+              }}
+            />
+            <Button size="sm" variant="ghost" onClick={() => onRename(item)}>OK</Button>
+            <Button size="sm" variant="ghost" onClick={() => setRenamingLog(null)}>Annuler</Button>
+          </div>
+        ) : (
+          <span className="flex-1 truncate font-mono text-sm">{item.name}</span>
+        )}
         <div className="flex items-center gap-2">
           {item.tags.map((tag) => (
             <Badge
@@ -115,6 +146,18 @@ function LogTreeItem({
               title="Marquer comme succes"
             >
               <CheckCircle2 className="h-3 w-3" />
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-7 w-7"
+              onClick={() => {
+                setRenamingLog(item.id)
+                setNewLogName(item.name.replace(".log", ""))
+              }}
+              title="Renommer"
+            >
+              <Pencil className="h-3 w-3" />
             </Button>
             {isSplitting === item.id ? (
               <Button size="icon" variant="ghost" className="h-7 w-7">
@@ -154,8 +197,13 @@ function LogTreeItem({
               onSplit={onSplit}
               onRemove={onRemove}
               onTagChange={onTagChange}
+              onRename={onRename}
               isReplaying={isReplaying}
               isSplitting={isSplitting}
+              renamingLog={renamingLog}
+              newLogName={newLogName}
+              setNewLogName={setNewLogName}
+              setRenamingLog={setRenamingLog}
             />
           ))}
         </div>
@@ -166,17 +214,20 @@ function LogTreeItem({
 
 export default function Isolation() {
   const router = useRouter()
-  const { logs, importLog, addChildLog, removeLog, updateLogTags, clearLogs } = useIsolationStore()
+  const { logs, importLog, addChildLog, removeLog, updateLogTags, updateLogName, clearLogs } = useIsolationStore()
   
   // Mission context
   const currentMissionId = useMissionStore((state) => state.currentMissionId)
   const missions = useMissionStore((state) => state.missions)
   
+  const [canInterface, setCanInterface] = useState<CANInterface>("can0")
   const [missionId, setMissionId] = useState<string>("")
   const [missionLogs, setMissionLogs] = useState<LogEntry[]>([])
   const [isLoadingLogs, setIsLoadingLogs] = useState(false)
   const [showImportDialog, setShowImportDialog] = useState(false)
   const [isReplaying, setIsReplaying] = useState<string | null>(null)
+  const [renamingLog, setRenamingLog] = useState<string | null>(null)
+  const [newLogName, setNewLogName] = useState("")
   
   // Get mission ID from localStorage
   useEffect(() => {
@@ -219,7 +270,7 @@ export default function Isolation() {
   const handleReplay = async (log: IsolationLog) => {
     setIsReplaying(log.id)
     try {
-      await startReplay(log.missionId, log.id, "can0")
+      await startReplay(log.missionId, log.id, canInterface)
       // Auto-stop after a reasonable time or let user stop manually
       setTimeout(async () => {
         try {
@@ -232,6 +283,23 @@ export default function Isolation() {
     } catch {
       setIsReplaying(null)
     }
+  }
+
+  const handleRename = async (log: IsolationLog) => {
+    if (!newLogName.trim()) return
+    try {
+      await renameLog(log.missionId, log.id, newLogName.trim())
+      updateLogName(log.id, newLogName.trim())
+      setRenamingLog(null)
+      setNewLogName("")
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Erreur lors du renommage")
+    }
+  }
+
+  const startRenaming = (log: IsolationLog) => {
+    setRenamingLog(log.id)
+    setNewLogName(log.name.replace(".log", ""))
   }
   
   const [isSplitting, setIsSplitting] = useState<string | null>(null)
@@ -312,6 +380,29 @@ export default function Isolation() {
           </CardContent>
         </Card>
 
+        {/* Interface Selector */}
+        <Card className="lg:col-span-2 border-border bg-card">
+          <CardContent className="py-4">
+            <div className="flex items-center gap-4">
+              <Label htmlFor="can-interface" className="whitespace-nowrap">Interface CAN (replay):</Label>
+              <Select
+                value={canInterface}
+                onValueChange={(v) => setCanInterface(v as CANInterface)}
+                disabled={isReplaying !== null}
+              >
+                <SelectTrigger id="can-interface" className="w-48">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="can0">can0</SelectItem>
+                  <SelectItem value="can1">can1</SelectItem>
+                  <SelectItem value="vcan0">vcan0 (test)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Log Tree Card */}
         <Card className="border-border bg-card lg:col-span-2">
           <CardHeader>
@@ -376,8 +467,13 @@ export default function Isolation() {
                     onSplit={handleSplit}
                     onRemove={removeLog}
                     onTagChange={handleTagChange}
+                    onRename={handleRename}
                     isReplaying={isReplaying}
                     isSplitting={isSplitting}
+                    renamingLog={renamingLog}
+                    newLogName={newLogName}
+                    setNewLogName={setNewLogName}
+                    setRenamingLog={setRenamingLog}
                   />
                 ))}
               </div>

@@ -1196,6 +1196,50 @@ async def delete_log(mission_id: str, log_id: str):
     return {"status": "deleted", "id": log_id}
 
 
+class RenameLogRequest(BaseModel):
+    new_name: str = Field(alias="newName")
+    
+    class Config:
+        populate_by_name = True
+
+
+@app.post("/api/missions/{mission_id}/logs/{log_id}/rename")
+async def rename_log(mission_id: str, log_id: str, request: RenameLogRequest):
+    """Rename a log file"""
+    load_mission(mission_id)
+    
+    logs_dir = get_mission_logs_dir(mission_id)
+    old_log_file = logs_dir / f"{log_id}.log"
+    old_meta_file = logs_dir / f"{log_id}.meta.json"
+    
+    if not old_log_file.exists():
+        raise HTTPException(status_code=404, detail="Log not found")
+    
+    # Clean new name and create new ID
+    new_name = request.new_name.strip()
+    if not new_name:
+        raise HTTPException(status_code=400, detail="New name cannot be empty")
+    
+    # Keep the same ID but update meta with display name
+    # Or rename the file if you want to change the filename
+    new_id = new_name.replace(" ", "_").replace(".log", "")
+    new_log_file = logs_dir / f"{new_id}.log"
+    new_meta_file = logs_dir / f"{new_id}.meta.json"
+    
+    # Check if new name already exists
+    if new_log_file.exists() and new_log_file != old_log_file:
+        raise HTTPException(status_code=409, detail="A log with this name already exists")
+    
+    # Rename log file
+    old_log_file.rename(new_log_file)
+    
+    # Rename or update meta file
+    if old_meta_file.exists():
+        old_meta_file.rename(new_meta_file)
+    
+    return {"status": "renamed", "oldId": log_id, "newId": new_id, "newName": f"{new_id}.log"}
+
+
 class SplitLogRequest(BaseModel):
     """Request to split a log file in half"""
     pass  # No extra params needed, we split in half

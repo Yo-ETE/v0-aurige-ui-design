@@ -10,12 +10,12 @@ import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { 
   Video, FolderOpen, Play, Trash2, Download, Circle, Square, FileText, 
-  AlertCircle, Loader2, CheckCircle2, ArrowLeft, FlaskConical
+  AlertCircle, Loader2, CheckCircle2, ArrowLeft, FlaskConical, Pencil
 } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { 
   startCapture, stopCapture, getCaptureStatus, type CANInterface, 
-  listMissionLogs, deleteLog, getLogDownloadUrl,
+  listMissionLogs, deleteLog, renameLog, getLogDownloadUrl,
   startReplay, stopReplay, getReplayStatus,
   type LogEntry, type CaptureStatus, type ProcessStatus
 } from "@/lib/api"
@@ -52,6 +52,8 @@ export default function CaptureReplay() {
   const [success, setSuccess] = useState<string | null>(null)
   const [captureDescription, setCaptureDescription] = useState("")
   const [replayingLogId, setReplayingLogId] = useState<string | null>(null)
+  const [renamingLogId, setRenamingLogId] = useState<string | null>(null)
+  const [newLogName, setNewLogName] = useState("")
   
   // Timer for capture duration display
   const [displayDuration, setDisplayDuration] = useState(0)
@@ -171,19 +173,33 @@ export default function CaptureReplay() {
     }
   }
 
-  const handleDeleteLog = async (logId: string) => {
-    if (!missionId) return
+const handleDeleteLog = async (logId: string) => {
     if (!confirm("Supprimer ce log ?")) return
-    
-    setError(null)
-    
     try {
       await deleteLog(missionId, logId)
       await fetchLogs()
-      setSuccess("Log supprimé")
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Erreur lors de la suppression")
+    } catch {
+      setError("Erreur lors de la suppression")
     }
+  }
+
+  const handleRenameLog = async (logId: string) => {
+    if (!newLogName.trim()) return
+    try {
+      await renameLog(missionId, logId, newLogName.trim())
+      setRenamingLogId(null)
+      setNewLogName("")
+      await fetchLogs()
+      setSuccess("Log renomme avec succes")
+    } catch {
+      setError("Erreur lors du renommage")
+    }
+  }
+
+  const startRenaming = (log: LogEntry) => {
+    setRenamingLogId(log.id)
+    setNewLogName(log.filename.replace(".log", ""))
+  }
   }
 
   const formatTime = (seconds: number) => {
@@ -393,9 +409,26 @@ export default function CaptureReplay() {
                     className="flex items-center justify-between rounded-lg border border-border bg-secondary/50 p-3"
                   >
                     <div className="min-w-0 flex-1">
-                      <p className="truncate font-mono text-sm text-foreground">
-                        {log.filename}
-                      </p>
+                      {renamingLogId === log.id ? (
+                        <div className="flex items-center gap-2">
+                          <Input
+                            value={newLogName}
+                            onChange={(e) => setNewLogName(e.target.value)}
+                            className="h-7 text-sm font-mono"
+                            autoFocus
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") handleRenameLog(log.id)
+                              if (e.key === "Escape") setRenamingLogId(null)
+                            }}
+                          />
+                          <Button size="sm" variant="ghost" onClick={() => handleRenameLog(log.id)}>OK</Button>
+                          <Button size="sm" variant="ghost" onClick={() => setRenamingLogId(null)}>Annuler</Button>
+                        </div>
+                      ) : (
+                        <p className="truncate font-mono text-sm text-foreground">
+                          {log.filename}
+                        </p>
+                      )}
                       <p className="text-xs text-muted-foreground">
                         {new Date(log.createdAt).toLocaleString("fr-FR")} • {formatFileSize(log.size)} • {log.framesCount.toLocaleString()} trames
                         {log.durationSeconds && ` • ${formatTime(log.durationSeconds)}`}
@@ -425,6 +458,15 @@ export default function CaptureReplay() {
                           <Play className="h-4 w-4" />
                         </Button>
                       )}
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8"
+                        title="Renommer"
+                        onClick={() => startRenaming(log)}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
                       <Button
                         size="icon"
                         variant="ghost"

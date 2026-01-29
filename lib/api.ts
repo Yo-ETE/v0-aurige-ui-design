@@ -400,6 +400,14 @@ export async function deleteLog(missionId: string, logId: string): Promise<void>
   })
 }
 
+export async function renameLog(missionId: string, logId: string, newName: string): Promise<void> {
+  await fetchApi(`/missions/${missionId}/logs/${logId}/rename`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ newName }),
+  })
+}
+
 export interface SplitLogResult {
   logAId: string
   logAName: string

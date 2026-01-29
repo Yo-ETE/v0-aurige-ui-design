@@ -33,6 +33,9 @@ interface IsolationStore {
   // Update log tags (success/failed/original)
   updateLogTags: (logId: string, tags: string[]) => void
   
+  // Update log name
+  updateLogName: (logId: string, name: string) => void
+  
   // Remove a log
   removeLog: (logId: string) => void
   
@@ -106,6 +109,16 @@ export const useIsolationStore = create<IsolationStore>()(
           logs: updateLogRecursive(state.logs, logId, (log) => ({
             ...log,
             tags,
+          })),
+        }))
+      },
+
+      updateLogName: (logId, name) => {
+        set((state) => ({
+          logs: updateLogRecursive(state.logs, logId, (log) => ({
+            ...log,
+            name,
+            filename: name.endsWith(".log") ? name : `${name}.log`,
           })),
         }))
       },
