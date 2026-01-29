@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { 
   Video, FolderOpen, Play, Trash2, Download, Circle, Square, FileText, 
-  AlertCircle, Loader2, CheckCircle2, ArrowLeft
+  AlertCircle, Loader2, CheckCircle2, ArrowLeft, FlaskConical
 } from "lucide-react"
 import { 
   startCapture, stopCapture, getCaptureStatus, 
@@ -19,11 +19,13 @@ import {
   type LogEntry, type CaptureStatus, type ProcessStatus
 } from "@/lib/api"
 import { useMissionStore } from "@/lib/mission-store"
+import { useIsolationStore } from "@/lib/isolation-store"
 
 export default function CaptureReplay() {
   const router = useRouter()
   const storeMissionId = useMissionStore((state) => state.currentMissionId)
   const missions = useMissionStore((state) => state.missions)
+  const importLogToIsolation = useIsolationStore((state) => state.importLog)
   
   // Use localStorage as primary source (persists across page reloads)
   const [missionId, setMissionId] = useState<string>("")
@@ -395,10 +397,30 @@ export default function CaptureReplay() {
                           <Play className="h-4 w-4" />
                         </Button>
                       )}
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8"
+                        title="Isolation"
+                        onClick={() => {
+                          importLogToIsolation({
+                            id: log.id,
+                            name: log.filename,
+                            filename: log.filename,
+                            missionId: missionId,
+                            tags: ["original"],
+                            frameCount: log.frameCount,
+                          })
+                          router.push("/isolation")
+                        }}
+                      >
+                        <FlaskConical className="h-4 w-4" />
+                      </Button>
                       <Button 
                         size="icon" 
                         variant="ghost" 
                         className="h-8 w-8"
+                        title="Telecharger"
                         asChild
                       >
                         <a 
@@ -412,6 +434,7 @@ export default function CaptureReplay() {
                         size="icon"
                         variant="ghost"
                         className="h-8 w-8 text-destructive hover:text-destructive"
+                        title="Supprimer"
                         onClick={() => handleDeleteLog(log.id)}
                       >
                         <Trash2 className="h-4 w-4" />
