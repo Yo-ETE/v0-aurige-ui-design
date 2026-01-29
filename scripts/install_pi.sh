@@ -79,6 +79,50 @@ install_system_deps() {
     log_success "System dependencies installed"
 }
 
+# Setup virtual CAN interface for testing
+setup_vcan() {
+    log_info "Setting up virtual CAN interface (vcan0)..."
+    
+    # Load vcan kernel module
+    modprobe vcan 2>/dev/null || true
+    
+    # Add vcan to modules to load at boot
+    if ! grep -q "^vcan$" /etc/modules 2>/dev/null; then
+        echo "vcan" >> /etc/modules
+        log_info "Added vcan to /etc/modules for auto-load at boot"
+    fi
+    
+    # Create vcan0 interface if it doesn't exist
+    if ! ip link show vcan0 &>/dev/null; then
+        ip link add dev vcan0 type vcan
+        log_info "Created vcan0 interface"
+    fi
+    
+    # Bring up vcan0
+    ip link set up vcan0
+    
+    # Create systemd service to ensure vcan0 is up after reboot
+    cat > /etc/systemd/system/vcan0.service << 'EOF'
+[Unit]
+Description=Virtual CAN interface vcan0
+After=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'modprobe vcan && (ip link show vcan0 || ip link add dev vcan0 type vcan) && ip link set up vcan0'
+ExecStop=/sbin/ip link set down vcan0
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    systemctl daemon-reload
+    systemctl enable vcan0.service
+    
+    log_success "Virtual CAN interface (vcan0) configured"
+}
+
 # Install Node.js LTS
 install_nodejs() {
     if command -v node &> /dev/null; then
@@ -324,9 +368,14 @@ print_summary() {
     echo -e "  ${YELLOW}sudo systemctl restart aurige-web${NC}  - Restart web"
     echo -e "  ${YELLOW}sudo systemctl restart aurige-api${NC}  - Restart API"
     echo ""
-    echo -e "Data directory: ${BLUE}$AURIGE_DIR/data${NC}"
-    echo ""
-}
+echo -e "Data directory: ${BLUE}$AURIGE_DIR/data${NC}"
+  echo ""
+  echo -e "Virtual CAN (vcan0) for testing:"
+  echo -e "  ${YELLOW}ip link show vcan0${NC}                 - Check vcan0 status"
+  echo -e "  ${YELLOW}cangen vcan0${NC}                       - Generate test traffic"
+  echo -e "  ${YELLOW}candump vcan0${NC}                      - View traffic on vcan0"
+  echo ""
+  }
 
 # Main installation
 main() {
@@ -336,11 +385,12 @@ main() {
     echo -e "${BLUE}============================================${NC}"
     echo ""
     
-    check_root
-    check_arch
-    install_system_deps
-    install_nodejs
-    setup_directories
+check_root
+  check_arch
+  install_system_deps
+  setup_vcan
+  install_nodejs
+  setup_directories
     copy_project_files
     setup_frontend
     setup_backend

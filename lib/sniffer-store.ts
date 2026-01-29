@@ -8,7 +8,7 @@
  */
 
 import { create } from "zustand"
-import { createSnifferWebSocket, type CANMessage } from "./api"
+import { createSnifferWebSocket, getCANStatus, type CANMessage } from "./api"
 
 export interface SnifferLine {
   id: number
@@ -39,7 +39,7 @@ interface SnifferState {
   
   // Actions
   setInterface: (iface: "can0" | "can1" | "vcan0") => void
-  start: () => void
+  start: () => Promise<void>
   stop: () => void
   togglePause: () => void
   toggleMinimize: () => void
@@ -70,7 +70,7 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
     set({ selectedInterface: iface })
   },
   
-  start: () => {
+  start: async () => {
     const { selectedInterface, ws: existingWs, isRunning, isConnecting } = get()
     
     // Prevent multiple starts
@@ -89,6 +89,24 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
     }
     
     set({ isConnecting: true, error: null })
+    
+    // Check if interface is up before trying to connect
+    try {
+      const status = await getCANStatus(selectedInterface)
+      if (!status.isUp) {
+        set({
+          error: `Interface ${selectedInterface} n'est pas initialisee. Allez dans Controle CAN pour l'activer.`,
+          isConnecting: false,
+        })
+        return
+      }
+    } catch {
+      set({
+        error: `Impossible de verifier l'etat de ${selectedInterface}. Verifiez la connexion au Raspberry Pi.`,
+        isConnecting: false,
+      })
+      return
+    }
     
     try {
       const ws = createSnifferWebSocket(
