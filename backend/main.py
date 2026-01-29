@@ -225,11 +225,12 @@ class SystemStatus(BaseModel):
     wifi_ip: Optional[str] = Field(default=None, alias="wifiIp")
     ethernet_connected: bool = Field(alias="ethernetConnected")
     ethernet_ip: Optional[str] = Field(default=None, alias="ethernetIp")
-    can0_up: bool = Field(alias="can0Up")
-    can0_bitrate: Optional[int] = Field(default=None, alias="can0Bitrate")
-    can1_up: bool = Field(alias="can1Up")
-    can1_bitrate: Optional[int] = Field(default=None, alias="can1Bitrate")
-    api_running: bool = Field(alias="apiRunning")
+can0_up: bool = Field(alias="can0Up")
+  can0_bitrate: Optional[int] = Field(default=None, alias="can0Bitrate")
+  can1_up: bool = Field(alias="can1Up")
+  can1_bitrate: Optional[int] = Field(default=None, alias="can1Bitrate")
+  vcan0_up: bool = Field(alias="vcan0Up")
+  api_running: bool = Field(alias="apiRunning")
     web_running: bool = Field(alias="webRunning")
 
     class Config:
@@ -573,6 +574,7 @@ async def get_system_status():
     # CAN interfaces
     can0_status = get_can_interface_status("can0")
     can1_status = get_can_interface_status("can1")
+    vcan0_status = get_can_interface_status("vcan0")
     
     # Services
     api_running = True  # We're running
@@ -599,6 +601,7 @@ async def get_system_status():
         can0Bitrate=can0_status.bitrate,
         can1Up=can1_status.up,
         can1Bitrate=can1_status.bitrate,
+        vcan0Up=vcan0_status.up,
         apiRunning=api_running,
         webRunning=web_running,
     )

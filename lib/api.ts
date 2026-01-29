@@ -13,7 +13,7 @@ import { getApiBaseUrl, getWsBaseUrl } from "./api-config"
 // =============================================================================
 
 // CAN interface type - includes vcan0 for testing without hardware
-export type CANInterface = CANInterface | "vcan0"
+export type CANInterface = "can0" | "can1" | "vcan0"
 
 export interface Vehicle {
   brand: string
@@ -83,6 +83,7 @@ export interface SystemStatus {
   can0Bitrate?: number
   can1Up: boolean
   can1Bitrate?: number
+  vcan0Up: boolean
   apiRunning: boolean
   webRunning: boolean
 }
@@ -94,6 +95,8 @@ export interface CANInterfaceStatus {
   txPackets: number
   rxPackets: number
   errors: number
+  // Alias for compatibility
+  isUp?: boolean
 }
 
 export interface CANFrame {

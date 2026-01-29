@@ -93,7 +93,7 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
     // Check if interface is up before trying to connect
     try {
       const status = await getCANStatus(selectedInterface)
-      if (!status.isUp) {
+      if (!status.up) {
         set({
           error: `Interface ${selectedInterface} n'est pas initialisee. Allez dans Controle CAN pour l'activer.`,
           isConnecting: false,
@@ -168,7 +168,7 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
         })
       }
       
-    } catch {
+    } catch (err) {
       set({
         error: err instanceof Error ? err.message : "Impossible de demarrer le sniffer",
         isConnecting: false,

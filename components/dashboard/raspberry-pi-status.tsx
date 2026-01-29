@@ -123,7 +123,14 @@ function mapStatusToTiles(status: SystemStatus): StatusTile[] {
       subvalue: status.can1Up ? "Interface active" : "Non configuré",
       status: status.can1Up ? "ok" : "warning",
     },
-    
+    {
+      id: "vcan0",
+      icon: Radio,
+      title: "vcan0",
+      value: status.vcan0Up ? "UP" : "DOWN",
+      subvalue: status.vcan0Up ? "Interface test active" : "Non configuré",
+      status: status.vcan0Up ? "ok" : "warning",
+    },
     {
       id: "api",
       icon: Server,
@@ -155,6 +162,7 @@ function getLoadingTiles(): StatusTile[] {
     { id: "uptime", icon: Clock, title: "Uptime", value: "...", subvalue: "Connexion...", status: "warning" },
     { id: "can0", icon: Radio, title: "can0", value: "...", subvalue: "Connexion...", status: "warning" },
     { id: "can1", icon: Radio, title: "can1", value: "...", subvalue: "Connexion...", status: "warning" },
+    { id: "vcan0", icon: Radio, title: "vcan0", value: "...", subvalue: "Connexion...", status: "warning" },
     { id: "api", icon: Server, title: "API Backend", value: "...", subvalue: "Connexion en cours...", status: "warning" },
     { id: "web", icon: Server, title: "Web Frontend", value: "OK", subvalue: "Port 3000", status: "ok" },
   ]
@@ -172,6 +180,7 @@ function getOfflineTiles(): StatusTile[] {
     { id: "uptime", icon: Clock, title: "Uptime", value: "?", subvalue: "API hors ligne", status: "error" },
     { id: "can0", icon: Radio, title: "can0", value: "?", subvalue: "API hors ligne", status: "error" },
     { id: "can1", icon: Radio, title: "can1", value: "?", subvalue: "API hors ligne", status: "error" },
+    { id: "vcan0", icon: Radio, title: "vcan0", value: "?", subvalue: "API hors ligne", status: "error" },
     { id: "api", icon: Server, title: "API Backend", value: "Hors ligne", subvalue: "Connexion impossible", status: "error" },
     { id: "web", icon: Server, title: "Web Frontend", value: "OK", subvalue: "Port 3000", status: "ok" },
   ]
