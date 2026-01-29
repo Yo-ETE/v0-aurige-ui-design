@@ -143,20 +143,37 @@ function mapStatusToTiles(status: SystemStatus): StatusTile[] {
   ]
 }
 
-// Placeholder tiles when API is unavailable - shows error state
+// Initial loading tiles - shown before first API call
+function getLoadingTiles(): StatusTile[] {
+  return [
+    { id: "wifi", icon: Wifi, title: "Wi-Fi", value: "...", subvalue: "Connexion...", status: "warning" },
+    { id: "ethernet", icon: Network, title: "Ethernet", value: "...", subvalue: "Connexion...", status: "warning" },
+    { id: "cpu", icon: Cpu, title: "CPU", value: "...", subvalue: "Connexion...", status: "warning" },
+    { id: "temp", icon: Thermometer, title: "Temp.", value: "...", subvalue: "Connexion...", status: "warning" },
+    { id: "memory", icon: MemoryStick, title: "Mémoire", value: "...", subvalue: "Connexion...", status: "warning" },
+    { id: "storage", icon: HardDrive, title: "Stockage", value: "...", subvalue: "Connexion...", status: "warning" },
+    { id: "uptime", icon: Clock, title: "Uptime", value: "...", subvalue: "Connexion...", status: "warning" },
+    { id: "can0", icon: Radio, title: "can0", value: "...", subvalue: "Connexion...", status: "warning" },
+    { id: "can1", icon: Radio, title: "can1", value: "...", subvalue: "Connexion...", status: "warning" },
+    { id: "api", icon: Server, title: "API Backend", value: "...", subvalue: "Connexion en cours...", status: "warning" },
+    { id: "web", icon: Server, title: "Web Frontend", value: "OK", subvalue: "Port 3000", status: "ok" },
+  ]
+}
+
+// Offline tiles - shown when API is unreachable after retry
 function getOfflineTiles(): StatusTile[] {
   return [
-    { id: "wifi", icon: Wifi, title: "Wi-Fi", value: "?", subvalue: "Non disponible", status: "error" },
-    { id: "ethernet", icon: Network, title: "Ethernet", value: "?", subvalue: "Non disponible", status: "error" },
-    { id: "cpu", icon: Cpu, title: "CPU", value: "?", subvalue: "Non disponible", status: "error" },
-    { id: "temp", icon: Thermometer, title: "Température", value: "?", subvalue: "Non disponible", status: "error" },
-    { id: "memory", icon: MemoryStick, title: "Mémoire", value: "?", subvalue: "Non disponible", status: "error" },
-    { id: "storage", icon: HardDrive, title: "Stockage", value: "?", subvalue: "Non disponible", status: "error" },
-    { id: "uptime", icon: Clock, title: "Uptime", value: "?", subvalue: "Non disponible", status: "error" },
-    { id: "can0", icon: Radio, title: "can0", value: "?", subvalue: "Non disponible", status: "error" },
-    { id: "can1", icon: Radio, title: "can1", value: "?", subvalue: "Non disponible", status: "error" },
+    { id: "wifi", icon: Wifi, title: "Wi-Fi", value: "?", subvalue: "API hors ligne", status: "error" },
+    { id: "ethernet", icon: Network, title: "Ethernet", value: "?", subvalue: "API hors ligne", status: "error" },
+    { id: "cpu", icon: Cpu, title: "CPU", value: "?", subvalue: "API hors ligne", status: "error" },
+    { id: "temp", icon: Thermometer, title: "Temp.", value: "?", subvalue: "API hors ligne", status: "error" },
+    { id: "memory", icon: MemoryStick, title: "Mémoire", value: "?", subvalue: "API hors ligne", status: "error" },
+    { id: "storage", icon: HardDrive, title: "Stockage", value: "?", subvalue: "API hors ligne", status: "error" },
+    { id: "uptime", icon: Clock, title: "Uptime", value: "?", subvalue: "API hors ligne", status: "error" },
+    { id: "can0", icon: Radio, title: "can0", value: "?", subvalue: "API hors ligne", status: "error" },
+    { id: "can1", icon: Radio, title: "can1", value: "?", subvalue: "API hors ligne", status: "error" },
     { id: "api", icon: Server, title: "API Backend", value: "Hors ligne", subvalue: "Connexion impossible", status: "error" },
-    { id: "web", icon: Server, title: "Web Frontend", value: "Online", subvalue: "Port 3000", status: "ok" },
+    { id: "web", icon: Server, title: "Web Frontend", value: "OK", subvalue: "Port 3000", status: "ok" },
   ]
 }
 
@@ -209,7 +226,7 @@ function StatusTileComponent({ tile }: { tile: StatusTile }) {
 
 export function RaspberryPiStatus() {
   const [isRefreshing, setIsRefreshing] = useState(false)
-  const [tiles, setTiles] = useState<StatusTile[]>(getOfflineTiles())
+  const [tiles, setTiles] = useState<StatusTile[]>(getLoadingTiles())
   const [lastUpdate, setLastUpdate] = useState(new Date())
   const [isApiAvailable, setIsApiAvailable] = useState(false)
 

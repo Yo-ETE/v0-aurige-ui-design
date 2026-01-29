@@ -72,7 +72,9 @@ install_system_deps() {
         python3-venv \
         python3-pip \
         can-utils \
-        build-essential
+        build-essential \
+        avahi-daemon \
+        avahi-utils
 
     log_success "System dependencies installed"
 }
@@ -182,9 +184,11 @@ setup_frontend() {
     
     cd "$AURIGE_DIR/frontend"
     
-    # Create .env file
+    # Create .env file (empty API_URL = same origin via nginx proxy)
     cat > .env.local << EOF
-NEXT_PUBLIC_API_URL=/api
+# AURIGE Configuration
+# Leave empty for same-origin (nginx proxies /api/* and /ws/* to backend)
+NEXT_PUBLIC_API_URL=
 EOF
     
     log_info "Installing npm dependencies (this may take a few minutes)..."
@@ -210,6 +214,44 @@ setup_backend() {
     ./venv/bin/pip install -r requirements.txt
     
     log_success "Backend setup complete"
+}
+
+# Configure mDNS (Avahi) for aurige.local
+setup_mdns() {
+    log_info "Configuring mDNS (Avahi)..."
+    
+    # Set hostname to aurige
+    hostnamectl set-hostname aurige
+    
+    # Update /etc/hosts
+    if ! grep -q "aurige" /etc/hosts; then
+        sed -i "s/127.0.1.1.*/127.0.1.1\taurige/" /etc/hosts
+        echo "127.0.1.1	aurige" >> /etc/hosts
+    fi
+    
+    # Configure avahi
+    cat > /etc/avahi/services/aurige.service << EOF
+<?xml version="1.0" standalone='no'?>
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<service-group>
+  <name>AURIGE CAN Analyzer</name>
+  <service>
+    <type>_http._tcp</type>
+    <port>80</port>
+    <txt-record>path=/</txt-record>
+  </service>
+  <service>
+    <type>_aurige._tcp</type>
+    <port>80</port>
+  </service>
+</service-group>
+EOF
+    
+    # Enable and restart avahi
+    systemctl enable avahi-daemon
+    systemctl restart avahi-daemon
+    
+    log_success "mDNS configured - accessible at http://aurige.local"
 }
 
 # Configure nginx
@@ -269,8 +311,10 @@ print_summary() {
     echo -e "${GREEN}============================================${NC}"
     echo ""
     echo -e "Access AURIGE at:"
-    echo -e "  ${BLUE}http://${IP}/${NC}          (Web UI)"
-    echo -e "  ${BLUE}http://${IP}/api${NC}      (API)"
+    echo -e "  ${BLUE}http://aurige.local/${NC}  (mDNS - recommended)"
+    echo -e "  ${BLUE}http://${IP}/${NC}        (IP address)"
+    echo ""
+    echo -e "No configuration required - just open the URL above!"
     echo ""
     echo -e "Useful commands:"
     echo -e "  ${YELLOW}sudo systemctl status aurige-web${NC}   - Check web service"
@@ -300,6 +344,7 @@ main() {
     copy_project_files
     setup_frontend
     setup_backend
+    setup_mdns
     setup_nginx
     set_permissions
     setup_services

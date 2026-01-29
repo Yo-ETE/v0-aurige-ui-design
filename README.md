@@ -2,6 +2,13 @@
 
 Professional CAN bus analysis tool for automotive forensics and diagnostics, designed for Raspberry Pi 5.
 
+## Quick Start
+
+After installation, AURIGE is immediately accessible at:
+- **http://aurige.local** (mDNS - works automatically on most networks)
+
+No configuration required - just open the URL and start analyzing CAN traffic.
+
 ## Hardware Requirements
 
 - **Raspberry Pi 5** (ARM64)
@@ -28,7 +35,7 @@ curl -fsSL https://raw.githubusercontent.com/YOUR_REPO/aurige/main/scripts/insta
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y curl git nginx python3 python3-venv python3-pip can-utils build-essential
+sudo apt-get install -y curl git nginx python3 python3-venv python3-pip can-utils build-essential avahi-daemon avahi-utils
 ```
 
 2. **Install Node.js LTS:**

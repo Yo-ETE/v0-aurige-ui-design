@@ -395,6 +395,49 @@ export async function deleteLog(missionId: string, logId: string): Promise<void>
 }
 
 // =============================================================================
+// OBD-II Diagnostics
+// =============================================================================
+
+export interface OBDResponse {
+  status: "sent" | "success" | "error"
+  message: string
+  data?: string
+  warning?: string
+}
+
+export async function requestVIN(iface: "can0" | "can1" = "can0"): Promise<OBDResponse> {
+  return fetchApi<OBDResponse>("/obd/vin", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ interface: iface }),
+  })
+}
+
+export async function readDTCs(iface: "can0" | "can1" = "can0"): Promise<OBDResponse> {
+  return fetchApi<OBDResponse>("/obd/dtc/read", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ interface: iface }),
+  })
+}
+
+export async function clearDTCs(iface: "can0" | "can1" = "can0"): Promise<OBDResponse> {
+  return fetchApi<OBDResponse>("/obd/dtc/clear", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ interface: iface }),
+  })
+}
+
+export async function resetECU(iface: "can0" | "can1" = "can0"): Promise<OBDResponse> {
+  return fetchApi<OBDResponse>("/obd/reset", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ interface: iface }),
+  })
+}
+
+// =============================================================================
 // WebSocket Helper
 // =============================================================================
 

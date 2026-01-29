@@ -7,69 +7,102 @@ import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Activity, Car, AlertTriangle, Trash2, RotateCcw, Info } from "lucide-react"
+import { Activity, Car, AlertTriangle, Trash2, RotateCcw, Info, Loader2 } from "lucide-react"
+import { requestVIN, readDTCs, clearDTCs, resetECU, type OBDResponse } from "@/lib/api"
 
 export default function OBDII() {
-  const [canInterface, setCanInterface] = useState("can0")
+  const [canInterface, setCanInterface] = useState<"can0" | "can1">("can0")
   const [isLoading, setIsLoading] = useState<string | null>(null)
   const [vin, setVin] = useState<string | null>(null)
   const [dtcCodes, setDtcCodes] = useState<string[] | null>(null)
+  const [lastResponse, setLastResponse] = useState<OBDResponse | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   const handleRetrieveVIN = async () => {
     setIsLoading("vin")
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-    setVin("WBAPH5C55BA123456")
-    setIsLoading(null)
+    setError(null)
+    try {
+      const response = await requestVIN(canInterface)
+      setLastResponse(response)
+      if (response.data) {
+        setVin(response.data)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur lors de la requete VIN")
+    } finally {
+      setIsLoading(null)
+    }
   }
 
   const handleReadDTC = async () => {
     setIsLoading("dtc")
-    await new Promise((resolve) => setTimeout(resolve, 1500))
-    setDtcCodes(["P0300", "P0171", "P0420"])
-    setIsLoading(null)
+    setError(null)
+    try {
+      const response = await readDTCs(canInterface)
+      setLastResponse(response)
+      // In real implementation, parse DTC codes from response
+      if (response.status === "sent") {
+        // Request sent, check candump for response
+        setDtcCodes(null)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur lors de la lecture DTC")
+    } finally {
+      setIsLoading(null)
+    }
   }
 
   const handleClearDTC = async () => {
     setIsLoading("clear")
-    await new Promise((resolve) => setTimeout(resolve, 800))
-    setDtcCodes([])
-    setIsLoading(null)
+    setError(null)
+    try {
+      const response = await clearDTCs(canInterface)
+      setLastResponse(response)
+      if (response.status === "sent") {
+        setDtcCodes([])
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur lors de l'effacement DTC")
+    } finally {
+      setIsLoading(null)
+    }
   }
 
   const handleResetECU = async () => {
     setIsLoading("reset")
-    await new Promise((resolve) => setTimeout(resolve, 2000))
-    setVin(null)
-    setDtcCodes(null)
-    setIsLoading(null)
+    setError(null)
+    try {
+      const response = await resetECU(canInterface)
+      setLastResponse(response)
+      setVin(null)
+      setDtcCodes(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur lors du reset ECU")
+    } finally {
+      setIsLoading(null)
+    }
   }
 
   return (
     <AppShell
       title="OBD-II"
-      description="Diagnostic OBD-II du véhicule"
+      description="Diagnostic OBD-II du vehicule"
     >
       <div className="grid gap-6 lg:grid-cols-2">
-        {/* Main Diagnostic Card */}
-        <Card className="border-border bg-card">
+        {/* Configuration */}
+        <Card className="bg-card border-border">
           <CardHeader>
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                <Activity className="h-5 w-5 text-primary" />
-              </div>
-              <div>
-                <CardTitle className="text-lg">Diagnostic OBD-II</CardTitle>
-                <CardDescription>
-                  Interroger le système de diagnostic embarqué
-                </CardDescription>
-              </div>
-            </div>
+            <CardTitle className="flex items-center gap-2 text-foreground">
+              <Activity className="h-5 w-5 text-primary" />
+              Configuration
+            </CardTitle>
+            <CardDescription>Parametres de diagnostic OBD-II</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-6">
+          <CardContent className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="obd-interface">Interface CAN</Label>
-              <Select value={canInterface} onValueChange={setCanInterface}>
-                <SelectTrigger id="obd-interface">
+              <Label>Interface CAN</Label>
+              <Select value={canInterface} onValueChange={(v) => setCanInterface(v as "can0" | "can1")}>
+                <SelectTrigger className="bg-input border-border">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -79,130 +112,183 @@ export default function OBDII() {
               </Select>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Button
-                onClick={handleRetrieveVIN}
-                disabled={isLoading !== null}
-                variant="outline"
-                className="justify-start gap-3 bg-transparent"
-              >
-                <Car className="h-4 w-4" />
-                {isLoading === "vin" ? "Lecture..." : "Récupérer VIN"}
-              </Button>
+            <Alert className="border-muted bg-muted/30">
+              <Info className="h-4 w-4" />
+              <AlertTitle>Information</AlertTitle>
+              <AlertDescription>
+                Les requetes OBD-II utilisent le protocole standard ISO 15765-4 (CAN).
+                Assurez-vous que l'interface CAN est initialisee avec le bon bitrate.
+              </AlertDescription>
+            </Alert>
+
+            {error && (
+              <Alert className="border-destructive/50 bg-destructive/10">
+                <AlertTriangle className="h-4 w-4 text-destructive" />
+                <AlertTitle className="text-destructive">Erreur</AlertTitle>
+                <AlertDescription className="text-destructive/80">{error}</AlertDescription>
+              </Alert>
+            )}
+
+            {lastResponse && (
+              <Alert className="border-primary/50 bg-primary/10">
+                <Info className="h-4 w-4 text-primary" />
+                <AlertTitle className="text-primary">Reponse</AlertTitle>
+                <AlertDescription className="text-primary/80 font-mono text-xs">
+                  {lastResponse.message}
+                  {lastResponse.warning && (
+                    <span className="block mt-1 text-warning">{lastResponse.warning}</span>
+                  )}
+                </AlertDescription>
+              </Alert>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* VIN */}
+        <Card className="bg-card border-border">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-foreground">
+              <Car className="h-5 w-5 text-primary" />
+              Identification vehicule
+            </CardTitle>
+            <CardDescription>Recuperation du VIN via OBD-II</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <Button
+              onClick={handleRetrieveVIN}
+              disabled={isLoading !== null}
+              className="w-full"
+            >
+              {isLoading === "vin" ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Requete en cours...
+                </>
+              ) : (
+                "Recuperer le VIN"
+              )}
+            </Button>
+
+            {vin && (
+              <div className="rounded-lg border border-success/30 bg-success/10 p-4">
+                <Label className="text-xs text-muted-foreground">VIN detecte</Label>
+                <p className="font-mono text-lg font-bold text-success">{vin}</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* DTC */}
+        <Card className="bg-card border-border">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-foreground">
+              <AlertTriangle className="h-5 w-5 text-warning" />
+              Codes defaut (DTC)
+            </CardTitle>
+            <CardDescription>Lecture et effacement des codes defaut</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex gap-2">
               <Button
                 onClick={handleReadDTC}
                 disabled={isLoading !== null}
-                variant="outline"
-                className="justify-start gap-3 bg-transparent"
+                variant="secondary"
+                className="flex-1"
               >
-                <AlertTriangle className="h-4 w-4" />
-                {isLoading === "dtc" ? "Lecture..." : "Lire DTC"}
+                {isLoading === "dtc" ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Lecture...
+                  </>
+                ) : (
+                  "Lire les DTC"
+                )}
               </Button>
               <Button
                 onClick={handleClearDTC}
-                disabled={isLoading !== null}
-                variant="outline"
-                className="justify-start gap-3 bg-transparent"
-              >
-                <Trash2 className="h-4 w-4" />
-                {isLoading === "clear" ? "Effacement..." : "Effacer DTC"}
-              </Button>
-              <Button
-                onClick={handleResetECU}
-                disabled={isLoading !== null}
+                disabled={isLoading !== null || !dtcCodes || dtcCodes.length === 0}
                 variant="destructive"
-                className="justify-start gap-3"
               >
-                <RotateCcw className="h-4 w-4" />
-                {isLoading === "reset" ? "Reset..." : "Reset ECU"}
+                {isLoading === "clear" ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Trash2 className="h-4 w-4" />
+                )}
               </Button>
             </div>
 
-            <Alert className="border-muted bg-muted/50">
-              <Info className="h-4 w-4" />
-              <AlertTitle>Notes</AlertTitle>
-              <AlertDescription className="text-muted-foreground">
-                <ul className="mt-2 list-disc space-y-1 pl-4 text-xs">
-                  <li>L&apos;interface CAN doit être initialisée avant utilisation</li>
-                  <li>Compatible avec les véhicules OBD-II (post-2000 en Europe)</li>
-                  <li>Le reset ECU peut affecter le fonctionnement du véhicule</li>
-                </ul>
+            {dtcCodes !== null && (
+              <div className="rounded-lg border border-border bg-muted/30 p-4">
+                {dtcCodes.length === 0 ? (
+                  <p className="text-sm text-success">Aucun code defaut detecte</p>
+                ) : (
+                  <div className="space-y-2">
+                    <Label className="text-xs text-muted-foreground">
+                      {dtcCodes.length} code(s) detecte(s)
+                    </Label>
+                    <div className="flex flex-wrap gap-2">
+                      {dtcCodes.map((code) => (
+                        <span
+                          key={code}
+                          className="rounded bg-destructive/20 px-2 py-1 font-mono text-sm text-destructive"
+                        >
+                          {code}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <Alert className="border-warning/50 bg-warning/10">
+              <AlertTriangle className="h-4 w-4 text-warning" />
+              <AlertDescription className="text-warning text-xs">
+                L'effacement des DTC supprime egalement les donnees de freeze frame.
+                A utiliser avec precaution.
               </AlertDescription>
             </Alert>
           </CardContent>
         </Card>
 
-        {/* Results Card */}
-        <Card className="border-border bg-card">
+        {/* Reset ECU */}
+        <Card className="bg-card border-border">
           <CardHeader>
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                <Car className="h-5 w-5 text-primary" />
-              </div>
-              <div>
-                <CardTitle className="text-lg">Résultats</CardTitle>
-                <CardDescription>
-                  Informations du véhicule
-                </CardDescription>
-              </div>
-            </div>
+            <CardTitle className="flex items-center gap-2 text-foreground">
+              <RotateCcw className="h-5 w-5 text-destructive" />
+              Reset ECU
+            </CardTitle>
+            <CardDescription>Reinitialisation du calculateur</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-6">
-            {/* VIN Section */}
-            <div className="space-y-2">
-              <Label className="text-muted-foreground">VIN (Vehicle Identification Number)</Label>
-              {vin ? (
-                <div className="rounded-md bg-secondary p-3">
-                  <p className="font-mono text-lg text-foreground">{vin}</p>
-                </div>
-              ) : (
-                <div className="rounded-md border border-dashed border-border p-3 text-center">
-                  <p className="text-sm text-muted-foreground">
-                    Cliquez sur &quot;Récupérer VIN&quot; pour lire le numéro
-                  </p>
-                </div>
-              )}
-            </div>
+          <CardContent className="space-y-4">
+            <Alert className="border-destructive/50 bg-destructive/10">
+              <AlertTriangle className="h-4 w-4 text-destructive" />
+              <AlertTitle className="text-destructive">Attention</AlertTitle>
+              <AlertDescription className="text-destructive/80 text-sm">
+                Le reset ECU peut provoquer un arret temporaire du vehicule.
+                Ne pas utiliser pendant la conduite. Le vehicule doit etre a l'arret,
+                contact mis.
+              </AlertDescription>
+            </Alert>
 
-            {/* DTC Section */}
-            <div className="space-y-2">
-              <Label className="text-muted-foreground">Codes défaut (DTC)</Label>
-              {dtcCodes ? (
-                dtcCodes.length > 0 ? (
-                  <div className="space-y-2">
-                    {dtcCodes.map((code) => (
-                      <div
-                        key={code}
-                        className="flex items-center justify-between rounded-md bg-destructive/10 p-3"
-                      >
-                        <div className="flex items-center gap-3">
-                          <AlertTriangle className="h-4 w-4 text-destructive" />
-                          <span className="font-mono font-semibold text-destructive">
-                            {code}
-                          </span>
-                        </div>
-                        <span className="text-xs text-muted-foreground">
-                          {code === "P0300" && "Random/Multiple Cylinder Misfire"}
-                          {code === "P0171" && "System Too Lean (Bank 1)"}
-                          {code === "P0420" && "Catalyst System Efficiency Below Threshold"}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-3 rounded-md bg-success/10 p-3">
-                    <div className="h-2 w-2 rounded-full bg-success" />
-                    <span className="text-sm text-success">Aucun code défaut</span>
-                  </div>
-                )
+            <Button
+              onClick={handleResetECU}
+              disabled={isLoading !== null}
+              variant="destructive"
+              className="w-full"
+            >
+              {isLoading === "reset" ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Reset en cours...
+                </>
               ) : (
-                <div className="rounded-md border border-dashed border-border p-3 text-center">
-                  <p className="text-sm text-muted-foreground">
-                    Cliquez sur &quot;Lire DTC&quot; pour scanner les codes défaut
-                  </p>
-                </div>
+                <>
+                  <RotateCcw className="h-4 w-4 mr-2" />
+                  Reset ECU
+                </>
               )}
-            </div>
+            </Button>
           </CardContent>
         </Card>
       </div>

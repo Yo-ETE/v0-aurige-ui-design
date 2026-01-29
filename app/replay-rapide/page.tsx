@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { AppShell } from "@/components/app-shell"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -8,19 +8,21 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Zap, Keyboard, Send, AlertTriangle, RotateCcw, Trash2 } from "lucide-react"
+import { Zap, Keyboard, Send, AlertTriangle, RotateCcw, Trash2, Loader2 } from "lucide-react"
+import { sendCANFrame, clearDTCs, resetECU } from "@/lib/api"
 
 interface QuickSlot {
   key: string
   label: string
-  frame: string
+  id: string
+  data: string
 }
 
 export default function ReplayRapide() {
   const [slots, setSlots] = useState<QuickSlot[]>([
-    { key: "A", label: "A", frame: "7DF#02010C" },
-    { key: "Z", label: "Z", frame: "7DF#02010D" },
-    { key: "E", label: "E", frame: "7E0#0301000000000000" },
+    { key: "a", label: "A", id: "7DF", data: "02010C00000000" },
+    { key: "z", label: "Z", id: "7DF", data: "02010D00000000" },
+    { key: "e", label: "E", id: "7E0", data: "0301000000000000" },
   ])
   const [keyboardEnabled, setKeyboardEnabled] = useState(false)
   const [burstId, setBurstId] = useState("7DF")
@@ -28,32 +30,87 @@ export default function ReplayRapide() {
   const [burstCount, setBurstCount] = useState("100")
   const [burstInterval, setBurstInterval] = useState("10")
   const [isBurstRunning, setIsBurstRunning] = useState(false)
+  const [isLoading, setIsLoading] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
-  const handleSlotChange = (index: number, frame: string) => {
+  const handleSlotChange = (index: number, field: "id" | "data", value: string) => {
     const newSlots = [...slots]
-    newSlots[index].frame = frame
+    newSlots[index][field] = value
     setSlots(newSlots)
   }
 
-  const handleSendSlot = async (index: number) => {
-    // Mock send
-    console.log(`Sending slot ${slots[index].key}: ${slots[index].frame}`)
-  }
+  const handleSendSlot = useCallback(async (index: number) => {
+    const slot = slots[index]
+    setError(null)
+    setIsLoading(`slot-${index}`)
+    try {
+      await sendCANFrame("can0", slot.id, slot.data)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur d'envoi")
+    } finally {
+      setIsLoading(null)
+    }
+  }, [slots])
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    if (!keyboardEnabled) return
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const key = e.key.toLowerCase()
+      const index = slots.findIndex((s) => s.key === key)
+      if (index !== -1) {
+        e.preventDefault()
+        handleSendSlot(index)
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [keyboardEnabled, slots, handleSendSlot])
 
   const handleBurstSend = async () => {
     setIsBurstRunning(true)
-    await new Promise((resolve) => setTimeout(resolve, 2000))
-    setIsBurstRunning(false)
+    setError(null)
+    try {
+      const count = parseInt(burstCount, 10)
+      const interval = parseInt(burstInterval, 10)
+      
+      for (let i = 0; i < count; i++) {
+        await sendCANFrame("can0", burstId, burstData)
+        if (interval > 0 && i < count - 1) {
+          await new Promise((resolve) => setTimeout(resolve, interval))
+        }
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur lors du burst")
+    } finally {
+      setIsBurstRunning(false)
+    }
   }
 
   const handleClearDTC = async () => {
-    // Mock clear
-    console.log("Clearing DTC codes")
+    setIsLoading("dtc")
+    setError(null)
+    try {
+      await clearDTCs("can0")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur effacement DTC")
+    } finally {
+      setIsLoading(null)
+    }
   }
 
   const handleResetECU = async () => {
-    // Mock reset
-    console.log("Resetting ECU")
+    setIsLoading("reset")
+    setError(null)
+    try {
+      await resetECU("can0")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur reset ECU")
+    } finally {
+      setIsLoading(null)
+    }
   }
 
   return (
@@ -62,6 +119,13 @@ export default function ReplayRapide() {
       description="Envoi rapide de trames CAN avec raccourcis clavier"
     >
       <div className="grid gap-6 lg:grid-cols-2">
+        {error && (
+          <Alert className="lg:col-span-2 border-destructive/50 bg-destructive/10">
+            <AlertTriangle className="h-4 w-4 text-destructive" />
+            <AlertDescription className="text-destructive">{error}</AlertDescription>
+          </Alert>
+        )}
+
         {/* Quick Replay Slots Card */}
         <Card className="border-border bg-card">
           <CardHeader>
@@ -73,7 +137,7 @@ export default function ReplayRapide() {
                 <div>
                   <CardTitle className="text-lg">Quick Replay Slots</CardTitle>
                   <CardDescription>
-                    Slots de trames à envoi rapide
+                    Slots de trames a envoi rapide
                   </CardDescription>
                 </div>
               </div>
@@ -88,28 +152,39 @@ export default function ReplayRapide() {
           </CardHeader>
           <CardContent className="space-y-4">
             {slots.map((slot, index) => (
-              <div key={slot.key} className="flex items-center gap-3">
+              <div key={slot.key} className="flex items-center gap-2">
                 <div className="flex h-10 w-10 items-center justify-center rounded-md border border-border bg-secondary font-mono font-semibold text-foreground">
                   {slot.label}
                 </div>
                 <Input
-                  value={slot.frame}
-                  onChange={(e) => handleSlotChange(index, e.target.value)}
+                  value={slot.id}
+                  onChange={(e) => handleSlotChange(index, "id", e.target.value)}
+                  className="w-20 font-mono"
+                  placeholder="ID"
+                />
+                <Input
+                  value={slot.data}
+                  onChange={(e) => handleSlotChange(index, "data", e.target.value)}
                   className="flex-1 font-mono"
-                  placeholder="ID#DATA"
+                  placeholder="DATA"
                 />
                 <Button
                   onClick={() => handleSendSlot(index)}
+                  disabled={isLoading !== null}
                   size="icon"
                   className="h-10 w-10"
                 >
-                  <Send className="h-4 w-4" />
+                  {isLoading === `slot-${index}` ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
                 </Button>
               </div>
             ))}
             {keyboardEnabled && (
               <p className="text-xs text-success">
-                Raccourcis clavier activés - Appuyez sur A, Z ou E pour envoyer
+                Raccourcis clavier actives - Appuyez sur A, Z ou E pour envoyer
               </p>
             )}
           </CardContent>
@@ -133,26 +208,36 @@ export default function ReplayRapide() {
           <CardContent className="space-y-4">
             <Button
               onClick={handleClearDTC}
+              disabled={isLoading !== null}
               variant="outline"
               className="w-full justify-start gap-3 bg-transparent"
             >
-              <Trash2 className="h-4 w-4" />
+              {isLoading === "dtc" ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Trash2 className="h-4 w-4" />
+              )}
               Effacer les codes erreur (DTC)
             </Button>
             <Button
               onClick={handleResetECU}
+              disabled={isLoading !== null}
               variant="destructive"
               className="w-full justify-start gap-3"
             >
-              <RotateCcw className="h-4 w-4" />
+              {isLoading === "reset" ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RotateCcw className="h-4 w-4" />
+              )}
               Reset ECU
             </Button>
             <Alert className="border-warning/50 bg-warning/10">
               <AlertTriangle className="h-4 w-4 text-warning" />
               <AlertTitle className="text-warning">Attention</AlertTitle>
               <AlertDescription className="text-warning/80">
-                Le reset ECU peut affecter le fonctionnement du véhicule. 
-                Utilisez uniquement sur un véhicule de test.
+                Le reset ECU peut affecter le fonctionnement du vehicule. 
+                Utilisez uniquement sur un vehicule de test.
               </AlertDescription>
             </Alert>
           </CardContent>
@@ -223,10 +308,14 @@ export default function ReplayRapide() {
               </p>
               <Button
                 onClick={handleBurstSend}
-                disabled={isBurstRunning}
+                disabled={isBurstRunning || isLoading !== null}
                 className="gap-2"
               >
-                <Send className="h-4 w-4" />
+                {isBurstRunning ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
                 {isBurstRunning ? "Envoi en cours..." : `Envoyer ${burstCount} trames`}
               </Button>
             </div>
