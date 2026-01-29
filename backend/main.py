@@ -1074,6 +1074,7 @@ async def duplicate_mission(mission_id: str):
         "updatedAt": now,
         "logsCount": 0,
         "framesCount": 0,
+        "lastCaptureDate": None,  # Reset for duplicated mission
     }
     
     save_mission(new_id, new_mission)

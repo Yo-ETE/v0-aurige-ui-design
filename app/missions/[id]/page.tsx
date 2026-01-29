@@ -106,7 +106,10 @@ const moduleLinks: ModuleLink[] = [
   },
 ]
 
-function formatDate(date: Date): string {
+function formatDate(dateInput: string | Date | null | undefined): string {
+  if (!dateInput) return "N/A"
+  const date = typeof dateInput === "string" ? new Date(dateInput) : dateInput
+  if (isNaN(date.getTime())) return "N/A"
   return new Intl.DateTimeFormat("fr-FR", {
     day: "2-digit",
     month: "2-digit",
@@ -258,6 +261,17 @@ export default function MissionPage() {
                 >
                   <Trash2 className="h-4 w-4" />
                   Supprimer
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setCurrentMission(null)
+                    router.push("/")
+                  }}
+                  className="gap-2"
+                >
+                  Fermer la mission
                 </Button>
               </div>
             </div>

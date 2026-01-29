@@ -39,7 +39,15 @@ import {
 
 type SortOption = "recent" | "az"
 
-function formatDate(date: Date): string {
+function safeParseDate(dateStr: string | undefined | null): Date | null {
+  if (!dateStr) return null
+  const parsed = new Date(dateStr)
+  return isNaN(parsed.getTime()) ? null : parsed
+}
+
+function formatDate(dateStr: string | undefined | null): string {
+  const date = safeParseDate(dateStr)
+  if (!date) return "N/A"
   return new Intl.DateTimeFormat("fr-FR", {
     day: "2-digit",
     month: "2-digit",
@@ -83,7 +91,7 @@ function MissionRow({
           </span>
           <span className="flex items-center gap-1">
             <Calendar className="h-3 w-3" />
-            {formatDate(mission.lastActivity)}
+            {formatDate(mission.updatedAt)}
           </span>
           <span className="flex items-center gap-1">
             <Radio className="h-3 w-3" />
@@ -163,7 +171,14 @@ export function MissionList() {
 
     // Sort
     if (sort === "recent") {
-      result.sort((a, b) => b.lastActivity.getTime() - a.lastActivity.getTime())
+      result.sort((a, b) => {
+        const dateA = safeParseDate(a.updatedAt)
+        const dateB = safeParseDate(b.updatedAt)
+        if (!dateA && !dateB) return 0
+        if (!dateA) return 1
+        if (!dateB) return -1
+        return dateB.getTime() - dateA.getTime()
+      })
     } else {
       result.sort((a, b) => a.name.localeCompare(b.name))
     }
