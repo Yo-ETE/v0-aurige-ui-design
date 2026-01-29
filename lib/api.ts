@@ -400,8 +400,15 @@ export async function deleteLog(missionId: string, logId: string): Promise<void>
   })
 }
 
-export async function renameLog(missionId: string, logId: string, newName: string): Promise<void> {
-  await fetchApi(`/missions/${missionId}/logs/${logId}/rename`, {
+export interface RenameLogResult {
+  status: string
+  oldId: string
+  newId: string
+  newName: string
+}
+
+export async function renameLog(missionId: string, logId: string, newName: string): Promise<RenameLogResult> {
+  return fetchApi(`/missions/${missionId}/logs/${logId}/rename`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ newName }),

@@ -288,8 +288,8 @@ export default function Isolation() {
   const handleRename = async (log: IsolationLog) => {
     if (!newLogName.trim()) return
     try {
-      await renameLog(log.missionId, log.id, newLogName.trim())
-      updateLogName(log.id, newLogName.trim())
+      const result = await renameLog(log.missionId, log.id, newLogName.trim())
+      updateLogName(log.id, result.newId, result.newName)
       setRenamingLog(null)
       setNewLogName("")
     } catch (err) {
@@ -380,29 +380,6 @@ export default function Isolation() {
           </CardContent>
         </Card>
 
-        {/* Interface Selector */}
-        <Card className="lg:col-span-2 border-border bg-card">
-          <CardContent className="py-4">
-            <div className="flex items-center gap-4">
-              <Label htmlFor="can-interface" className="whitespace-nowrap">Interface CAN (replay):</Label>
-              <Select
-                value={canInterface}
-                onValueChange={(v) => setCanInterface(v as CANInterface)}
-                disabled={isReplaying !== null}
-              >
-                <SelectTrigger id="can-interface" className="w-48">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="can0">can0</SelectItem>
-                  <SelectItem value="can1">can1</SelectItem>
-                  <SelectItem value="vcan0">vcan0 (test)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </CardContent>
-        </Card>
-
         {/* Log Tree Card */}
         <Card className="border-border bg-card lg:col-span-2">
           <CardHeader>
@@ -418,7 +395,24 @@ export default function Isolation() {
                   </CardDescription>
                 </div>
               </div>
-              <div className="flex gap-2">
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="can-interface" className="text-xs text-muted-foreground whitespace-nowrap">Replay sur:</Label>
+                  <Select
+                    value={canInterface}
+                    onValueChange={(v) => setCanInterface(v as CANInterface)}
+                    disabled={isReplaying !== null}
+                  >
+                    <SelectTrigger id="can-interface" className="h-8 w-28 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="can0">can0</SelectItem>
+                      <SelectItem value="can1">can1</SelectItem>
+                      <SelectItem value="vcan0">vcan0</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
                 {logs.length > 0 && (
                   <Button variant="outline" size="sm" onClick={clearLogs}>
                     Vider
