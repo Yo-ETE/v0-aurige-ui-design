@@ -452,6 +452,40 @@ export async function resetECU(iface: "can0" | "can1" = "can0"): Promise<OBDResp
   })
 }
 
+export interface PIDScanResponse {
+  status: string
+  message: string
+  responsesCount: number
+  responses: string[]
+}
+
+export async function scanAllPIDs(iface: "can0" | "can1" = "can0"): Promise<PIDScanResponse> {
+  return fetchApi<PIDScanResponse>("/obd/scan-pids", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ interface: iface }),
+  })
+}
+
+export interface FullScanResponse {
+  status: string
+  message: string
+  results: {
+    vin: string[] | null
+    pids: string[]
+    dtcs: string[]
+    logFile: string | null
+  }
+}
+
+export async function fullOBDScan(iface: "can0" | "can1" = "can0"): Promise<FullScanResponse> {
+  return fetchApi<FullScanResponse>("/obd/full-scan", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ interface: iface }),
+  })
+}
+
 // =============================================================================
 // WebSocket Helpers
 // =============================================================================

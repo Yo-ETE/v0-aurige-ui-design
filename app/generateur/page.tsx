@@ -10,6 +10,7 @@ import { Switch } from "@/components/ui/switch"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Cpu, Play, Square, Shuffle, AlertCircle, CheckCircle2, Loader2 } from "lucide-react"
 import { startGenerator, stopGenerator, getGeneratorStatus, type ProcessStatus } from "@/lib/api"
+import { SentFramesHistory, useSentFramesHistory } from "@/components/sent-frames-history"
 
 export default function Generateur() {
   const [canId, setCanId] = useState("")
@@ -25,6 +26,9 @@ export default function Generateur() {
   // Simulated frame count (actual count would require backend tracking)
   const [frameCount, setFrameCount] = useState(0)
   const [lastFrame, setLastFrame] = useState<{ id: string; data: string } | null>(null)
+  
+  // Sent frames history
+  const { frames: historyFrames, addFrame, updateStatus, clearHistory } = useSentFramesHistory()
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -71,6 +75,13 @@ export default function Generateur() {
     setIsStarting(true)
     setFrameCount(0)
     
+    const frameId = addFrame({
+      canId: useRandomId ? "RANDOM" : (canId || "7DF"),
+      data: `${frameLength} octets @ ${delay}ms`,
+      interface: "can0",
+      description: `Generateur cangen ${useRandomId ? "ID aleatoire" : `ID fixe ${canId}`}`,
+    })
+    
     try {
       await startGenerator(
         "can0",
@@ -78,10 +89,12 @@ export default function Generateur() {
         parseInt(frameLength) || 8,
         useRandomId ? undefined : canId || undefined
       )
-      setSuccess("Générateur démarré")
+      updateStatus(frameId, "success")
+      setSuccess("Generateur demarre")
       await fetchStatus()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erreur lors du démarrage")
+      updateStatus(frameId, "error")
+      setError(err instanceof Error ? err.message : "Erreur lors du demarrage")
     } finally {
       setIsStarting(false)
     }
@@ -298,6 +311,11 @@ export default function Generateur() {
             </div>
           </CardContent>
         </Card>
+
+        {/* Sent Frames History */}
+        <div className="lg:col-span-2">
+          <SentFramesHistory frames={historyFrames} onClear={clearHistory} />
+        </div>
       </div>
     </AppShell>
   )

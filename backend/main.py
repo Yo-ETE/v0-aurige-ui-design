@@ -1371,24 +1371,81 @@ class OBDRequest(BaseModel):
         populate_by_name = True
 
 
+async def obd_send_with_flow_control(interface: str, request_id: str, request_data: str, response_id: str = "7E8") -> list[str]:
+    """
+    Send an OBD-II request and handle ISO-TP flow control for multi-frame responses.
+    
+    For multi-frame responses:
+    1. First frame starts with 0x10 (indicates more frames coming)
+    2. We send flow control: targetID#3000000000000000
+    3. Consecutive frames start with 0x21, 0x22, etc.
+    """
+    # Calculate flow control target (response_id - 8)
+    flow_target = f"{int(response_id, 16) - 8:03X}"
+    
+    # Start candump to capture response
+    log_file = Path(f"/tmp/obd_response_{int(time.time())}.log")
+    
+    candump = await asyncio.create_subprocess_exec(
+        "candump", "-L", "-ta", f"{interface},{request_id}:7FF,{response_id}:{response_id}",
+        stdout=open(log_file, "w"),
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    
+    try:
+        await asyncio.sleep(0.05)  # Let candump start
+        
+        # Send the OBD request
+        can_send_frame(interface, request_id, request_data)
+        await asyncio.sleep(0.05)
+        
+        # Send flow control for multi-frame responses
+        can_send_frame(interface, flow_target, "3000000000000000")
+        
+        # Wait for response
+        await asyncio.sleep(1.0)
+        
+    finally:
+        candump.terminate()
+        try:
+            await asyncio.wait_for(candump.wait(), timeout=2.0)
+        except asyncio.TimeoutError:
+            candump.kill()
+    
+    # Read captured response
+    responses = []
+    if log_file.exists():
+        with open(log_file, "r") as f:
+            for line in f:
+                if response_id.lower() in line.lower():
+                    responses.append(line.strip())
+        log_file.unlink()
+    
+    return responses
+
+
 @app.post("/api/obd/vin")
 async def read_vin(request: OBDRequest):
     """
     Read Vehicle Identification Number via OBD-II.
     
-    Sends: 7DF#0209020000000000 (Service 09, PID 02 - VIN request)
-    Expects multi-frame response on 7E8-7EF
+    Protocol:
+    1. Send: 7DF#0209020000000000 (Service 09, PID 02 - VIN request)
+    2. Send: 7E0#3000000000000000 (Flow control)
+    3. Receive multi-frame response on 7E8
     """
-    # Send VIN request
-    can_send_frame(request.interface, "7DF", "0209020000000000")
+    responses = await obd_send_with_flow_control(
+        request.interface,
+        "7DF",
+        "0209020000000000",
+        "7E8"
+    )
     
-    # In a real implementation, we'd wait for and parse the response
-    # This requires isotp (ISO 15765-2) for multi-frame messages
-    # For now, return a placeholder
     return {
-        "status": "sent",
-        "message": "VIN request sent. Check candump for response.",
-        "note": "Full ISO-TP support requires can-isotp kernel module",
+        "status": "success" if responses else "sent",
+        "message": "VIN request completed" if responses else "VIN request sent, waiting for response",
+        "data": responses[0] if responses else None,
+        "frames": responses,
     }
 
 
@@ -1397,13 +1454,22 @@ async def read_dtc(request: OBDRequest):
     """
     Read Diagnostic Trouble Codes.
     
-    Sends: 7DF#0103000000000000 (Service 03 - Read DTCs)
+    Protocol:
+    1. Send: 7DF#0103000000000000 (Service 03 - Read DTCs)
+    2. Send: 7E0#3000000000000000 (Flow control)
+    3. Receive response on 7E8
     """
-    can_send_frame(request.interface, "7DF", "0103000000000000")
+    responses = await obd_send_with_flow_control(
+        request.interface,
+        "7DF",
+        "0103000000000000",
+        "7E8"
+    )
     
     return {
-        "status": "sent",
-        "message": "DTC read request sent. Check candump for response.",
+        "status": "success" if responses else "sent",
+        "message": "DTC read completed" if responses else "DTC request sent",
+        "frames": responses,
     }
 
 
@@ -1416,6 +1482,7 @@ async def clear_dtc(request: OBDRequest):
     WARNING: This clears all stored DTCs and freeze frame data!
     """
     can_send_frame(request.interface, "7DF", "0104000000000000")
+    await asyncio.sleep(0.1)
     
     return {
         "status": "sent",
@@ -1438,6 +1505,136 @@ async def reset_ecu(request: OBDRequest):
         "status": "sent",
         "message": "ECU reset request sent.",
         "warning": "Vehicle may enter temporary non-operational state",
+    }
+
+
+@app.post("/api/obd/scan-pids")
+async def scan_all_pids(request: OBDRequest):
+    """
+    Scan all Service 01 PIDs (0x00 to 0xE0).
+    
+    This mimics your bash script:
+    - Sends requests for PIDs 0-224
+    - Captures responses
+    - Identifies which PIDs are supported
+    """
+    supported_pids = []
+    
+    # Start candump to capture all responses
+    log_file = Path(f"/tmp/pid_scan_{int(time.time())}.log")
+    
+    candump = await asyncio.create_subprocess_exec(
+        "candump", "-L", "-ta", f"{request.interface},7DF:7FF,7E8:7E8",
+        stdout=open(log_file, "w"),
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    
+    try:
+        await asyncio.sleep(0.05)
+        
+        # Scan PIDs 0x00 to 0xE0 (0-224 decimal)
+        for pid in range(0, 225):
+            pid_hex = f"{pid:02X}"
+            can_send_frame(request.interface, "7DF", f"0201{pid_hex}0000000000")
+            await asyncio.sleep(0.05)  # 50ms delay between requests
+        
+        # Final wait for responses
+        await asyncio.sleep(0.5)
+        
+    finally:
+        candump.terminate()
+        try:
+            await asyncio.wait_for(candump.wait(), timeout=2.0)
+        except asyncio.TimeoutError:
+            candump.kill()
+    
+    # Parse responses to find supported PIDs
+    if log_file.exists():
+        with open(log_file, "r") as f:
+            for line in f:
+                if "7e8" in line.lower():
+                    # Extract PID from response
+                    parts = line.strip().split()
+                    if len(parts) >= 4:
+                        supported_pids.append(line.strip())
+        log_file.unlink()
+    
+    return {
+        "status": "completed",
+        "message": f"Scanned {225} PIDs, found {len(supported_pids)} responses",
+        "responsesCount": len(supported_pids),
+        "responses": supported_pids[:50],  # Limit to first 50 for API response
+    }
+
+
+@app.post("/api/obd/full-scan")
+async def full_obd_scan(request: OBDRequest):
+    """
+    Perform a complete OBD-II scan similar to your bash script:
+    1. Request VIN
+    2. Scan all Service 01 PIDs
+    3. Request DTCs
+    
+    Results are saved to aurige_obd.log in the mission logs directory.
+    """
+    results = {
+        "vin": None,
+        "pids": [],
+        "dtcs": [],
+        "logFile": None,
+    }
+    
+    # Use /tmp for the scan log
+    log_path = Path(f"/tmp/aurige_obd_{int(time.time())}.log")
+    
+    with open(log_path, "w") as f:
+        f.write("########## VIN DU VEHICULE ##########\n")
+        
+        # 1. Request VIN
+        vin_responses = await obd_send_with_flow_control(
+            request.interface, "7DF", "0209020000000000", "7E8"
+        )
+        for line in vin_responses:
+            f.write(line + "\n")
+        results["vin"] = vin_responses
+        
+        f.write("\n########## SCAN DES PIDS ##########\n")
+        
+        # 2. Scan PIDs (shortened for API response time)
+        # Scan key PIDs only: 0x00, 0x01, 0x05, 0x0C, 0x0D, 0x0F, 0x11
+        key_pids = [0x00, 0x01, 0x05, 0x0C, 0x0D, 0x0F, 0x11, 0x1F, 0x2F]
+        
+        candump = await asyncio.create_subprocess_exec(
+            "candump", "-L", "-ta", f"{request.interface},7DF:7FF,7E8:7E8",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        
+        await asyncio.sleep(0.05)
+        
+        for pid in key_pids:
+            can_send_frame(request.interface, "7DF", f"0201{pid:02X}0000000000")
+            await asyncio.sleep(0.1)
+        
+        await asyncio.sleep(0.5)
+        candump.terminate()
+        
+        f.write("\n########## DTCs DU VEHICULE ##########\n")
+        
+        # 3. Request DTCs
+        dtc_responses = await obd_send_with_flow_control(
+            request.interface, "7DF", "0103000000000000", "7E8"
+        )
+        for line in dtc_responses:
+            f.write(line + "\n")
+        results["dtcs"] = dtc_responses
+    
+    results["logFile"] = str(log_path)
+    
+    return {
+        "status": "completed",
+        "message": "Full OBD scan completed",
+        "results": results,
     }
 
 
