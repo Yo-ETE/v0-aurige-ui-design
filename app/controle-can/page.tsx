@@ -6,11 +6,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Input } from "@/components/ui/input"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Settings, Send, Power, PowerOff, CheckCircle2, AlertCircle, Loader2 } from "lucide-react"
-import { initializeCAN, stopCAN, sendCANFrame, getCANStatus, type CANInterfaceStatus } from "@/lib/api"
-import { SentFramesHistory, useSentFramesHistory } from "@/components/sent-frames-history"
+import { Settings, Power, PowerOff, CheckCircle2, AlertCircle, Loader2 } from "lucide-react"
+import { initializeCAN, stopCAN, getCANStatus, type CANInterfaceStatus } from "@/lib/api"
 
 const bitrates = [
   { value: "20000", label: "20 kbit/s" },
@@ -29,13 +27,8 @@ export default function ControleCAN() {
   const [canStatus, setCanStatus] = useState<CANInterfaceStatus | null>(null)
   const [isInitializing, setIsInitializing] = useState(false)
   const [isStopping, setIsStopping] = useState(false)
-  const [canFrame, setCanFrame] = useState("")
-  const [isSending, setIsSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
-  
-  // Sent frames history
-  const { frames, trackFrame, clearHistory } = useSentFramesHistory()
 
   // Fetch CAN interface status
   const fetchStatus = async () => {
@@ -86,39 +79,6 @@ export default function ControleCAN() {
       setError(err instanceof Error ? err.message : "Erreur lors de l'arrêt")
     } finally {
       setIsStopping(false)
-    }
-  }
-
-  const handleSendFrame = async () => {
-    if (!canFrame) return
-    setError(null)
-    setSuccess(null)
-    setIsSending(true)
-    
-    try {
-      // Parse frame format: ID#DATA (e.g., 7DF#02010C)
-      const [canId, data] = canFrame.split("#")
-      if (!canId || !data) {
-        throw new Error("Format invalide. Utilisez: ID#DATA (ex: 7DF#02010C)")
-      }
-      
-      const success = await trackFrame(
-        { canId: canId.trim(), data: data.trim(), interface: canInterface },
-        () => sendCANFrame({
-          interface: canInterface,
-          canId: canId.trim(),
-          data: data.trim(),
-        })
-      )
-      
-      if (success) {
-        setSuccess(`Trame envoyee: ${canFrame}`)
-        setCanFrame("")
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Erreur lors de l'envoi")
-    } finally {
-      setIsSending(false)
     }
   }
 
@@ -276,111 +236,6 @@ export default function ControleCAN() {
             </div>
           </CardContent>
         </Card>
-
-        {/* Card 2 - Envoi de trame */}
-        <Card className="border-border bg-card">
-          <CardHeader>
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                <Send className="h-5 w-5 text-primary" />
-              </div>
-              <div>
-                <CardTitle className="text-lg">Envoi de trame</CardTitle>
-                <CardDescription>
-                  Envoyer une trame CAN manuellement
-                </CardDescription>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="space-y-2">
-              <Label htmlFor="frame">Trame CAN (ID#DATA)</Label>
-              <Input
-                id="frame"
-                placeholder="7DF#02010C"
-                value={canFrame}
-                onChange={(e) => setCanFrame(e.target.value.toUpperCase())}
-                className="font-mono"
-                disabled={!isInitialized}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && canFrame && isInitialized) {
-                    handleSendFrame()
-                  }
-                }}
-              />
-              <p className="text-xs text-muted-foreground">
-                Format: ID hexadécimal # données hexadécimales (ex: 7DF#02010C)
-              </p>
-            </div>
-
-            {/* Quick send buttons */}
-            <div className="space-y-2">
-              <Label className="text-muted-foreground">Trames rapides</Label>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="font-mono text-xs bg-transparent"
-                  disabled={!isInitialized}
-                  onClick={() => setCanFrame("7DF#0100")}
-                >
-                  PIDs supportés
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="font-mono text-xs bg-transparent"
-                  disabled={!isInitialized}
-                  onClick={() => setCanFrame("7DF#02010C")}
-                >
-                  RPM
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="font-mono text-xs bg-transparent"
-                  disabled={!isInitialized}
-                  onClick={() => setCanFrame("7DF#02010D")}
-                >
-                  Vitesse
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="font-mono text-xs bg-transparent"
-                  disabled={!isInitialized}
-                  onClick={() => setCanFrame("7DF#020105")}
-                >
-                  Temp. moteur
-                </Button>
-              </div>
-            </div>
-
-            <Button
-              onClick={handleSendFrame}
-              disabled={!isInitialized || !canFrame || isSending}
-              className="w-full gap-2"
-            >
-              {isSending ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Send className="h-4 w-4" />
-              )}
-              {isSending ? "Envoi en cours..." : "Envoyer"}
-            </Button>
-
-            {!isInitialized && (
-              <p className="text-center text-sm text-muted-foreground">
-                Initialisez l&apos;interface CAN pour envoyer des trames
-              </p>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Sent Frames History */}
-        <div className="lg:col-span-2">
-          <SentFramesHistory frames={frames} onClear={clearHistory} />
-        </div>
       </div>
     </AppShell>
   )

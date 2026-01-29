@@ -35,6 +35,8 @@ export default function ReplayRapide() {
   const [isBurstRunning, setIsBurstRunning] = useState(false)
   const [isLoading, setIsLoading] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [manualFrame, setManualFrame] = useState("")
+  const [isSendingManual, setIsSendingManual] = useState(false)
   
   // Sent frames history
   const { frames, trackFrame, clearHistory } = useSentFramesHistory()
@@ -95,6 +97,29 @@ export default function ReplayRapide() {
       setError(err instanceof Error ? err.message : "Erreur lors du burst")
     } finally {
       setIsBurstRunning(false)
+    }
+  }
+
+  const handleManualSend = async () => {
+    if (!manualFrame) return
+    setError(null)
+    setIsSendingManual(true)
+    
+    try {
+      const [canId, data] = manualFrame.split("#")
+      if (!canId || !data) {
+        throw new Error("Format invalide. Utilisez: ID#DATA (ex: 7DF#02010C)")
+      }
+      
+      await trackFrame(
+        { canId: canId.trim(), data: data.trim(), interface: canInterface, description: "Envoi manuel" },
+        () => sendCANFrame({ interface: canInterface, canId: canId.trim(), data: data.trim() })
+      )
+      setManualFrame("")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur lors de l'envoi")
+    } finally {
+      setIsSendingManual(false)
     }
   }
 
@@ -265,6 +290,71 @@ export default function ReplayRapide() {
                 <Send className="h-4 w-4" />
               )}
               {isBurstRunning ? "Envoi en cours..." : `Envoyer ${burstCount} trames`}
+            </Button>
+          </CardContent>
+        </Card>
+
+        {/* Manual Send Card */}
+        <Card className="border-border bg-card">
+          <CardHeader>
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                <Send className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <CardTitle className="text-lg">Envoi manuel</CardTitle>
+                <CardDescription>
+                  Envoyer une trame CAN manuellement
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="manual-frame">Trame CAN (ID#DATA)</Label>
+              <Input
+                id="manual-frame"
+                placeholder="7DF#02010C"
+                value={manualFrame}
+                onChange={(e) => setManualFrame(e.target.value.toUpperCase())}
+                className="font-mono"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && manualFrame) {
+                    handleManualSend()
+                  }
+                }}
+              />
+              <p className="text-xs text-muted-foreground">
+                Format: ID hexadecimal # donnees hexadecimales
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" className="font-mono text-xs" onClick={() => setManualFrame("7DF#0100")}>
+                PIDs supportes
+              </Button>
+              <Button size="sm" variant="outline" className="font-mono text-xs" onClick={() => setManualFrame("7DF#02010C")}>
+                RPM
+              </Button>
+              <Button size="sm" variant="outline" className="font-mono text-xs" onClick={() => setManualFrame("7DF#02010D")}>
+                Vitesse
+              </Button>
+              <Button size="sm" variant="outline" className="font-mono text-xs" onClick={() => setManualFrame("7DF#020105")}>
+                Temp. moteur
+              </Button>
+            </div>
+
+            <Button
+              onClick={handleManualSend}
+              disabled={!manualFrame || isSendingManual}
+              className="w-full gap-2"
+            >
+              {isSendingManual ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Send className="h-4 w-4" />
+              )}
+              {isSendingManual ? "Envoi..." : "Envoyer"}
             </Button>
           </CardContent>
         </Card>
