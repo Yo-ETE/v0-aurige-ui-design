@@ -12,7 +12,7 @@ import { requestVIN, readDTCs, clearDTCs, resetECU, fullOBDScan, type OBDRespons
 import { SentFramesHistory, useSentFramesHistory } from "@/components/sent-frames-history"
 
 export default function OBDII() {
-  const [canInterface, setCanInterface] = useState<"can0" | "can1">("can0")
+  const [canInterface, setCanInterface] = useState<"can0" | "can1" | "vcan0">("can0")
   const [isLoading, setIsLoading] = useState<string | null>(null)
   const [vin, setVin] = useState<string | null>(null)
   const [dtcCodes, setDtcCodes] = useState<string[] | null>(null)
@@ -147,14 +147,15 @@ export default function OBDII() {
           <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label>Interface CAN</Label>
-              <Select value={canInterface} onValueChange={(v) => setCanInterface(v as "can0" | "can1")}>
+              <Select value={canInterface} onValueChange={(v) => setCanInterface(v as "can0" | "can1" | "vcan0")}>
                 <SelectTrigger className="bg-input border-border">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="can0">can0</SelectItem>
-                  <SelectItem value="can1">can1</SelectItem>
-                </SelectContent>
+<SelectItem value="can0">can0</SelectItem>
+  <SelectItem value="can1">can1</SelectItem>
+  <SelectItem value="vcan0">vcan0 (test)</SelectItem>
+  </SelectContent>
               </Select>
             </div>
 

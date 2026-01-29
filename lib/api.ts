@@ -12,6 +12,9 @@ import { getApiBaseUrl, getWsBaseUrl } from "./api-config"
 // Types
 // =============================================================================
 
+// CAN interface type - includes vcan0 for testing without hardware
+export type CANInterface = CANInterface | "vcan0"
+
 export interface Vehicle {
   brand: string
   model: string
@@ -23,7 +26,7 @@ export interface Vehicle {
 }
 
 export interface CANConfig {
-  interface: "can0" | "can1"
+  interface: CANInterface
   bitrate: number
 }
 
@@ -170,18 +173,18 @@ export async function checkHealth(): Promise<{ status: string; timestamp: string
 // CAN Interface Control
 // =============================================================================
 
-export async function getCANStatus(iface: "can0" | "can1"): Promise<CANInterfaceStatus> {
+export async function getCANStatus(iface: CANInterface): Promise<CANInterfaceStatus> {
   return fetchApi<CANInterfaceStatus>(`/can/${iface}/status`)
 }
 
-export async function initializeCAN(iface: "can0" | "can1", bitrate: number): Promise<{ status: string }> {
+export async function initializeCAN(iface: CANInterface, bitrate: number): Promise<{ status: string }> {
   return fetchApi("/can/init", {
     method: "POST",
     body: JSON.stringify({ interface: iface, bitrate }),
   })
 }
 
-export async function stopCAN(iface: "can0" | "can1"): Promise<{ status: string }> {
+export async function stopCAN(iface: CANInterface): Promise<{ status: string }> {
   return fetchApi(`/can/stop?interface=${iface}`, {
     method: "POST",
   })
@@ -200,7 +203,7 @@ export async function sendCANFrame(frame: CANFrame): Promise<{ status: string }>
 
 export async function startCapture(
   missionId: string,
-  iface: "can0" | "can1",
+  iface: CANInterface,
   filename?: string,
   description?: string
 ): Promise<{ status: string; filename: string }> {
@@ -232,7 +235,7 @@ export async function getCaptureStatus(): Promise<CaptureStatus> {
 export async function startReplay(
   missionId: string,
   logId: string,
-  iface: "can0" | "can1",
+  iface: CANInterface,
   speed: number = 1.0
 ): Promise<{ status: string }> {
   return fetchApi("/replay/start", {
@@ -261,7 +264,7 @@ export async function getReplayStatus(): Promise<ProcessStatus> {
 // =============================================================================
 
 export async function startGenerator(
-  iface: "can0" | "can1",
+  iface: CANInterface,
   delayMs: number,
   dataLength: number,
   canId?: string
@@ -292,7 +295,7 @@ export async function getGeneratorStatus(): Promise<ProcessStatus> {
 // =============================================================================
 
 export async function startFuzzing(
-  iface: "can0" | "can1",
+  iface: CANInterface,
   idStart: string,
   idEnd: string,
   dataTemplate: string,
@@ -326,7 +329,7 @@ export async function getFuzzingStatus(): Promise<ProcessStatus> {
 // Sniffer
 // =============================================================================
 
-export async function startSniffer(iface: "can0" | "can1"): Promise<{ status: string }> {
+export async function startSniffer(iface: CANInterface): Promise<{ status: string }> {
   return fetchApi(`/sniffer/start?interface=${iface}`, {
     method: "POST",
   })
@@ -420,7 +423,7 @@ export interface OBDResponse {
   warning?: string
 }
 
-export async function requestVIN(iface: "can0" | "can1" = "can0"): Promise<OBDResponse> {
+export async function requestVIN(iface: CANInterface = "can0"): Promise<OBDResponse> {
   return fetchApi<OBDResponse>("/obd/vin", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -428,7 +431,7 @@ export async function requestVIN(iface: "can0" | "can1" = "can0"): Promise<OBDRe
   })
 }
 
-export async function readDTCs(iface: "can0" | "can1" = "can0"): Promise<OBDResponse> {
+export async function readDTCs(iface: CANInterface = "can0"): Promise<OBDResponse> {
   return fetchApi<OBDResponse>("/obd/dtc/read", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -436,7 +439,7 @@ export async function readDTCs(iface: "can0" | "can1" = "can0"): Promise<OBDResp
   })
 }
 
-export async function clearDTCs(iface: "can0" | "can1" = "can0"): Promise<OBDResponse> {
+export async function clearDTCs(iface: CANInterface = "can0"): Promise<OBDResponse> {
   return fetchApi<OBDResponse>("/obd/dtc/clear", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -444,7 +447,7 @@ export async function clearDTCs(iface: "can0" | "can1" = "can0"): Promise<OBDRes
   })
 }
 
-export async function resetECU(iface: "can0" | "can1" = "can0"): Promise<OBDResponse> {
+export async function resetECU(iface: CANInterface = "can0"): Promise<OBDResponse> {
   return fetchApi<OBDResponse>("/obd/reset", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -459,7 +462,7 @@ export interface PIDScanResponse {
   responses: string[]
 }
 
-export async function scanAllPIDs(iface: "can0" | "can1" = "can0"): Promise<PIDScanResponse> {
+export async function scanAllPIDs(iface: CANInterface = "can0"): Promise<PIDScanResponse> {
   return fetchApi<PIDScanResponse>("/obd/scan-pids", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -478,7 +481,7 @@ export interface FullScanResponse {
   }
 }
 
-export async function fullOBDScan(iface: "can0" | "can1" = "can0"): Promise<FullScanResponse> {
+export async function fullOBDScan(iface: CANInterface = "can0"): Promise<FullScanResponse> {
   return fetchApi<FullScanResponse>("/obd/full-scan", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -495,7 +498,7 @@ export async function fullOBDScan(iface: "can0" | "can1" = "can0"): Promise<Full
  * Used by the floating terminal for real-time CAN traffic monitoring
  */
 export function createSnifferWebSocket(
-  iface: "can0" | "can1",
+  iface: CANInterface,
   onMessage: (msg: CANMessage) => void,
   onError?: (error: Event) => void,
   onClose?: () => void
@@ -528,7 +531,7 @@ export function createSnifferWebSocket(
  * Note: For actual capture/recording, use startCapture() API
  */
 export function createCandumpWebSocket(
-  iface: "can0" | "can1",
+  iface: CANInterface,
   onMessage: (msg: CANMessage) => void,
   onError?: (error: Event) => void,
   onClose?: () => void

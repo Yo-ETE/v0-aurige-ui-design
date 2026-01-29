@@ -23,7 +23,7 @@ interface SnifferState {
   // Connection state
   isRunning: boolean
   isConnecting: boolean
-  selectedInterface: "can0" | "can1"
+  selectedInterface: "can0" | "can1" | "vcan0"
   error: string | null
   
   // Terminal state
@@ -38,7 +38,7 @@ interface SnifferState {
   lastTimestamp: number
   
   // Actions
-  setInterface: (iface: "can0" | "can1") => void
+  setInterface: (iface: "can0" | "can1" | "vcan0") => void
   start: () => void
   stop: () => void
   togglePause: () => void

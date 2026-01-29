@@ -14,7 +14,6 @@ import {
   Video,
   Zap,
   GitBranch,
-  FileText,
   Activity,
   Flame,
   Cpu,
@@ -60,7 +59,6 @@ const baseNavigation: NavSection[] = [
       { name: "Capture & Replay", href: "/capture-replay", icon: Video },
       { name: "Replay Rapide", href: "/replay-rapide", icon: Zap },
       { name: "Isolation", href: "/isolation", icon: GitBranch },
-      { name: "Trames", href: "/trames", icon: FileText },
     ],
   },
   {

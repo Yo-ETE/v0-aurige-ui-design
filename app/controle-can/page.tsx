@@ -24,7 +24,7 @@ const bitrates = [
 ]
 
 export default function ControleCAN() {
-  const [canInterface, setCanInterface] = useState<"can0" | "can1">("can0")
+  const [canInterface, setCanInterface] = useState<"can0" | "can1" | "vcan0">("can0")
   const [bitrate, setBitrate] = useState("500000")
   const [canStatus, setCanStatus] = useState<CANInterfaceStatus | null>(null)
   const [isInitializing, setIsInitializing] = useState(false)
@@ -169,7 +169,7 @@ export default function ControleCAN() {
                 <Label htmlFor="interface">Interface CAN</Label>
                 <Select
                   value={canInterface}
-                  onValueChange={(v) => setCanInterface(v as "can0" | "can1")}
+                  onValueChange={(v) => setCanInterface(v as "can0" | "can1" | "vcan0")}
                   disabled={isInitialized}
                 >
                   <SelectTrigger id="interface">
@@ -178,6 +178,7 @@ export default function ControleCAN() {
                   <SelectContent>
                     <SelectItem value="can0">can0</SelectItem>
                     <SelectItem value="can1">can1</SelectItem>
+                    <SelectItem value="vcan0">vcan0 (test)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

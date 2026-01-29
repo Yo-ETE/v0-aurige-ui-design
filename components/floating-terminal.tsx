@@ -93,12 +93,13 @@ export function FloatingTerminal() {
         <div className="flex items-center gap-1">
           <select
             value={selectedInterface}
-            onChange={(e) => setInterface(e.target.value as "can0" | "can1")}
+            onChange={(e) => setInterface(e.target.value as "can0" | "can1" | "vcan0")}
             disabled={isRunning}
             className="mr-2 rounded border border-border bg-secondary px-2 py-1 text-xs text-foreground disabled:opacity-50"
           >
             <option value="can0">can0</option>
             <option value="can1">can1</option>
+            <option value="vcan0">vcan0 (test)</option>
           </select>
           <Button
             size="icon"

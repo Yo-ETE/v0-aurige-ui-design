@@ -607,8 +607,8 @@ async def get_system_status():
 @app.get("/api/can/{interface}/status", response_model=CANInterfaceStatus)
 async def get_can_status(interface: str):
     """Get status of a specific CAN interface"""
-    if interface not in ["can0", "can1"]:
-        raise HTTPException(status_code=400, detail="Invalid interface. Use can0 or can1.")
+    if interface not in ["can0", "can1", "vcan0"]:
+        raise HTTPException(status_code=400, detail="Invalid interface. Use can0, can1, or vcan0.")
     return get_can_interface_status(interface)
 
 
@@ -621,13 +621,35 @@ async def initialize_can(request: CANInitRequest):
     """
     Initialize a CAN interface with specified bitrate.
     
-    Executes:
+    For physical interfaces (can0, can1):
     - ip link set canX down
     - ip link set canX type can bitrate BITRATE
     - ip link set canX up
+    
+    For virtual interface (vcan0):
+    - modprobe vcan (load module)
+    - ip link add dev vcan0 type vcan
+    - ip link set up vcan0
     """
-    if request.interface not in ["can0", "can1"]:
+    if request.interface not in ["can0", "can1", "vcan0"]:
         raise HTTPException(status_code=400, detail="Invalid interface")
+    
+    if request.interface == "vcan0":
+        # Virtual CAN for testing - no bitrate needed
+        try:
+            subprocess.run(["modprobe", "vcan"], check=False)
+            # Check if vcan0 already exists
+            result = subprocess.run(["ip", "link", "show", "vcan0"], capture_output=True)
+            if result.returncode != 0:
+                subprocess.run(["ip", "link", "add", "dev", "vcan0", "type", "vcan"], check=True)
+            subprocess.run(["ip", "link", "set", "up", "vcan0"], check=True)
+        except subprocess.CalledProcessError as e:
+            raise HTTPException(status_code=500, detail=f"Failed to initialize vcan0: {e}")
+        return {
+            "status": "initialized",
+            "interface": "vcan0",
+            "bitrate": 0,  # vcan has no bitrate
+        }
     
     if request.bitrate not in [20000, 50000, 100000, 125000, 250000, 500000, 800000, 1000000]:
         raise HTTPException(status_code=400, detail="Invalid bitrate")
@@ -642,13 +664,9 @@ async def initialize_can(request: CANInitRequest):
 
 
 @app.post("/api/can/stop")
-async def stop_can(interface: str = "can0"):
-    """
-    Stop a CAN interface.
-    
-    Executes: ip link set canX down
-    """
-    if interface not in ["can0", "can1"]:
+async def stop_can(interface: str = Query(default="can0")):
+    """Stop a CAN interface"""
+    if interface not in ["can0", "can1", "vcan0"]:
         raise HTTPException(status_code=400, detail="Invalid interface")
     
     can_interface_down(interface)
@@ -663,7 +681,7 @@ async def send_can_frame(frame: CANFrame):
     
     Executes: cansend canX ID#DATA
     """
-    if frame.interface not in ["can0", "can1"]:
+    if frame.interface not in ["can0", "can1", "vcan0"]:
         raise HTTPException(status_code=400, detail="Invalid interface")
     
     can_send_frame(frame.interface, frame.can_id, frame.data)

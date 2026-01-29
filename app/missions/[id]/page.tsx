@@ -145,6 +145,21 @@ export default function MissionPage() {
     }
   }, [id, setCurrentMission])
 
+  const fetchMissions = useMissionStore((state) => state.fetchMissions)
+
+  // Refresh mission data periodically and on mount
+  useEffect(() => {
+    // Initial fetch
+    fetchMissions()
+    
+    // Refresh every 5 seconds to get updated stats
+    const interval = setInterval(() => {
+      fetchMissions()
+    }, 5000)
+    
+    return () => clearInterval(interval)
+  }, [fetchMissions])
+
   // Find mission data from store
   useEffect(() => {
     const found = missions.find((m) => m.id === id)
