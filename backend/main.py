@@ -384,6 +384,9 @@ def get_can_interface_status(interface: str) -> CANInterfaceStatus:
     """
     Get CAN interface status using `ip -details link show`
     Parses the output to extract state and bitrate.
+    
+    Note: For vcan interfaces, operstate is "UNKNOWN" (no physical link),
+    so we also check the flags for "UP".
     """
     try:
         result = run_command(["ip", "-details", "-json", "link", "show", interface], check=False)
@@ -395,10 +398,14 @@ def get_can_interface_status(interface: str) -> CANInterfaceStatus:
             return CANInterfaceStatus(interface=interface, up=False)
         
         iface_data = data[0]
-        operstate = iface_data.get("operstate", "DOWN")
-        up = operstate.upper() == "UP"
+        operstate = iface_data.get("operstate", "DOWN").upper()
+        flags = iface_data.get("flags", [])
         
-        # Extract bitrate from linkinfo
+        # Interface is up if operstate is UP, or if it's UNKNOWN but has UP flag
+        # (vcan interfaces have operstate=UNKNOWN but flags include "UP")
+        up = operstate == "UP" or (operstate == "UNKNOWN" and "UP" in flags)
+        
+        # Extract bitrate from linkinfo (not applicable for vcan)
         bitrate = None
         linkinfo = iface_data.get("linkinfo", {})
         info_data = linkinfo.get("info_data", {})
