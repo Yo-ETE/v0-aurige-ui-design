@@ -214,7 +214,7 @@ function LogTreeItem({
 
 export default function Isolation() {
   const router = useRouter()
-  const { logs, importLog, addChildLog, removeLog, updateLogTags, updateLogName, clearLogs, setMission, currentMissionId: storeMissionId } = useIsolationStore()
+  const { logs, importLog, addChildLog, removeLog, updateLogTags, updateLogName, clearLogs, setMission } = useIsolationStore()
   
   // Mission context
   const currentMissionId = useMissionStore((state) => state.currentMissionId)
