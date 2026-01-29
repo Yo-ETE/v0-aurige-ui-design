@@ -44,7 +44,7 @@ export default function ReplayRapide() {
     setError(null)
     setIsLoading(`slot-${index}`)
     try {
-      await sendCANFrame("can0", slot.id, slot.data)
+      await sendCANFrame({ interface: "can0", canId: slot.id, data: slot.data })
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur d'envoi")
     } finally {
@@ -77,7 +77,7 @@ export default function ReplayRapide() {
       const interval = parseInt(burstInterval, 10)
       
       for (let i = 0; i < count; i++) {
-        await sendCANFrame("can0", burstId, burstData)
+        await sendCANFrame({ interface: "can0", canId: burstId, data: burstData })
         if (interval > 0 && i < count - 1) {
           await new Promise((resolve) => setTimeout(resolve, interval))
         }
