@@ -5,10 +5,12 @@
  * 
  * All mission data is stored on the Raspberry Pi filesystem.
  * This store communicates ONLY with the FastAPI backend.
- * NO mock data, NO localStorage, NO in-memory persistence.
+ * 
+ * Note: currentMissionId is persisted in sessionStorage to survive page navigation.
  */
 
 import { create } from "zustand"
+import { persist, createJSONStorage } from "zustand/middleware"
 import { getApiBaseUrl } from "./api-config"
 
 export interface Vehicle {
@@ -65,7 +67,9 @@ interface MissionStore {
   getMissionById: (id: string) => Mission | undefined
 }
 
-export const useMissionStore = create<MissionStore>((set, get) => ({
+export const useMissionStore = create<MissionStore>()(
+  persist(
+    (set, get) => ({
   missions: [],
   currentMissionId: null,
   isLoading: false,
@@ -210,4 +214,12 @@ export const useMissionStore = create<MissionStore>((set, get) => ({
     const { missions } = get()
     return missions.find((m) => m.id === id)
   },
-}))
+}),
+    {
+      name: "aurige-mission-session",
+      storage: createJSONStorage(() => sessionStorage),
+      // Only persist currentMissionId, not the full missions array (that comes from API)
+      partialize: (state) => ({ currentMissionId: state.currentMissionId }),
+    }
+  )
+)

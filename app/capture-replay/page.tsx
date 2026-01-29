@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { useSearchParams } from "next/navigation"
+import { useRouter } from "next/navigation"
 import { AppShell } from "@/components/app-shell"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { 
   Video, FolderOpen, Play, Trash2, Download, Circle, Square, FileText, 
-  AlertCircle, Loader2, CheckCircle2 
+  AlertCircle, Loader2, CheckCircle2, ArrowLeft
 } from "lucide-react"
 import { 
   startCapture, stopCapture, getCaptureStatus, 
@@ -18,10 +18,14 @@ import {
   startReplay, stopReplay, getReplayStatus,
   type LogEntry, type CaptureStatus, type ProcessStatus
 } from "@/lib/api"
+import { useMissionStore } from "@/lib/mission-store"
 
 export default function CaptureReplay() {
-  const searchParams = useSearchParams()
-  const missionId = searchParams.get("missionId") || ""
+  const router = useRouter()
+  const currentMissionId = useMissionStore((state) => state.currentMissionId)
+  const missions = useMissionStore((state) => state.missions)
+  const currentMission = missions.find((m) => m.id === currentMissionId)
+  const missionId = currentMissionId || ""
   
   const [captureStatus, setCaptureStatus] = useState<CaptureStatus>({ running: false, durationSeconds: 0 })
   const [replayStatus, setReplayStatus] = useState<ProcessStatus>({ running: false })
@@ -187,10 +191,33 @@ export default function CaptureReplay() {
     )
   }
 
+  // No mission selected - show helpful message
+  if (!missionId) {
+    return (
+      <AppShell title="Capture & Replay" description="Aucune mission selectionnee">
+        <Card className="bg-card border-border">
+          <CardContent className="flex flex-col items-center justify-center py-16">
+            <FolderOpen className="h-16 w-16 text-muted-foreground/30 mb-4" />
+            <h2 className="text-xl font-semibold text-foreground mb-2">
+              Aucune mission selectionnee
+            </h2>
+            <p className="text-muted-foreground text-center max-w-md mb-6">
+              Vous devez d'abord selectionner ou creer une mission pour pouvoir capturer et rejouer des logs CAN.
+            </p>
+            <Button onClick={() => router.push("/")} className="gap-2">
+              <ArrowLeft className="h-4 w-4" />
+              Retour a l'accueil
+            </Button>
+          </CardContent>
+        </Card>
+      </AppShell>
+    )
+  }
+
   return (
     <AppShell
       title="Capture & Replay"
-      description="Capturer et rejouer des logs CAN"
+      description={currentMission ? `Mission: ${currentMission.name}` : "Capturer et rejouer des logs CAN"}
     >
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Alerts */}
