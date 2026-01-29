@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Activity, Car, AlertTriangle, Trash2, RotateCcw, Info, Loader2 } from "lucide-react"
 import { requestVIN, readDTCs, clearDTCs, resetECU, type OBDResponse } from "@/lib/api"
+import { SentFramesHistory, useSentFramesHistory } from "@/components/sent-frames-history"
 
 export default function OBDII() {
   const [canInterface, setCanInterface] = useState<"can0" | "can1">("can0")
@@ -17,16 +18,24 @@ export default function OBDII() {
   const [dtcCodes, setDtcCodes] = useState<string[] | null>(null)
   const [lastResponse, setLastResponse] = useState<OBDResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
+  
+  // Sent frames history
+  const { frames, trackFrame, clearHistory } = useSentFramesHistory()
 
   const handleRetrieveVIN = async () => {
     setIsLoading("vin")
     setError(null)
     try {
-      const response = await requestVIN(canInterface)
-      setLastResponse(response)
-      if (response.data) {
-        setVin(response.data)
-      }
+      await trackFrame(
+        { canId: "7DF", data: "0902", interface: canInterface, description: "Request VIN" },
+        async () => {
+          const response = await requestVIN(canInterface)
+          setLastResponse(response)
+          if (response.data) {
+            setVin(response.data)
+          }
+        }
+      )
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur lors de la requete VIN")
     } finally {
@@ -38,13 +47,16 @@ export default function OBDII() {
     setIsLoading("dtc")
     setError(null)
     try {
-      const response = await readDTCs(canInterface)
-      setLastResponse(response)
-      // In real implementation, parse DTC codes from response
-      if (response.status === "sent") {
-        // Request sent, check candump for response
-        setDtcCodes(null)
-      }
+      await trackFrame(
+        { canId: "7DF", data: "0300", interface: canInterface, description: "Read DTC" },
+        async () => {
+          const response = await readDTCs(canInterface)
+          setLastResponse(response)
+          if (response.status === "sent") {
+            setDtcCodes(null)
+          }
+        }
+      )
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur lors de la lecture DTC")
     } finally {
@@ -56,11 +68,16 @@ export default function OBDII() {
     setIsLoading("clear")
     setError(null)
     try {
-      const response = await clearDTCs(canInterface)
-      setLastResponse(response)
-      if (response.status === "sent") {
-        setDtcCodes([])
-      }
+      await trackFrame(
+        { canId: "7DF", data: "0104", interface: canInterface, description: "Clear DTC" },
+        async () => {
+          const response = await clearDTCs(canInterface)
+          setLastResponse(response)
+          if (response.status === "sent") {
+            setDtcCodes([])
+          }
+        }
+      )
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur lors de l'effacement DTC")
     } finally {
@@ -72,10 +89,15 @@ export default function OBDII() {
     setIsLoading("reset")
     setError(null)
     try {
-      const response = await resetECU(canInterface)
-      setLastResponse(response)
-      setVin(null)
-      setDtcCodes(null)
+      await trackFrame(
+        { canId: "7DF", data: "1101", interface: canInterface, description: "Reset ECU" },
+        async () => {
+          const response = await resetECU(canInterface)
+          setLastResponse(response)
+          setVin(null)
+          setDtcCodes(null)
+        }
+      )
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur lors du reset ECU")
     } finally {
@@ -291,6 +313,11 @@ export default function OBDII() {
             </Button>
           </CardContent>
         </Card>
+
+        {/* Sent Frames History */}
+        <div className="lg:col-span-2">
+          <SentFramesHistory frames={frames} onClear={clearHistory} />
+        </div>
       </div>
     </AppShell>
   )

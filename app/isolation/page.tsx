@@ -154,6 +154,7 @@ function LogTreeItem({
               onRemove={onRemove}
               onTagChange={onTagChange}
               isReplaying={isReplaying}
+              isSplitting={isSplitting}
             />
           ))}
         </div>
@@ -375,6 +376,7 @@ export default function Isolation() {
                     onRemove={removeLog}
                     onTagChange={handleTagChange}
                     isReplaying={isReplaying}
+                    isSplitting={isSplitting}
                   />
                 ))}
               </div>

@@ -10,6 +10,7 @@ import { Switch } from "@/components/ui/switch"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Zap, Keyboard, Send, AlertTriangle, RotateCcw, Trash2, Loader2 } from "lucide-react"
 import { sendCANFrame, clearDTCs, resetECU } from "@/lib/api"
+import { SentFramesHistory, useSentFramesHistory } from "@/components/sent-frames-history"
 
 interface QuickSlot {
   key: string
@@ -32,6 +33,9 @@ export default function ReplayRapide() {
   const [isBurstRunning, setIsBurstRunning] = useState(false)
   const [isLoading, setIsLoading] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  
+  // Sent frames history
+  const { frames, trackFrame, clearHistory } = useSentFramesHistory()
 
   const handleSlotChange = (index: number, field: "id" | "data", value: string) => {
     const newSlots = [...slots]
@@ -43,14 +47,14 @@ export default function ReplayRapide() {
     const slot = slots[index]
     setError(null)
     setIsLoading(`slot-${index}`)
-    try {
-      await sendCANFrame({ interface: "can0", canId: slot.id, data: slot.data })
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Erreur d'envoi")
-    } finally {
-      setIsLoading(null)
-    }
-  }, [slots])
+    
+    await trackFrame(
+      { canId: slot.id, data: slot.data, interface: "can0", description: `Slot ${slot.label}` },
+      () => sendCANFrame({ interface: "can0", canId: slot.id, data: slot.data })
+    )
+    
+    setIsLoading(null)
+  }, [slots, trackFrame])
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -77,7 +81,10 @@ export default function ReplayRapide() {
       const interval = parseInt(burstInterval, 10)
       
       for (let i = 0; i < count; i++) {
-        await sendCANFrame({ interface: "can0", canId: burstId, data: burstData })
+        await trackFrame(
+          { canId: burstId, data: burstData, interface: "can0", description: `Burst ${i + 1}/${count}` },
+          () => sendCANFrame({ interface: "can0", canId: burstId, data: burstData })
+        )
         if (interval > 0 && i < count - 1) {
           await new Promise((resolve) => setTimeout(resolve, interval))
         }
@@ -92,25 +99,21 @@ export default function ReplayRapide() {
   const handleClearDTC = async () => {
     setIsLoading("dtc")
     setError(null)
-    try {
-      await clearDTCs("can0")
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Erreur effacement DTC")
-    } finally {
-      setIsLoading(null)
-    }
+    await trackFrame(
+      { canId: "7DF", data: "0104", interface: "can0", description: "Clear DTC" },
+      () => clearDTCs("can0")
+    )
+    setIsLoading(null)
   }
 
   const handleResetECU = async () => {
     setIsLoading("reset")
     setError(null)
-    try {
-      await resetECU("can0")
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Erreur reset ECU")
-    } finally {
-      setIsLoading(null)
-    }
+    await trackFrame(
+      { canId: "7DF", data: "1101", interface: "can0", description: "Reset ECU" },
+      () => resetECU("can0")
+    )
+    setIsLoading(null)
   }
 
   return (
@@ -244,7 +247,7 @@ export default function ReplayRapide() {
         </Card>
 
         {/* Burst Send Card */}
-        <Card className="border-border bg-card lg:col-span-2">
+        <Card className="border-border bg-card">
           <CardHeader>
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
@@ -259,7 +262,7 @@ export default function ReplayRapide() {
             </div>
           </CardHeader>
           <CardContent className="space-y-6">
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="burst-id">CAN ID (hex)</Label>
                 <Input
@@ -300,27 +303,23 @@ export default function ReplayRapide() {
                 />
               </div>
             </div>
-            <div className="flex items-center justify-between">
-              <p className="text-sm text-muted-foreground">
-                Envoi de <span className="font-semibold text-foreground">{burstCount}</span> trames{" "}
-                <span className="font-mono text-primary">{burstId}#{burstData}</span> avec un intervalle de{" "}
-                <span className="font-semibold text-foreground">{burstInterval}ms</span>
-              </p>
-              <Button
-                onClick={handleBurstSend}
-                disabled={isBurstRunning || isLoading !== null}
-                className="gap-2"
-              >
-                {isBurstRunning ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Send className="h-4 w-4" />
-                )}
-                {isBurstRunning ? "Envoi en cours..." : `Envoyer ${burstCount} trames`}
-              </Button>
-            </div>
+            <Button
+              onClick={handleBurstSend}
+              disabled={isBurstRunning || isLoading !== null}
+              className="w-full gap-2"
+            >
+              {isBurstRunning ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Send className="h-4 w-4" />
+              )}
+              {isBurstRunning ? "Envoi en cours..." : `Envoyer ${burstCount} trames`}
+            </Button>
           </CardContent>
         </Card>
+
+        {/* Sent Frames History */}
+        <SentFramesHistory frames={frames} onClear={clearHistory} />
       </div>
     </AppShell>
   )

@@ -10,6 +10,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Progress } from "@/components/ui/progress"
 import { Flame, AlertTriangle, Play, Square, AlertCircle, CheckCircle2, Loader2 } from "lucide-react"
 import { startFuzzing, stopFuzzing, getFuzzingStatus, type ProcessStatus } from "@/lib/api"
+import { SentFramesHistory, useSentFramesHistory } from "@/components/sent-frames-history"
 
 export default function Fuzzing() {
   const [idStart, setIdStart] = useState("000")
@@ -27,6 +28,9 @@ export default function Fuzzing() {
   const [progress, setProgress] = useState(0)
   const [currentId, setCurrentId] = useState("")
   const [startTime, setStartTime] = useState<number | null>(null)
+  
+  // Sent frames history (for fuzzing, we track start/stop events)
+  const { frames, addFrame, updateStatus, clearHistory } = useSentFramesHistory()
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -77,6 +81,13 @@ export default function Fuzzing() {
     setIsStarting(true)
     setProgress(0)
     
+    const frameId = addFrame({
+      canId: `${idStart}-${idEnd}`,
+      data: dataTemplate,
+      interface: "can0",
+      description: `Fuzzing ${iterations} iterations`,
+    })
+    
     try {
       await startFuzzing(
         "can0",
@@ -86,11 +97,13 @@ export default function Fuzzing() {
         parseInt(iterations),
         parseInt(delay)
       )
-      setSuccess("Fuzzing démarré")
+      updateStatus(frameId, "success")
+      setSuccess("Fuzzing demarre")
       setStartTime(Date.now())
       await fetchStatus()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erreur lors du démarrage")
+      updateStatus(frameId, "error")
+      setError(err instanceof Error ? err.message : "Erreur lors du demarrage")
     } finally {
       setIsStarting(false)
     }
@@ -268,10 +281,13 @@ export default function Fuzzing() {
             )}
             
             <p className="text-xs text-muted-foreground">
-              Utilise <code className="rounded bg-muted px-1 py-0.5 font-mono">cansend</code> en boucle pour envoyer des trames avec IDs incrémentaux
+              Utilise <code className="rounded bg-muted px-1 py-0.5 font-mono">cansend</code> en boucle pour envoyer des trames avec IDs incrementaux
             </p>
           </CardContent>
         </Card>
+
+        {/* Sent Frames History */}
+        <SentFramesHistory frames={frames} onClear={clearHistory} />
       </div>
     </AppShell>
   )

@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Settings, Send, Power, PowerOff, CheckCircle2, AlertCircle, Loader2 } from "lucide-react"
 import { initializeCAN, stopCAN, sendCANFrame, getCANStatus, type CANInterfaceStatus } from "@/lib/api"
+import { SentFramesHistory, useSentFramesHistory } from "@/components/sent-frames-history"
 
 const bitrates = [
   { value: "20000", label: "20 kbit/s" },
@@ -32,6 +33,9 @@ export default function ControleCAN() {
   const [isSending, setIsSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  
+  // Sent frames history
+  const { frames, trackFrame, clearHistory } = useSentFramesHistory()
 
   // Fetch CAN interface status
   const fetchStatus = async () => {
@@ -98,14 +102,19 @@ export default function ControleCAN() {
         throw new Error("Format invalide. Utilisez: ID#DATA (ex: 7DF#02010C)")
       }
       
-      await sendCANFrame({
-        interface: canInterface,
-        canId: canId.trim(),
-        data: data.trim(),
-      })
+      const success = await trackFrame(
+        { canId: canId.trim(), data: data.trim(), interface: canInterface },
+        () => sendCANFrame({
+          interface: canInterface,
+          canId: canId.trim(),
+          data: data.trim(),
+        })
+      )
       
-      setSuccess(`Trame envoyée: ${canFrame}`)
-      setCanFrame("")
+      if (success) {
+        setSuccess(`Trame envoyee: ${canFrame}`)
+        setCanFrame("")
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur lors de l'envoi")
     } finally {
@@ -366,6 +375,11 @@ export default function ControleCAN() {
             )}
           </CardContent>
         </Card>
+
+        {/* Sent Frames History */}
+        <div className="lg:col-span-2">
+          <SentFramesHistory frames={frames} onClear={clearHistory} />
+        </div>
       </div>
     </AppShell>
   )
