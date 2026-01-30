@@ -1517,7 +1517,7 @@ async def obd_send_with_flow_control(interface: str, request_id: str, request_da
             await asyncio.sleep(0.1)
             
             # Send flow control for multi-frame responses
-            can_send_frame(interface, flow_target, "3000000000000000")
+            _, _ = can_send_frame(interface, flow_target, "3000000000000000")
             
             # Wait for response
             await asyncio.sleep(0.5)
@@ -1690,7 +1690,7 @@ async def scan_all_pids(request: OBDRequest):
         # Scan PIDs 0x00 to 0xE0 (0-224 decimal)
         for pid in range(0, 225):
             pid_hex = f"{pid:02X}"
-            can_send_frame(request.interface, "7DF", f"0201{pid_hex}0000000000")
+            _, _ = can_send_frame(request.interface, "7DF", f"0201{pid_hex}0000000000")
             await asyncio.sleep(0.05)  # 50ms delay between requests
         
         # Final wait for responses
@@ -1772,7 +1772,7 @@ async def full_obd_scan(request: OBDRequest):
         await asyncio.sleep(0.05)
         
         for pid in key_pids:
-            can_send_frame(request.interface, "7DF", f"0201{pid:02X}0000000000")
+            _, _ = can_send_frame(request.interface, "7DF", f"0201{pid:02X}0000000000")
             await asyncio.sleep(0.1)
         
         await asyncio.sleep(0.5)
@@ -1819,7 +1819,7 @@ async def read_obd_pid(
     """
     # Format: Length + Service + PID + padding
     data = f"02{service}{pid}0000000000"[:16]
-    can_send_frame(interface, "7DF", data)
+    _, _ = can_send_frame(interface, "7DF", data)
     
     return {
         "status": "sent",
