@@ -86,6 +86,12 @@ export function Sidebar() {
     baseNavigation.map((section) => section.title)
   )
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [isHydrated, setIsHydrated] = useState(false)
+
+  // Handle hydration
+  useEffect(() => {
+    setIsHydrated(true)
+  }, [])
 
   // Close mobile menu on route change
   useEffect(() => {
@@ -160,8 +166,8 @@ export function Sidebar() {
         {/* Navigation */}
         <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
           {navigation.map((section) => {
-            // Skip Analyse section if no current mission
-            if (section.showMission && !currentMission) return null
+            // Skip Analyse section if no current mission (only after hydration)
+            if (section.showMission && isHydrated && !currentMission) return null
             
             return (
               <div key={section.title} className="mb-4">
@@ -227,7 +233,7 @@ export function Sidebar() {
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-xs font-medium text-sidebar-foreground">Raspberry Pi</p>
-              <p className="text-[10px] text-muted-foreground truncate">{typeof window !== "undefined" ? getApiHost() : "..."}</p>
+              <p className="text-[10px] text-muted-foreground truncate">{isHydrated ? getApiHost() : "..."}</p>
             </div>
           </div>
 </div>
