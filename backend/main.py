@@ -2322,11 +2322,10 @@ async def connect_to_wifi(request: WifiConnectRequest):
                 "nmcli", "connection", "up", request.ssid
             ], check=False)
         elif request.password:
-            # New network with password - use proper security settings
+            # New network with password - nmcli auto-detects security type
             result = run_command([
                 "nmcli", "device", "wifi", "connect", request.ssid,
-                "password", request.password,
-                "wifi-sec.key-mgmt", "wpa-psk"
+                "password", request.password
             ], check=False)
         else:
             # Try to connect to open network
