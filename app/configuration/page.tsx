@@ -29,6 +29,9 @@ import {
   HardDrive,
   Trash2,
   Archive,
+  RotateCcw,
+  Usb,
+  Cable,
 } from "lucide-react"
 import {
   scanWifiNetworks,
@@ -44,6 +47,7 @@ import {
   listBackups,
   createBackup,
   deleteBackup,
+  restoreBackup,
   startUpdate,
   getUpdateOutput,
   type WifiNetwork,
@@ -278,6 +282,18 @@ export default function ConfigurationPage() {
     }
   }
 
+  // Handle restore backup
+  const handleRestoreBackup = async (filename: string) => {
+    if (!confirm(`Restaurer la sauvegarde ${filename} ?\nLes donnees actuelles seront ecrasees.`)) return
+    setBackupMessage(null)
+    try {
+      const result = await restoreBackup(filename)
+      setBackupMessage(result.message)
+    } catch {
+      setBackupMessage("Erreur lors de la restauration")
+    }
+  }
+
   // Initial load
   useEffect(() => {
     fetchConnectionStatus()
@@ -336,11 +352,10 @@ export default function ConfigurationPage() {
               {wifiStatus?.connected ? (
                 wifiStatus.isHotspot ? (
                   <div className="pl-6 text-sm space-y-2">
-                    <Alert className="border-warning/50 bg-warning/10 py-2">
-                      <AlertTriangle className="h-4 w-4 text-warning" />
-                      <AlertDescription className="text-warning text-xs">
-                        Le Pi diffuse le hotspot "{wifiStatus.hotspotSsid || "Aurige"}". 
-                        Internet via Ethernet ou USB.
+                    <Alert className="border-primary/50 bg-primary/10 py-2">
+                      <Wifi className="h-4 w-4 text-primary" />
+                      <AlertDescription className="text-primary text-xs">
+                        Hotspot "{wifiStatus.hotspotSsid || "Aurige"}" actif
                       </AlertDescription>
                     </Alert>
                     <div className="grid grid-cols-2 gap-3">
@@ -351,6 +366,16 @@ export default function ConfigurationPage() {
                       <div>
                         <p className="text-xs text-muted-foreground">IP Publique</p>
                         <p className="font-mono text-xs">{wifiStatus.ipPublic || "-"}</p>
+                      </div>
+                      <div className="col-span-2">
+                        <p className="text-xs text-muted-foreground">Source Internet</p>
+                        <p className="font-medium flex items-center gap-2">
+                          {wifiStatus.internetSource === "Ethernet" && <Cable className="h-3 w-3" />}
+                          {wifiStatus.internetSource === "USB Tethering" && <Usb className="h-3 w-3" />}
+                          {wifiStatus.internetSource?.startsWith("WiFi") && <Wifi className="h-3 w-3" />}
+                          {wifiStatus.internetSource || "Non detecte"}
+                          {wifiStatus.internetVia && ` (${wifiStatus.internetVia})`}
+                        </p>
                       </div>
                     </div>
                   </div>
@@ -673,24 +698,36 @@ export default function ConfigurationPage() {
             {backups.length > 0 && (
               <div className="space-y-2">
                 <p className="text-xs text-muted-foreground font-medium">Sauvegardes existantes</p>
-                <ScrollArea className="h-32">
+                <ScrollArea className="h-40">
                   <div className="space-y-2">
                     {backups.map((backup) => (
                       <div key={backup.filename} className="flex items-center justify-between p-2 rounded bg-secondary/50">
                         <div className="flex-1 min-w-0">
                           <p className="text-xs font-mono truncate">{backup.filename}</p>
                           <p className="text-xs text-muted-foreground">
-                            {(backup.size / 1024 / 1024).toFixed(2)} Mo
+                            {backup.size > 0 ? `${(backup.size / 1024 / 1024).toFixed(2)} Mo` : "Vide"}
                           </p>
                         </div>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-7 w-7 text-destructive"
-                          onClick={() => handleDeleteBackup(backup.filename)}
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
+                        <div className="flex gap-1">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7 text-primary"
+                            onClick={() => handleRestoreBackup(backup.filename)}
+                            title="Restaurer"
+                          >
+                            <RotateCcw className="h-3 w-3" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7 text-destructive"
+                            onClick={() => handleDeleteBackup(backup.filename)}
+                            title="Supprimer"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
                       </div>
                     ))}
                   </div>

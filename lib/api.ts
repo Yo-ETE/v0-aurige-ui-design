@@ -553,6 +553,9 @@ export interface WifiStatus {
   rxRate: string
   ipLocal: string
   ipPublic: string
+  internetSource?: string
+  internetInterface?: string
+  internetVia?: string
 }
 
 export interface EthernetStatus {
@@ -643,6 +646,10 @@ export async function createBackup(): Promise<{ status: string; message: string;
 
 export async function deleteBackup(filename: string): Promise<{ status: string; message: string }> {
   return fetchApi(`/system/backups/${filename}`, { method: "DELETE" })
+}
+
+export async function restoreBackup(filename: string): Promise<{ status: string; message: string }> {
+  return fetchApi(`/system/backups/${filename}/restore`, { method: "POST" })
 }
 
 export async function startUpdate(): Promise<{ status: string; message: string }> {

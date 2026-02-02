@@ -2160,6 +2160,38 @@ async def get_wifi_status():
         except:
             pass
         
+        # Detect internet source by checking default route
+        internet_source = ""
+        internet_interface = ""
+        internet_via = ""
+        if is_hotspot:
+            # Check default route to find how we get internet
+            route_result = run_command(["ip", "route", "show", "default"], check=False)
+            if route_result.returncode == 0:
+                for line in route_result.stdout.strip().split("\n"):
+                    if "default" in line:
+                        parts = line.split()
+                        # Find interface (after "dev")
+                        if "dev" in parts:
+                            idx = parts.index("dev")
+                            if idx + 1 < len(parts):
+                                internet_interface = parts[idx + 1]
+                        break
+                
+                # Determine source type based on interface
+                if internet_interface == "eth0":
+                    internet_source = "Ethernet"
+                elif internet_interface.startswith("usb") or internet_interface.startswith("enx"):
+                    internet_source = "USB Tethering"
+                elif internet_interface == "wlan1":
+                    # Second WiFi adapter - get its SSID
+                    ssid_result = run_command(["iwgetid", "-r", internet_interface], check=False)
+                    if ssid_result.returncode == 0 and ssid_result.stdout.strip():
+                        internet_via = ssid_result.stdout.strip()
+                    internet_source = "WiFi (wlan1)"
+                elif internet_interface:
+                    internet_source = internet_interface
+        
         return {
             "connected": bool(ip_local),
             "isHotspot": is_hotspot,
@@ -2170,6 +2202,9 @@ async def get_wifi_status():
             "rxRate": rx_rate,
             "ipLocal": ip_local,
             "ipPublic": ip_public,
+            "internetSource": internet_source,
+            "internetInterface": internet_interface,
+            "internetVia": internet_via,
         }
     except Exception as e:
         return {"connected": False, "ssid": "", "signal": 0, "error": str(e)}
@@ -2427,26 +2462,39 @@ async def create_backup():
         
         # Check if data directory exists
         if not data_dir.exists():
-            return {"status": "error", "message": "Le dossier /opt/aurige/data n'existe pas"}
+            return {"status": "error", "message": f"Le dossier {data_dir} n'existe pas"}
         
         # Check if data directory has any content
         data_files = list(data_dir.rglob("*"))
-        if not data_files:
+        file_count = len([f for f in data_files if f.is_file()])
+        if file_count == 0:
             return {"status": "error", "message": "Le dossier data est vide, rien a sauvegarder"}
         
-        # Create backup with verbose output
+        # Create backup - use tar without sudo, then chmod to make readable
         result = run_command([
-            "sudo", "tar", "-czvf", backup_file, "-C", "/opt/aurige", "data"
+            "tar", "-czf", backup_file, "-C", "/opt/aurige", "data"
         ], check=False)
         
+        # If permission denied, try with sudo then fix permissions
+        if result.returncode != 0 and "Permission denied" in (result.stderr or ""):
+            result = run_command([
+                "sudo", "tar", "-czf", backup_file, "-C", "/opt/aurige", "data"
+            ], check=False)
+            # Fix permissions so we can read it
+            if result.returncode == 0:
+                run_command(["sudo", "chmod", "644", backup_file], check=False)
+        
         if result.returncode == 0:
-            # Get file size - need sudo to read file created by sudo
-            stat_result = run_command(["stat", "-c", "%s", backup_file], check=False)
-            size = int(stat_result.stdout.strip()) if stat_result.returncode == 0 else 0
+            # Get file size
+            try:
+                size = Path(backup_file).stat().st_size
+            except:
+                stat_result = run_command(["stat", "-c", "%s", backup_file], check=False)
+                size = int(stat_result.stdout.strip()) if stat_result.returncode == 0 else 0
             
             return {
                 "status": "success",
-                "message": f"Sauvegarde creee: {backup_file}",
+                "message": f"Sauvegarde creee ({file_count} fichiers)",
                 "filename": f"data-backup-{timestamp}.tar.gz",
                 "size": size,
             }
@@ -2468,8 +2516,40 @@ async def delete_backup(filename: str):
         if not backup_path.exists():
             raise HTTPException(status_code=404, detail="Sauvegarde introuvable")
         
-        backup_path.unlink()
-        return {"status": "success", "message": f"Sauvegarde {filename} supprimée"}
+        # Try normal delete, then sudo if needed
+        try:
+            backup_path.unlink()
+        except PermissionError:
+            run_command(["sudo", "rm", str(backup_path)], check=False)
+        
+        return {"status": "success", "message": f"Sauvegarde {filename} supprimee"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/system/backups/{filename}/restore")
+async def restore_backup(filename: str):
+    """Restore a backup file"""
+    try:
+        # Security: only allow restoring backup files with proper naming
+        if not filename.startswith("data-backup-") or not filename.endswith(".tar.gz"):
+            raise HTTPException(status_code=400, detail="Nom de fichier invalide")
+        
+        backup_path = Path("/opt/aurige") / filename
+        if not backup_path.exists():
+            raise HTTPException(status_code=404, detail="Sauvegarde introuvable")
+        
+        # Extract backup to /opt/aurige (will overwrite data folder)
+        result = run_command([
+            "sudo", "tar", "-xzf", str(backup_path), "-C", "/opt/aurige"
+        ], check=False)
+        
+        if result.returncode == 0:
+            return {"status": "success", "message": f"Sauvegarde {filename} restauree. Redemarrez les services."}
+        else:
+            return {"status": "error", "message": result.stderr or "Erreur lors de la restauration"}
     except HTTPException:
         raise
     except Exception as e:
