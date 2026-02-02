@@ -356,7 +356,7 @@ def update_mission_stats(mission_id: str, new_capture: bool = False):
 # Helper Functions - CAN Commands (Linux can-utils)
 # =============================================================================
 
-def run_command(cmd: list[str], check: bool = True) -> subprocess.CompletedProcess:
+def run_command(cmd: list[str], check: bool = True, timeout: int = 10) -> subprocess.CompletedProcess:
     """
     Execute a system command.
     This is the ONLY place where shell commands are executed.
@@ -367,7 +367,7 @@ def run_command(cmd: list[str], check: bool = True) -> subprocess.CompletedProce
             cmd,
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=timeout,
             check=check,
         )
         return result
@@ -2320,18 +2320,18 @@ async def connect_to_wifi(request: WifiConnectRequest):
             # Network is saved, just activate it (no password needed)
             result = run_command([
                 "nmcli", "connection", "up", request.ssid
-            ], check=False)
+            ], check=False, timeout=30)
         elif request.password:
             # New network with password - nmcli auto-detects security type
             result = run_command([
                 "nmcli", "device", "wifi", "connect", request.ssid,
                 "password", request.password
-            ], check=False)
+            ], check=False, timeout=30)
         else:
             # Try to connect to open network
             result = run_command([
                 "nmcli", "device", "wifi", "connect", request.ssid
-            ], check=False)
+            ], check=False, timeout=30)
         
         if result.returncode == 0:
             return {"status": "success", "message": f"Connecte a {request.ssid}"}
