@@ -2483,10 +2483,19 @@ async def get_system_version():
         date_result = run_command(["git", "-C", GIT_REPO_PATH, "log", "-1", "--format=%ci"], check=False)
         commit_date = date_result.stdout.strip() if date_result.returncode == 0 else ""
         
-        # Check if there are updates available - always compare with origin/main
-        # (local branch may be v0/main-xxx but we update from main)
+        # Check if there are updates available
+        # v0 pushes to origin/{local_branch} (e.g. origin/v0/main-xxx)
         run_command(["git", "-C", GIT_REPO_PATH, "fetch", "origin"], check=False)
-        behind_result = run_command(["git", "-C", GIT_REPO_PATH, "rev-list", "--count", "HEAD..origin/main"], check=False)
+        
+        # Try origin/{branch} first (where v0 pushes), fallback to origin/main
+        remote_branch = f"origin/{branch}" if branch and branch != "unknown" else "origin/main"
+        behind_result = run_command(["git", "-C", GIT_REPO_PATH, "rev-list", "--count", f"HEAD..{remote_branch}"], check=False)
+        
+        # If that fails (branch doesn't exist on remote), try origin/main
+        if behind_result.returncode != 0 or not behind_result.stdout.strip().isdigit():
+            remote_branch = "origin/main"
+            behind_result = run_command(["git", "-C", GIT_REPO_PATH, "rev-list", "--count", "HEAD..origin/main"], check=False)
+        
         commits_behind = int(behind_result.stdout.strip()) if behind_result.returncode == 0 and behind_result.stdout.strip().isdigit() else 0
         
         return {
@@ -2706,11 +2715,34 @@ async def start_update():
                 update_output_store["lines"].append(line.decode().strip())
             await fetch_proc.wait()
             
-            # Always reset to origin/main (the main branch on remote)
-            # Local branch may be different (e.g. v0/main-xxx) but we want latest from main
-            update_output_store["lines"].append(">>> Reset vers origin/main...")
+            # Get current branch to find the correct remote
+            branch_proc = await asyncio.create_subprocess_exec(
+                "git", "-C", GIT_REPO_PATH, "branch", "--show-current",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            branch_out, _ = await branch_proc.communicate()
+            current_branch = branch_out.decode().strip() or "main"
+            
+            # v0 pushes to origin/{current_branch} (e.g. origin/v0/main-xxx)
+            # Try that first, fallback to origin/main
+            remote_branch = f"origin/{current_branch}"
+            
+            # Check if remote branch exists
+            check_proc = await asyncio.create_subprocess_exec(
+                "git", "-C", GIT_REPO_PATH, "rev-parse", "--verify", remote_branch,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            await check_proc.wait()
+            
+            if check_proc.returncode != 0:
+                remote_branch = "origin/main"
+                update_output_store["lines"].append(f">>> Branche {current_branch} non trouvee sur origin, utilisation de main")
+            
+            update_output_store["lines"].append(f">>> Reset vers {remote_branch}...")
             process = await asyncio.create_subprocess_exec(
-                "sudo", "git", "-C", GIT_REPO_PATH, "reset", "--hard", "origin/main",
+                "sudo", "git", "-C", GIT_REPO_PATH, "reset", "--hard", remote_branch,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
             )
