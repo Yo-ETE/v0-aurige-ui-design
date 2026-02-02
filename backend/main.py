@@ -2320,6 +2320,9 @@ async def get_system_version():
         if not Path(GIT_REPO_PATH).exists() or not Path(f"{GIT_REPO_PATH}/.git").exists():
             return {"branch": "non installe", "commit": "-", "commitsBehind": 0, "updateAvailable": False, "error": "Depot git non trouve dans /tmp/aurige"}
         
+        # Add safe.directory to avoid "dubious ownership" error
+        run_command(["git", "config", "--global", "--add", "safe.directory", GIT_REPO_PATH], check=False)
+        
         # Get current branch
         branch_result = run_command(["git", "-C", GIT_REPO_PATH, "branch", "--show-current"], check=False)
         branch = branch_result.stdout.strip() if branch_result.returncode == 0 else "unknown"
@@ -2355,11 +2358,25 @@ async def list_backups():
         backup_dir = Path("/opt/aurige")
         backups = []
         for f in backup_dir.glob("data-backup-*.tar.gz"):
-            stat = f.stat()
+            # Use stat command to get file size (works better with sudo-created files)
+            stat_result = run_command(["stat", "-c", "%s %Y", str(f)], check=False)
+            if stat_result.returncode == 0:
+                parts = stat_result.stdout.strip().split()
+                size = int(parts[0]) if parts else 0
+                mtime = int(parts[1]) if len(parts) > 1 else 0
+            else:
+                try:
+                    stat = f.stat()
+                    size = stat.st_size
+                    mtime = int(stat.st_mtime)
+                except:
+                    size = 0
+                    mtime = 0
+            
             backups.append({
                 "filename": f.name,
-                "size": stat.st_size,
-                "created": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                "size": size,
+                "created": datetime.fromtimestamp(mtime).isoformat() if mtime else "",
             })
         backups.sort(key=lambda x: x["created"], reverse=True)
         return {"backups": backups}
@@ -2375,25 +2392,33 @@ async def create_backup():
         backup_file = f"/opt/aurige/data-backup-{timestamp}.tar.gz"
         data_dir = Path("/opt/aurige/data")
         
-        # Check if data directory exists and has content
+        # Check if data directory exists
         if not data_dir.exists():
-            return {"status": "error", "message": "Le dossier data n'existe pas"}
+            return {"status": "error", "message": "Le dossier /opt/aurige/data n'existe pas"}
         
+        # Check if data directory has any content
+        data_files = list(data_dir.rglob("*"))
+        if not data_files:
+            return {"status": "error", "message": "Le dossier data est vide, rien a sauvegarder"}
+        
+        # Create backup with verbose output
         result = run_command([
-            "sudo", "tar", "-czf", backup_file, "-C", "/opt/aurige", "data"
+            "sudo", "tar", "-czvf", backup_file, "-C", "/opt/aurige", "data"
         ], check=False)
         
         if result.returncode == 0:
-            # Get file size
-            stat = Path(backup_file).stat()
+            # Get file size - need sudo to read file created by sudo
+            stat_result = run_command(["stat", "-c", "%s", backup_file], check=False)
+            size = int(stat_result.stdout.strip()) if stat_result.returncode == 0 else 0
+            
             return {
                 "status": "success",
-                "message": f"Sauvegarde créée: {backup_file}",
+                "message": f"Sauvegarde creee: {backup_file}",
                 "filename": f"data-backup-{timestamp}.tar.gz",
-                "size": stat.st_size,
+                "size": size,
             }
         else:
-            return {"status": "error", "message": result.stderr or "Erreur lors de la sauvegarde"}
+            return {"status": "error", "message": result.stderr or result.stdout or "Erreur lors de la sauvegarde"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
@@ -2434,6 +2459,15 @@ async def start_update():
     async def run_update():
         global update_output_store
         try:
+            # First, add safe.directory to avoid "dubious ownership" error
+            update_output_store["lines"].append(">>> Configuration git safe.directory...")
+            safe_dir_proc = await asyncio.create_subprocess_exec(
+                "sudo", "git", "config", "--global", "--add", "safe.directory", GIT_REPO_PATH,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            await safe_dir_proc.wait()
+            
             update_output_store["lines"].append(">>> Mise a jour depuis Git...")
             
             # Git pull
