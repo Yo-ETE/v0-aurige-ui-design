@@ -1217,6 +1217,60 @@ async def download_log(mission_id: str, log_id: str):
     )
 
 
+@app.get("/api/missions/{mission_id}/logs/{log_id}/content")
+async def get_log_content(mission_id: str, log_id: str, limit: int = 500, offset: int = 0):
+    """Get parsed content of a log file (CAN frames)"""
+    load_mission(mission_id)
+    
+    logs_dir = get_mission_logs_dir(mission_id)
+    log_file = logs_dir / f"{log_id}.log"
+    
+    if not log_file.exists():
+        raise HTTPException(status_code=404, detail="Log not found")
+    
+    frames = []
+    total_count = 0
+    
+    with open(log_file, "r") as f:
+        for i, line in enumerate(f):
+            total_count += 1
+            if i < offset:
+                continue
+            if len(frames) >= limit:
+                continue  # Keep counting total
+            
+            line = line.strip()
+            if not line:
+                continue
+            
+            # Parse candump format: (timestamp) interface canid#data
+            # Example: (1234567890.123456) can0 7DF#02010C
+            try:
+                parts = line.split()
+                if len(parts) >= 3:
+                    timestamp = parts[0].strip("()")
+                    interface = parts[1]
+                    frame_parts = parts[2].split("#")
+                    if len(frame_parts) == 2:
+                        frames.append({
+                            "timestamp": timestamp,
+                            "interface": interface,
+                            "canId": frame_parts[0],
+                            "data": frame_parts[1],
+                            "raw": line,
+                        })
+            except Exception:
+                # If parsing fails, just include raw line
+                frames.append({"raw": line})
+    
+    return {
+        "frames": frames,
+        "totalCount": total_count,
+        "offset": offset,
+        "limit": limit,
+    }
+
+
 @app.delete("/api/missions/{mission_id}/logs/{log_id}")
 async def delete_log(mission_id: str, log_id: str):
     """Delete a log file"""
@@ -2073,6 +2127,32 @@ async def get_wifi_status():
         }
     except Exception as e:
         return {"connected": False, "ssid": "", "signal": 0, "error": str(e)}
+
+
+@app.get("/api/network/ethernet/status")
+async def get_ethernet_status():
+    """Get current Ethernet connection status"""
+    try:
+        connected = False
+        ip_local = ""
+        
+        # Check eth0 status
+        result = run_command(["ip", "-json", "addr", "show", "eth0"], check=False)
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            if data:
+                for addr_info in data[0].get("addr_info", []):
+                    if addr_info.get("family") == "inet":
+                        ip_local = addr_info.get("local", "")
+                        connected = True
+                        break
+        
+        return {
+            "connected": connected,
+            "ipLocal": ip_local,
+        }
+    except Exception as e:
+        return {"connected": False, "ipLocal": "", "error": str(e)}
 
 
 class WifiConnectRequest(BaseModel):

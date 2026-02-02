@@ -404,6 +404,25 @@ export async function deleteLog(missionId: string, logId: string): Promise<void>
   })
 }
 
+export interface LogFrame {
+  timestamp?: string
+  interface?: string
+  canId?: string
+  data?: string
+  raw: string
+}
+
+export interface LogContentResponse {
+  frames: LogFrame[]
+  totalCount: number
+  offset: number
+  limit: number
+}
+
+export async function getLogContent(missionId: string, logId: string, limit = 500, offset = 0): Promise<LogContentResponse> {
+  return fetchApi<LogContentResponse>(`/missions/${missionId}/logs/${logId}/content?limit=${limit}&offset=${offset}`)
+}
+
 export interface RenameLogResult {
   status: string
   oldId: string
@@ -532,6 +551,11 @@ export interface WifiStatus {
   ipPublic: string
 }
 
+export interface EthernetStatus {
+  connected: boolean
+  ipLocal: string
+}
+
 export interface AptOutput {
   running: boolean
   command: string
@@ -544,6 +568,10 @@ export async function scanWifiNetworks(): Promise<{ status: string; networks: Wi
 
 export async function getWifiStatus(): Promise<WifiStatus> {
   return fetchApi("/network/wifi/status")
+}
+
+export async function getEthernetStatus(): Promise<EthernetStatus> {
+  return fetchApi("/network/ethernet/status")
 }
 
 export async function connectToWifi(ssid: string, password: string): Promise<{ status: string; message: string }> {

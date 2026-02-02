@@ -27,12 +27,18 @@ import {
   Loader2,
   CheckCircle2,
   Pencil,
+  Eye,
+  X,
+  Send,
 } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { useIsolationStore, type IsolationLog } from "@/lib/isolation-store"
-import { listMissionLogs, startReplay, stopReplay, getReplayStatus, splitLog, renameLog, type LogEntry, type CANInterface } from "@/lib/api"
+import { useExportStore } from "@/lib/export-store"
+import { listMissionLogs, startReplay, stopReplay, getReplayStatus, splitLog, renameLog, getLogContent, type LogEntry, type CANInterface, type LogFrame } from "@/lib/api"
+import { useRouter as useNavRouter } from "next/navigation"
 import { useMissionStore } from "@/lib/mission-store"
 
 const steps = [
@@ -51,6 +57,7 @@ function LogTreeItem({
   onRemove,
   onTagChange,
   onRename,
+  onView,
   isReplaying,
   isSplitting,
   renamingLog,
@@ -65,6 +72,7 @@ function LogTreeItem({
   onRemove: (logId: string) => void
   onTagChange: (logId: string, tag: "success" | "failed") => void
   onRename: (log: IsolationLog) => void
+  onView: (log: IsolationLog) => void
   isReplaying: string | null
   isSplitting: string | null
   renamingLog: string | null
@@ -151,6 +159,15 @@ function LogTreeItem({
               size="icon"
               variant="ghost"
               className="h-7 w-7"
+              onClick={() => onView(item)}
+              title="Voir les trames"
+            >
+              <Eye className="h-3 w-3" />
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-7 w-7"
               onClick={() => {
                 setRenamingLog(item.id)
                 setNewLogName(item.name.replace(".log", ""))
@@ -198,6 +215,7 @@ function LogTreeItem({
               onRemove={onRemove}
               onTagChange={onTagChange}
               onRename={onRename}
+              onView={onView}
               isReplaying={isReplaying}
               isSplitting={isSplitting}
               renamingLog={renamingLog}
@@ -214,7 +232,9 @@ function LogTreeItem({
 
 export default function Isolation() {
   const router = useRouter()
+  const navRouter = useNavRouter()
   const { logs, importLog, addChildLog, removeLog, updateLogTags, updateLogName, clearLogs, setMission } = useIsolationStore()
+  const { addFrames } = useExportStore()
   
   // Mission context
   const currentMissionId = useMissionStore((state) => state.currentMissionId)
@@ -229,6 +249,12 @@ export default function Isolation() {
   const [renamingLog, setRenamingLog] = useState<string | null>(null)
   const [newLogName, setNewLogName] = useState("")
   const [importMissionId, setImportMissionId] = useState<string>("")
+  
+  // Log viewer state
+  const [viewingLog, setViewingLog] = useState<IsolationLog | null>(null)
+  const [logFrames, setLogFrames] = useState<LogFrame[]>([])
+  const [isLoadingFrames, setIsLoadingFrames] = useState(false)
+  const [totalFrames, setTotalFrames] = useState(0)
   
   // Get mission ID from localStorage and sync with store
   useEffect(() => {
@@ -321,6 +347,43 @@ export default function Isolation() {
   const startRenaming = (log: IsolationLog) => {
     setRenamingLog(log.id)
     setNewLogName(log.name.replace(".log", ""))
+  }
+
+  const handleViewLog = async (log: IsolationLog) => {
+    setViewingLog(log)
+    setIsLoadingFrames(true)
+    setLogFrames([])
+    try {
+      const response = await getLogContent(log.missionId, log.id, 500)
+      setLogFrames(response.frames)
+      setTotalFrames(response.totalCount)
+    } catch (err) {
+      console.error("Failed to load log content:", err)
+    } finally {
+      setIsLoadingFrames(false)
+    }
+  }
+
+  const closeLogViewer = () => {
+    setViewingLog(null)
+    setLogFrames([])
+  }
+
+  const handleExportToReplay = () => {
+    if (!viewingLog || logFrames.length === 0) return
+    
+    const exportedFrames = logFrames
+      .filter(f => f.canId && f.data)
+      .map(f => ({
+        canId: f.canId!,
+        data: f.data!,
+        timestamp: f.timestamp,
+        source: viewingLog.name,
+      }))
+    
+    addFrames(exportedFrames)
+    closeLogViewer()
+    navRouter.push("/replay-rapide")
   }
   
   const [isSplitting, setIsSplitting] = useState<string | null>(null)
@@ -483,6 +546,7 @@ export default function Isolation() {
                     onRemove={removeLog}
                     onTagChange={handleTagChange}
                     onRename={handleRename}
+                    onView={handleViewLog}
                     isReplaying={isReplaying}
                     isSplitting={isSplitting}
                     renamingLog={renamingLog}
@@ -579,6 +643,66 @@ export default function Isolation() {
               </div>
             )}
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Log Viewer Dialog */}
+      <Dialog open={viewingLog !== null} onOpenChange={(open) => !open && closeLogViewer()}>
+        <DialogContent className="sm:max-w-4xl max-h-[80vh]">
+          <DialogHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <DialogTitle className="flex items-center gap-2">
+                  <FileText className="h-5 w-5" />
+                  {viewingLog?.name}
+                </DialogTitle>
+                <DialogDescription>
+                  {totalFrames} trames au total
+                  {logFrames.length < totalFrames && ` (affichage des ${logFrames.length} premieres)`}
+                </DialogDescription>
+              </div>
+              <Button
+                onClick={handleExportToReplay}
+                disabled={logFrames.length === 0}
+                className="gap-2"
+              >
+                <Send className="h-4 w-4" />
+                Exporter vers Replay
+              </Button>
+            </div>
+          </DialogHeader>
+          <div className="mt-4">
+            {isLoadingFrames ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : (
+              <ScrollArea className="h-[400px] rounded-md border border-border">
+                <div className="p-2">
+                  <table className="w-full text-xs font-mono">
+                    <thead className="sticky top-0 bg-secondary">
+                      <tr className="text-left text-muted-foreground">
+                        <th className="p-2 w-32">Timestamp</th>
+                        <th className="p-2 w-16">Interface</th>
+                        <th className="p-2 w-20">CAN ID</th>
+                        <th className="p-2">Data</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {logFrames.map((frame, index) => (
+                        <tr key={index} className="border-t border-border/50 hover:bg-secondary/50">
+                          <td className="p-2 text-muted-foreground">{frame.timestamp || "-"}</td>
+                          <td className="p-2">{frame.interface || "-"}</td>
+                          <td className="p-2 text-primary font-semibold">{frame.canId || "-"}</td>
+                          <td className="p-2">{frame.data || frame.raw}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </ScrollArea>
+            )}
           </div>
         </DialogContent>
       </Dialog>

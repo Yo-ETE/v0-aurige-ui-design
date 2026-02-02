@@ -29,6 +29,7 @@ import {
 import {
   scanWifiNetworks,
   getWifiStatus,
+  getEthernetStatus,
   connectToWifi,
   runAptUpdate,
   runAptUpgrade,
@@ -37,12 +38,14 @@ import {
   systemShutdown,
   type WifiNetwork,
   type WifiStatus,
+  type EthernetStatus,
   type AptOutput,
 } from "@/lib/api"
 
 export default function ConfigurationPage() {
   // Wi-Fi state
   const [wifiStatus, setWifiStatus] = useState<WifiStatus | null>(null)
+  const [ethernetStatus, setEthernetStatus] = useState<EthernetStatus | null>(null)
   const [networks, setNetworks] = useState<WifiNetwork[]>([])
   const [isScanning, setIsScanning] = useState(false)
   const [selectedNetwork, setSelectedNetwork] = useState<string | null>(null)
@@ -57,13 +60,18 @@ export default function ConfigurationPage() {
   const [isShuttingDown, setIsShuttingDown] = useState(false)
   const [systemMessage, setSystemMessage] = useState<string | null>(null)
 
-  // Fetch Wi-Fi status
-  const fetchWifiStatus = useCallback(async () => {
+  // Fetch connection status (wifi + ethernet)
+  const fetchConnectionStatus = useCallback(async () => {
     try {
-      const status = await getWifiStatus()
-      setWifiStatus(status)
+      const [wifi, ethernet] = await Promise.all([
+        getWifiStatus(),
+        getEthernetStatus(),
+      ])
+      setWifiStatus(wifi)
+      setEthernetStatus(ethernet)
     } catch {
       setWifiStatus(null)
+      setEthernetStatus(null)
     }
   }, [])
 
@@ -97,7 +105,7 @@ export default function ConfigurationPage() {
         setWifiSuccess(result.message)
         setWifiPassword("")
         setSelectedNetwork(null)
-        await fetchWifiStatus()
+        await fetchConnectionStatus()
       } else {
         setWifiError(result.message)
       }
@@ -170,9 +178,9 @@ export default function ConfigurationPage() {
 
   // Initial load
   useEffect(() => {
-    fetchWifiStatus()
+    fetchConnectionStatus()
     handleScan()
-  }, [fetchWifiStatus])
+  }, [fetchConnectionStatus])
 
   // Signal strength helper
   const getSignalIcon = (signal: number) => {
@@ -187,63 +195,97 @@ export default function ConfigurationPage() {
       description="Administration reseau et systeme du Raspberry Pi"
     >
       <div className="grid gap-6 lg:grid-cols-2">
-        {/* Wi-Fi Status Card */}
+        {/* Connection Status Card */}
         <Card className="border-border bg-card">
           <CardHeader>
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                {wifiStatus?.connected ? (
-                  <Wifi className="h-5 w-5 text-primary" />
-                ) : (
-                  <WifiOff className="h-5 w-5 text-muted-foreground" />
-                )}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                  <Globe className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <CardTitle className="text-lg">Etat connexion</CardTitle>
+                  <CardDescription>Wi-Fi et Ethernet</CardDescription>
+                </div>
               </div>
-              <div>
-                <CardTitle className="text-lg">Etat Wi-Fi</CardTitle>
-                <CardDescription>Connexion actuelle</CardDescription>
-              </div>
+              <Button variant="outline" size="sm" onClick={fetchConnectionStatus} className="bg-transparent">
+                <RefreshCw className="h-4 w-4" />
+              </Button>
             </div>
           </CardHeader>
-          <CardContent>
-            {wifiStatus ? (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
+          <CardContent className="space-y-4">
+            {/* Wi-Fi Section */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                {wifiStatus?.connected ? (
+                  <Wifi className="h-4 w-4 text-success" />
+                ) : (
+                  <WifiOff className="h-4 w-4 text-muted-foreground" />
+                )}
+                <span className="font-medium">Wi-Fi</span>
+                {wifiStatus?.connected && (
+                  <span className="text-xs text-success ml-auto">Connecte</span>
+                )}
+              </div>
+              {wifiStatus?.connected ? (
+                <div className="grid grid-cols-2 gap-3 pl-6 text-sm">
+                  <div>
                     <p className="text-xs text-muted-foreground">SSID</p>
-                    <p className="font-semibold">{wifiStatus.ssid || "Non connecte"}</p>
+                    <p className="font-medium">{wifiStatus.ssid}</p>
                   </div>
-                  <div className="space-y-1">
+                  <div>
                     <p className="text-xs text-muted-foreground">Signal</p>
-                    <p className="font-semibold flex items-center gap-2">
+                    <p className="font-medium flex items-center gap-1">
                       {wifiStatus.signal} dBm
                       {getSignalIcon(wifiStatus.signal + 100)}
                     </p>
                   </div>
-                  <div className="space-y-1">
+                  <div>
                     <p className="text-xs text-muted-foreground">IP Locale</p>
-                    <p className="font-mono text-sm">{wifiStatus.ipLocal || "-"}</p>
+                    <p className="font-mono text-xs">{wifiStatus.ipLocal}</p>
                   </div>
-                  <div className="space-y-1">
+                  <div>
                     <p className="text-xs text-muted-foreground">IP Publique</p>
-                    <p className="font-mono text-sm">{wifiStatus.ipPublic || "-"}</p>
+                    <p className="font-mono text-xs">{wifiStatus.ipPublic || "-"}</p>
                   </div>
-                  <div className="space-y-1">
+                  <div>
                     <p className="text-xs text-muted-foreground">Debit TX</p>
-                    <p className="font-semibold">{wifiStatus.txRate || "-"}</p>
+                    <p className="font-medium">{wifiStatus.txRate}</p>
                   </div>
-                  <div className="space-y-1">
+                  <div>
                     <p className="text-xs text-muted-foreground">Debit RX</p>
-                    <p className="font-semibold">{wifiStatus.rxRate || "-"}</p>
+                    <p className="font-medium">{wifiStatus.rxRate}</p>
                   </div>
                 </div>
-                <Button variant="outline" size="sm" onClick={fetchWifiStatus} className="w-full mt-4 bg-transparent">
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                  Actualiser
-                </Button>
+              ) : (
+                <p className="text-xs text-muted-foreground pl-6">Non connecte</p>
+              )}
+            </div>
+
+            <div className="border-t border-border" />
+
+            {/* Ethernet Section */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                {ethernetStatus?.connected ? (
+                  <Network className="h-4 w-4 text-success" />
+                ) : (
+                  <Network className="h-4 w-4 text-muted-foreground" />
+                )}
+                <span className="font-medium">Ethernet</span>
+                {ethernetStatus?.connected && (
+                  <span className="text-xs text-success ml-auto">Connecte</span>
+                )}
               </div>
-            ) : (
-              <p className="text-muted-foreground text-sm">Chargement...</p>
-            )}
+              {ethernetStatus?.connected ? (
+                <div className="pl-6 text-sm">
+                  <p className="text-xs text-muted-foreground">IP Locale</p>
+                  <p className="font-mono text-xs">{ethernetStatus.ipLocal}</p>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground pl-6">Non connecte</p>
+              )}
+            </div>
           </CardContent>
         </Card>
 
