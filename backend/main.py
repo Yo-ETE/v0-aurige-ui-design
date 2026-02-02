@@ -2286,20 +2286,58 @@ class WifiConnectRequest(BaseModel):
     password: str
 
 
+@app.get("/api/network/wifi/saved")
+async def get_saved_networks():
+    """Get list of saved Wi-Fi networks"""
+    try:
+        result = run_command(["nmcli", "-t", "-f", "NAME,TYPE", "connection", "show"], check=False)
+        saved = []
+        if result.returncode == 0:
+            for line in result.stdout.strip().split("\n"):
+                parts = line.split(":")
+                if len(parts) >= 2 and parts[1] == "802-11-wireless":
+                    saved.append(parts[0])
+        return {"saved": saved}
+    except Exception as e:
+        return {"saved": [], "error": str(e)}
+
+
 @app.post("/api/network/wifi/connect")
 async def connect_to_wifi(request: WifiConnectRequest):
     """Connect to a Wi-Fi network"""
     try:
-        # Use nmcli to connect
-        result = run_command([
-            "nmcli", "device", "wifi", "connect", request.ssid,
-            "password", request.password
-        ], check=False)
+        # First check if this network is already saved
+        saved_result = run_command(["nmcli", "-t", "-f", "NAME,TYPE", "connection", "show"], check=False)
+        is_saved = False
+        if saved_result.returncode == 0:
+            for line in saved_result.stdout.strip().split("\n"):
+                parts = line.split(":")
+                if len(parts) >= 2 and parts[0] == request.ssid and parts[1] == "802-11-wireless":
+                    is_saved = True
+                    break
+        
+        if is_saved:
+            # Network is saved, just activate it (no password needed)
+            result = run_command([
+                "nmcli", "connection", "up", request.ssid
+            ], check=False)
+        elif request.password:
+            # New network with password - use proper security settings
+            result = run_command([
+                "nmcli", "device", "wifi", "connect", request.ssid,
+                "password", request.password,
+                "wifi-sec.key-mgmt", "wpa-psk"
+            ], check=False)
+        else:
+            # Try to connect to open network
+            result = run_command([
+                "nmcli", "device", "wifi", "connect", request.ssid
+            ], check=False)
         
         if result.returncode == 0:
-            return {"status": "success", "message": f"Connecté à {request.ssid}"}
+            return {"status": "success", "message": f"Connecte a {request.ssid}"}
         else:
-            error_msg = result.stderr.strip() if result.stderr else "Connexion échouée"
+            error_msg = result.stderr.strip() if result.stderr else result.stdout.strip() if result.stdout else "Connexion echouee"
             return {"status": "error", "message": error_msg}
     except Exception as e:
         return {"status": "error", "message": str(e)}

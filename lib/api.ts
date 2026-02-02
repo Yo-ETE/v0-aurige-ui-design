@@ -583,6 +583,10 @@ export async function getEthernetStatus(): Promise<EthernetStatus> {
   return fetchApi("/network/ethernet/status")
 }
 
+export async function getSavedNetworks(): Promise<{ saved: string[] }> {
+  return fetchApi("/network/wifi/saved")
+}
+
 export async function connectToWifi(ssid: string, password: string): Promise<{ status: string; message: string }> {
   return fetchApi("/network/wifi/connect", {
     method: "POST",

@@ -32,12 +32,16 @@ import {
   RotateCcw,
   Usb,
   Cable,
+  Eye,
+  EyeOff,
+  Star,
 } from "lucide-react"
 import {
   scanWifiNetworks,
   getWifiStatus,
   getEthernetStatus,
   connectToWifi,
+  getSavedNetworks,
   runAptUpdate,
   runAptUpgrade,
   getAptOutput,
@@ -68,6 +72,8 @@ export default function ConfigurationPage() {
   const [isScanning, setIsScanning] = useState(false)
   const [selectedNetwork, setSelectedNetwork] = useState<string | null>(null)
   const [wifiPassword, setWifiPassword] = useState("")
+  const [showPassword, setShowPassword] = useState(false)
+  const [savedNetworks, setSavedNetworks] = useState<string[]>([])
   const [isConnecting, setIsConnecting] = useState(false)
   const [wifiError, setWifiError] = useState<string | null>(null)
   const [wifiSuccess, setWifiSuccess] = useState<string | null>(null)
@@ -105,16 +111,29 @@ export default function ConfigurationPage() {
     }
   }, [])
 
+  // Fetch saved networks
+  const fetchSavedNetworks = useCallback(async () => {
+    try {
+      const result = await getSavedNetworks()
+      setSavedNetworks(result.saved || [])
+    } catch {
+      setSavedNetworks([])
+    }
+  }, [])
+
   // Scan for networks
   const handleScan = async () => {
     setIsScanning(true)
     setWifiError(null)
     try {
-      const result = await scanWifiNetworks()
-      if (result.status === "success") {
-        setNetworks(result.networks)
+      const [scanResult] = await Promise.all([
+        scanWifiNetworks(),
+        fetchSavedNetworks(),
+      ])
+      if (scanResult.status === "success") {
+        setNetworks(scanResult.networks)
       } else {
-        setWifiError(result.message || "Erreur lors du scan")
+        setWifiError(scanResult.message || "Erreur lors du scan")
       }
     } catch (err) {
       setWifiError("Erreur lors du scan Wi-Fi")
@@ -517,6 +536,9 @@ export default function ConfigurationPage() {
                         <Unlock className="h-4 w-4 text-muted-foreground" />
                       )}
                       <span className="font-medium">{network.ssid}</span>
+                      {savedNetworks.includes(network.ssid) && (
+                        <Star className="h-3 w-3 text-warning fill-warning" title="Reseau enregistre" />
+                      )}
                       {wifiStatus?.ssid === network.ssid && (
                         <CheckCircle2 className="h-4 w-4 text-success" />
                       )}
@@ -537,17 +559,47 @@ export default function ConfigurationPage() {
 
             {selectedNetwork && (
               <div className="space-y-3 pt-2 border-t border-border">
-                <p className="font-medium">Connexion a: {selectedNetwork}</p>
-                <div className="space-y-2">
-                  <Label htmlFor="wifi-password">Mot de passe</Label>
-                  <Input
-                    id="wifi-password"
-                    type="password"
-                    value={wifiPassword}
-                    onChange={(e) => setWifiPassword(e.target.value)}
-                    placeholder="Mot de passe Wi-Fi"
-                  />
+                <div className="flex items-center gap-2">
+                  <p className="font-medium">Connexion a: {selectedNetwork}</p>
+                  {savedNetworks.includes(selectedNetwork) && (
+                    <span className="text-xs bg-warning/20 text-warning px-2 py-0.5 rounded flex items-center gap-1">
+                      <Star className="h-3 w-3 fill-warning" />
+                      Enregistre
+                    </span>
+                  )}
                 </div>
+                {savedNetworks.includes(selectedNetwork) ? (
+                  <p className="text-sm text-muted-foreground">
+                    Ce reseau est deja enregistre. Cliquez sur Se connecter pour vous reconnecter.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    <Label htmlFor="wifi-password">Mot de passe</Label>
+                    <div className="relative">
+                      <Input
+                        id="wifi-password"
+                        type={showPassword ? "text" : "password"}
+                        value={wifiPassword}
+                        onChange={(e) => setWifiPassword(e.target.value)}
+                        placeholder="Mot de passe Wi-Fi"
+                        className="pr-10"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
+                        onClick={() => setShowPassword(!showPassword)}
+                      >
+                        {showPassword ? (
+                          <EyeOff className="h-4 w-4 text-muted-foreground" />
+                        ) : (
+                          <Eye className="h-4 w-4 text-muted-foreground" />
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                )}
                 <Button onClick={handleConnect} disabled={isConnecting} className="w-full">
                   {isConnecting ? (
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
