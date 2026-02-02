@@ -581,15 +581,23 @@ async def get_system_status():
                         break
         
         if wifi_connected:
-            # Get SSID using iwgetid (more reliable than nmcli CONNECTION)
+            # Method 1: Try iwgetid first
             ssid_result = run_command(["iwgetid", "-r", "wlan0"], check=False)
             if ssid_result.returncode == 0 and ssid_result.stdout.strip():
                 wifi_ssid = ssid_result.stdout.strip()
             
+            # Method 2: Try nmcli to get actual connected SSID
+            if not wifi_ssid:
+                nmcli_result = run_command(["nmcli", "-t", "-f", "active,ssid", "dev", "wifi"], check=False)
+                for line in nmcli_result.stdout.strip().split("\n"):
+                    if line.startswith("yes:"):
+                        wifi_ssid = line.split(":", 1)[1] if ":" in line else ""
+                        break
+            
             # Get signal and rates from iw
             iw_result = run_command(["iw", "dev", "wlan0", "link"], check=False)
             for line in iw_result.stdout.split("\n"):
-                # Fallback: get SSID from iw if iwgetid failed
+                # Method 3: Fallback - get SSID from iw
                 if "SSID:" in line and not wifi_ssid:
                     wifi_ssid = line.split("SSID:")[1].strip()
                 if "signal:" in line:
@@ -2086,15 +2094,23 @@ async def get_wifi_status():
         rx_rate = ""
         
         if wifi_connected:
-            # Get SSID using iwgetid (most reliable method)
+            # Method 1: Try iwgetid first (most reliable)
             ssid_result = run_command(["iwgetid", "-r", "wlan0"], check=False)
             if ssid_result.returncode == 0 and ssid_result.stdout.strip():
                 ssid = ssid_result.stdout.strip()
             
+            # Method 2: Try nmcli to get the actual connected SSID (not connection name)
+            if not ssid:
+                nmcli_result = run_command(["nmcli", "-t", "-f", "active,ssid", "dev", "wifi"], check=False)
+                for line in nmcli_result.stdout.strip().split("\n"):
+                    if line.startswith("yes:"):
+                        ssid = line.split(":", 1)[1] if ":" in line else ""
+                        break
+            
             # Get signal and rates from iw
             iw_result = run_command(["iw", "dev", "wlan0", "link"], check=False)
             for line in iw_result.stdout.split("\n"):
-                # Fallback: get SSID from iw if iwgetid failed
+                # Method 3: Fallback - get SSID from iw if still not found
                 if "SSID:" in line and not ssid:
                     ssid = line.split("SSID:")[1].strip()
                 if "signal:" in line:

@@ -540,6 +540,142 @@ export default function ConfigurationPage() {
           </CardContent>
         </Card>
 
+        {/* Aurige Update Card */}
+        <Card className="border-border bg-card">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-success/10">
+                  <GitBranch className="h-5 w-5 text-success" />
+                </div>
+                <div>
+                  <CardTitle className="text-lg">Mise a jour Aurige</CardTitle>
+                  <CardDescription>Version et mise a jour depuis Git</CardDescription>
+                </div>
+              </div>
+              <Button variant="outline" size="sm" onClick={fetchVersionInfo} disabled={isCheckingVersion} className="bg-transparent">
+                <RefreshCw className={`h-4 w-4 ${isCheckingVersion ? "animate-spin" : ""}`} />
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {versionInfo ? (
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Branche</p>
+                    <p className="font-mono">{versionInfo.branch}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Commit</p>
+                    <p className="font-mono">{versionInfo.commit}</p>
+                  </div>
+                  {versionInfo.commitDate && (
+                    <div className="col-span-2">
+                      <p className="text-xs text-muted-foreground">Date</p>
+                      <p className="text-sm">{versionInfo.commitDate}</p>
+                    </div>
+                  )}
+                </div>
+                {versionInfo.updateAvailable && (
+                  <Alert className="border-success/50 bg-success/10">
+                    <ArrowUpCircle className="h-4 w-4 text-success" />
+                    <AlertDescription className="text-success">
+                      {versionInfo.commitsBehind} commit(s) disponible(s)
+                    </AlertDescription>
+                  </Alert>
+                )}
+                <Button
+                  onClick={handleStartUpdate}
+                  disabled={updateOutput.running}
+                  className="w-full gap-2"
+                >
+                  {updateOutput.running ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Download className="h-4 w-4" />
+                  )}
+                  {updateOutput.running ? "Mise a jour..." : "Mettre a jour Aurige"}
+                </Button>
+              </div>
+            ) : (
+              <p className="text-muted-foreground text-sm">Chargement...</p>
+            )}
+
+            {updateOutput.lines.length > 0 && (
+              <ScrollArea className="h-32 rounded-md border border-border bg-secondary/30 p-3">
+                <pre className="text-xs font-mono text-muted-foreground whitespace-pre-wrap">
+                  {updateOutput.lines.join("\n")}
+                </pre>
+              </ScrollArea>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Backup Card */}
+        <Card className="border-border bg-card">
+          <CardHeader>
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                <Archive className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <CardTitle className="text-lg">Sauvegardes</CardTitle>
+                <CardDescription>Sauvegarde des donnees missions</CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <Button
+              onClick={handleCreateBackup}
+              disabled={isCreatingBackup}
+              className="w-full gap-2"
+            >
+              {isCreatingBackup ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <HardDrive className="h-4 w-4" />
+              )}
+              {isCreatingBackup ? "Sauvegarde..." : "Creer une sauvegarde"}
+            </Button>
+
+            {backupMessage && (
+              <Alert className="border-muted">
+                <CheckCircle2 className="h-4 w-4" />
+                <AlertDescription>{backupMessage}</AlertDescription>
+              </Alert>
+            )}
+
+            {backups.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground font-medium">Sauvegardes existantes</p>
+                <ScrollArea className="h-32">
+                  <div className="space-y-2">
+                    {backups.map((backup) => (
+                      <div key={backup.filename} className="flex items-center justify-between p-2 rounded bg-secondary/50">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-mono truncate">{backup.filename}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {(backup.size / 1024 / 1024).toFixed(2)} Mo
+                          </p>
+                        </div>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7 text-destructive"
+                          onClick={() => handleDeleteBackup(backup.filename)}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
         {/* Power Controls Card */}
         <Card className="border-border bg-card lg:col-span-2">
           <CardHeader>
