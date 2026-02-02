@@ -59,7 +59,9 @@ function mapStatusToTiles(status: SystemStatus): StatusTile[] {
         ? (status.wifiIsHotspot ? `Hotspot: ${status.wifiHotspotSsid || "Aurige"}` : (status.wifiSsid || "Connecté"))
         : "Déconnecté",
       subvalue: status.wifiConnected 
-        ? (status.wifiIsHotspot ? "Mode point d'accès" : `${status.wifiTxRate || "-"} / ${status.wifiRxRate || "-"}`)
+        ? (status.wifiIsHotspot 
+            ? `Internet: ${status.wifiInternetSource || "?"}${status.wifiInternetVia ? ` (${status.wifiInternetVia})` : ""}`
+            : `${status.wifiTxRate || "-"} / ${status.wifiRxRate || "-"}`)
         : "Aucune connexion",
       status: status.wifiConnected ? "ok" : "warning",
     },

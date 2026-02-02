@@ -83,6 +83,8 @@ export interface SystemStatus {
   wifiRxRate?: string
   wifiIsHotspot?: boolean
   wifiHotspotSsid?: string
+  wifiInternetSource?: string
+  wifiInternetVia?: string
   ethernetConnected: boolean
   ethernetIp?: string
   can0Up: boolean

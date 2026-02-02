@@ -230,6 +230,8 @@ class SystemStatus(BaseModel):
     wifi_rx_rate: Optional[str] = Field(default=None, alias="wifiRxRate")
     wifi_is_hotspot: Optional[bool] = Field(default=False, alias="wifiIsHotspot")
     wifi_hotspot_ssid: Optional[str] = Field(default=None, alias="wifiHotspotSsid")
+    wifi_internet_source: Optional[str] = Field(default=None, alias="wifiInternetSource")
+    wifi_internet_via: Optional[str] = Field(default=None, alias="wifiInternetVia")
     ethernet_connected: bool = Field(alias="ethernetConnected")
     ethernet_ip: Optional[str] = Field(default=None, alias="ethernetIp")
     can0_up: bool = Field(alias="can0Up")
@@ -625,6 +627,35 @@ async def get_system_status():
     except Exception:
         pass
     
+    # Detect internet source if in hotspot mode
+    wifi_internet_source = None
+    wifi_internet_via = None
+    if wifi_is_hotspot:
+        try:
+            route_result = run_command(["ip", "route", "show", "default"], check=False)
+            if route_result.returncode == 0:
+                for line in route_result.stdout.strip().split("\n"):
+                    if "default" in line:
+                        parts = line.split()
+                        if "dev" in parts:
+                            idx = parts.index("dev")
+                            if idx + 1 < len(parts):
+                                iface = parts[idx + 1]
+                                if iface == "eth0":
+                                    wifi_internet_source = "Ethernet"
+                                elif iface.startswith("usb") or iface.startswith("enx"):
+                                    wifi_internet_source = "USB Tethering"
+                                elif iface == "wlan1":
+                                    wifi_internet_source = "WiFi (wlan1)"
+                                    ssid_r = run_command(["iwgetid", "-r", iface], check=False)
+                                    if ssid_r.returncode == 0 and ssid_r.stdout.strip():
+                                        wifi_internet_via = ssid_r.stdout.strip()
+                                else:
+                                    wifi_internet_source = iface
+                        break
+        except:
+            pass
+    
     # Network - Ethernet
     ethernet_connected = False
     ethernet_ip = None
@@ -671,6 +702,8 @@ async def get_system_status():
         wifiRxRate=wifi_rx_rate,
         wifiIsHotspot=wifi_is_hotspot,
         wifiHotspotSsid=wifi_hotspot_ssid,
+        wifiInternetSource=wifi_internet_source,
+        wifiInternetVia=wifi_internet_via,
         ethernetConnected=ethernet_connected,
         ethernetIp=ethernet_ip,
         can0Up=can0_status.up,
@@ -2419,6 +2452,32 @@ async def get_system_version():
         return {"branch": "unknown", "commit": "unknown", "error": str(e)}
 
 
+@app.get("/api/system/data-info")
+async def get_data_info():
+    """Get info about the data directory for debugging"""
+    try:
+        data_files = []
+        total_size = 0
+        for f in DATA_DIR.rglob("*"):
+            if f.is_file():
+                size = f.stat().st_size
+                total_size += size
+                data_files.append({
+                    "path": str(f.relative_to(DATA_DIR)),
+                    "size": size,
+                })
+        
+        return {
+            "dataDir": str(DATA_DIR),
+            "exists": DATA_DIR.exists(),
+            "fileCount": len(data_files),
+            "totalSize": total_size,
+            "files": data_files[:50],  # Limit to first 50 files
+        }
+    except Exception as e:
+        return {"error": str(e), "dataDir": str(DATA_DIR)}
+
+
 @app.get("/api/system/backups")
 async def list_backups():
     """List available backup files"""
@@ -2458,7 +2517,11 @@ async def create_backup():
     try:
         timestamp = datetime.now().strftime("%Y-%m-%d-%H%M")
         backup_file = f"/opt/aurige/data-backup-{timestamp}.tar.gz"
-        data_dir = Path("/opt/aurige/data")
+        
+        # Use the actual DATA_DIR that the app uses
+        data_dir = DATA_DIR
+        parent_dir = data_dir.parent  # /opt/aurige
+        data_folder_name = data_dir.name  # data
         
         # Check if data directory exists
         if not data_dir.exists():
@@ -2467,22 +2530,21 @@ async def create_backup():
         # Check if data directory has any content
         data_files = list(data_dir.rglob("*"))
         file_count = len([f for f in data_files if f.is_file()])
-        if file_count == 0:
-            return {"status": "error", "message": "Le dossier data est vide, rien a sauvegarder"}
         
-        # Create backup - use tar without sudo, then chmod to make readable
+        # Calculate total size before backup
+        total_size = sum(f.stat().st_size for f in data_files if f.is_file())
+        
+        if file_count == 0:
+            return {"status": "error", "message": f"Le dossier {data_dir} est vide, rien a sauvegarder"}
+        
+        # Create backup - use tar with sudo to ensure we can read all files
         result = run_command([
-            "tar", "-czf", backup_file, "-C", "/opt/aurige", "data"
+            "sudo", "tar", "-czf", backup_file, "-C", str(parent_dir), data_folder_name
         ], check=False)
         
-        # If permission denied, try with sudo then fix permissions
-        if result.returncode != 0 and "Permission denied" in (result.stderr or ""):
-            result = run_command([
-                "sudo", "tar", "-czf", backup_file, "-C", "/opt/aurige", "data"
-            ], check=False)
-            # Fix permissions so we can read it
-            if result.returncode == 0:
-                run_command(["sudo", "chmod", "644", backup_file], check=False)
+        # Fix permissions so we can read it
+        if result.returncode == 0:
+            run_command(["sudo", "chmod", "644", backup_file], check=False)
         
         if result.returncode == 0:
             # Get file size
@@ -2494,12 +2556,12 @@ async def create_backup():
             
             return {
                 "status": "success",
-                "message": f"Sauvegarde creee ({file_count} fichiers)",
+                "message": f"Sauvegarde creee ({file_count} fichiers, {total_size/1024:.1f} Ko source)",
                 "filename": f"data-backup-{timestamp}.tar.gz",
                 "size": size,
             }
         else:
-            return {"status": "error", "message": result.stderr or result.stdout or "Erreur lors de la sauvegarde"}
+            return {"status": "error", "message": f"Erreur tar: {result.stderr or result.stdout}"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
