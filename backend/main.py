@@ -228,6 +228,8 @@ class SystemStatus(BaseModel):
     wifi_signal: Optional[int] = Field(default=None, alias="wifiSignal")
     wifi_tx_rate: Optional[str] = Field(default=None, alias="wifiTxRate")
     wifi_rx_rate: Optional[str] = Field(default=None, alias="wifiRxRate")
+    wifi_is_hotspot: Optional[bool] = Field(default=False, alias="wifiIsHotspot")
+    wifi_hotspot_ssid: Optional[str] = Field(default=None, alias="wifiHotspotSsid")
     ethernet_connected: bool = Field(alias="ethernetConnected")
     ethernet_ip: Optional[str] = Field(default=None, alias="ethernetIp")
     can0_up: bool = Field(alias="can0Up")
@@ -569,6 +571,8 @@ async def get_system_status():
     wifi_signal = None
     wifi_tx_rate = None
     wifi_rx_rate = None
+    wifi_is_hotspot = False
+    wifi_hotspot_ssid = None
     try:
         result = run_command(["ip", "-json", "addr", "show", "wlan0"], check=False)
         if result.returncode == 0:
@@ -578,37 +582,46 @@ async def get_system_status():
                     if addr_info.get("family") == "inet":
                         wifi_ip = addr_info.get("local")
                         wifi_connected = True
+                        # Check if it's a hotspot IP (10.42.0.x)
+                        if wifi_ip and wifi_ip.startswith("10.42.0."):
+                            wifi_is_hotspot = True
                         break
         
         if wifi_connected:
-            # Method 1: Try iwgetid first
-            ssid_result = run_command(["iwgetid", "-r", "wlan0"], check=False)
-            if ssid_result.returncode == 0 and ssid_result.stdout.strip():
-                wifi_ssid = ssid_result.stdout.strip()
+            # Check nmcli for connection info and mode
+            nmcli_result = run_command(["nmcli", "-t", "-f", "NAME,TYPE,DEVICE", "connection", "show", "--active"], check=False)
+            for line in nmcli_result.stdout.strip().split("\n"):
+                parts = line.split(":")
+                if len(parts) >= 3 and parts[2] == "wlan0":
+                    conn_name = parts[0]
+                    # Check if AP mode
+                    mode_result = run_command(["nmcli", "-t", "-f", "802-11-wireless.mode", "connection", "show", conn_name], check=False)
+                    mode = mode_result.stdout.strip().split(":")[-1] if mode_result.returncode == 0 else ""
+                    if mode == "ap" or "hotspot" in conn_name.lower() or "aurige" in conn_name.lower():
+                        wifi_is_hotspot = True
+                        wifi_hotspot_ssid = conn_name
+                    break
             
-            # Method 2: Try nmcli to get actual connected SSID
-            if not wifi_ssid:
-                nmcli_result = run_command(["nmcli", "-t", "-f", "active,ssid", "dev", "wifi"], check=False)
-                for line in nmcli_result.stdout.strip().split("\n"):
-                    if line.startswith("yes:"):
-                        wifi_ssid = line.split(":", 1)[1] if ":" in line else ""
-                        break
-            
-            # Get signal and rates from iw
-            iw_result = run_command(["iw", "dev", "wlan0", "link"], check=False)
-            for line in iw_result.stdout.split("\n"):
-                # Method 3: Fallback - get SSID from iw
-                if "SSID:" in line and not wifi_ssid:
-                    wifi_ssid = line.split("SSID:")[1].strip()
-                if "signal:" in line:
-                    try:
-                        wifi_signal = int(line.split("signal:")[1].strip().split()[0])
-                    except:
-                        pass
-                if "tx bitrate:" in line:
-                    wifi_tx_rate = line.split("tx bitrate:")[1].strip().split()[0] + " Mbps"
-                if "rx bitrate:" in line:
-                    wifi_rx_rate = line.split("rx bitrate:")[1].strip().split()[0] + " Mbps"
+            if not wifi_is_hotspot:
+                # Get SSID using iwgetid
+                ssid_result = run_command(["iwgetid", "-r", "wlan0"], check=False)
+                if ssid_result.returncode == 0 and ssid_result.stdout.strip():
+                    wifi_ssid = ssid_result.stdout.strip()
+                
+                # Get signal and rates from iw
+                iw_result = run_command(["iw", "dev", "wlan0", "link"], check=False)
+                for line in iw_result.stdout.split("\n"):
+                    if "SSID:" in line and not wifi_ssid:
+                        wifi_ssid = line.split("SSID:")[1].strip()
+                    if "signal:" in line:
+                        try:
+                            wifi_signal = int(line.split("signal:")[1].strip().split()[0])
+                        except:
+                            pass
+                    if "tx bitrate:" in line:
+                        wifi_tx_rate = line.split("tx bitrate:")[1].strip().split()[0] + " Mbps"
+                    if "rx bitrate:" in line:
+                        wifi_rx_rate = line.split("rx bitrate:")[1].strip().split()[0] + " Mbps"
     except Exception:
         pass
     
@@ -656,6 +669,8 @@ async def get_system_status():
         wifiSignal=wifi_signal,
         wifiTxRate=wifi_tx_rate,
         wifiRxRate=wifi_rx_rate,
+        wifiIsHotspot=wifi_is_hotspot,
+        wifiHotspotSsid=wifi_hotspot_ssid,
         ethernetConnected=ethernet_connected,
         ethernetIp=ethernet_ip,
         can0Up=can0_status.up,
@@ -2076,46 +2091,59 @@ async def scan_wifi_networks():
 async def get_wifi_status():
     """Get current Wi-Fi connection status with detailed info"""
     try:
-        # Check if wlan0 has an IP address (connected)
-        wifi_connected = False
+        # Check if wlan0 is in AP (hotspot) mode or client mode
+        # AP mode typically has IP 10.42.0.1
+        is_hotspot = False
+        hotspot_ssid = ""
+        client_ssid = ""
+        client_signal = 0
+        tx_rate = ""
+        rx_rate = ""
         ip_local = ""
         
+        # Check wlan0 IP
         ip_result = run_command(["ip", "-4", "addr", "show", "wlan0"], check=False)
         for line in ip_result.stdout.split("\n"):
             if "inet " in line:
                 ip_local = line.strip().split()[1].split("/")[0]
-                wifi_connected = True
+                # 10.42.0.1 is the typical hotspot IP
+                if ip_local.startswith("10.42.0."):
+                    is_hotspot = True
                 break
         
-        # Get detailed info if connected
-        ssid = ""
-        signal = 0
-        tx_rate = ""
-        rx_rate = ""
+        # Check nmcli for connection info
+        nmcli_result = run_command(["nmcli", "-t", "-f", "NAME,TYPE,DEVICE", "connection", "show", "--active"], check=False)
+        for line in nmcli_result.stdout.strip().split("\n"):
+            parts = line.split(":")
+            if len(parts) >= 3:
+                conn_name, conn_type, device = parts[0], parts[1], parts[2]
+                if device == "wlan0":
+                    if conn_type == "802-11-wireless" or "wifi" in conn_type.lower():
+                        # Check if this is AP or client
+                        # AP connections typically have "Hotspot" in name or we can check mode
+                        mode_result = run_command(["nmcli", "-t", "-f", "802-11-wireless.mode", "connection", "show", conn_name], check=False)
+                        mode = mode_result.stdout.strip().split(":")[-1] if mode_result.returncode == 0 else ""
+                        if mode == "ap" or "hotspot" in conn_name.lower() or "aurige" in conn_name.lower():
+                            is_hotspot = True
+                            hotspot_ssid = conn_name
+                        else:
+                            client_ssid = conn_name
         
-        if wifi_connected:
-            # Method 1: Try iwgetid first (most reliable)
+        # If in client mode, get actual SSID and signal
+        if not is_hotspot and ip_local:
+            # Try iwgetid for SSID
             ssid_result = run_command(["iwgetid", "-r", "wlan0"], check=False)
             if ssid_result.returncode == 0 and ssid_result.stdout.strip():
-                ssid = ssid_result.stdout.strip()
-            
-            # Method 2: Try nmcli to get the actual connected SSID (not connection name)
-            if not ssid:
-                nmcli_result = run_command(["nmcli", "-t", "-f", "active,ssid", "dev", "wifi"], check=False)
-                for line in nmcli_result.stdout.strip().split("\n"):
-                    if line.startswith("yes:"):
-                        ssid = line.split(":", 1)[1] if ":" in line else ""
-                        break
+                client_ssid = ssid_result.stdout.strip()
             
             # Get signal and rates from iw
             iw_result = run_command(["iw", "dev", "wlan0", "link"], check=False)
             for line in iw_result.stdout.split("\n"):
-                # Method 3: Fallback - get SSID from iw if still not found
-                if "SSID:" in line and not ssid:
-                    ssid = line.split("SSID:")[1].strip()
+                if "SSID:" in line and not client_ssid:
+                    client_ssid = line.split("SSID:")[1].strip()
                 if "signal:" in line:
                     try:
-                        signal = int(line.split("signal:")[1].strip().split()[0])
+                        client_signal = int(line.split("signal:")[1].strip().split()[0])
                     except:
                         pass
                 if "tx bitrate:" in line:
@@ -2133,9 +2161,11 @@ async def get_wifi_status():
             pass
         
         return {
-            "connected": wifi_connected,
-            "ssid": ssid,
-            "signal": signal,
+            "connected": bool(ip_local),
+            "isHotspot": is_hotspot,
+            "hotspotSsid": hotspot_ssid if is_hotspot else "",
+            "ssid": client_ssid if not is_hotspot else "",
+            "signal": client_signal,
             "txRate": tx_rate,
             "rxRate": rx_rate,
             "ipLocal": ip_local,
@@ -2335,9 +2365,12 @@ async def get_system_version():
         date_result = run_command(["git", "-C", GIT_REPO_PATH, "log", "-1", "--format=%ci"], check=False)
         commit_date = date_result.stdout.strip() if date_result.returncode == 0 else ""
         
-        # Check if there are updates available
+        # Check if there are updates available - compare with origin/current_branch
         run_command(["git", "-C", GIT_REPO_PATH, "fetch", "origin"], check=False)
-        behind_result = run_command(["git", "-C", GIT_REPO_PATH, "rev-list", "--count", "HEAD..origin/HEAD"], check=False)
+        if branch and branch != "unknown":
+            behind_result = run_command(["git", "-C", GIT_REPO_PATH, "rev-list", "--count", f"HEAD..origin/{branch}"], check=False)
+        else:
+            behind_result = run_command(["git", "-C", GIT_REPO_PATH, "rev-list", "--count", "HEAD..origin/main"], check=False)
         commits_behind = int(behind_result.stdout.strip()) if behind_result.returncode == 0 and behind_result.stdout.strip().isdigit() else 0
         
         return {

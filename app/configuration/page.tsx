@@ -328,39 +328,63 @@ export default function ConfigurationPage() {
                 )}
                 <span className="font-medium">Wi-Fi</span>
                 {wifiStatus?.connected && (
-                  <span className="text-xs text-success ml-auto">Connecte</span>
+                  <span className="text-xs text-success ml-auto">
+                    {wifiStatus.isHotspot ? "Mode Hotspot" : "Connecte"}
+                  </span>
                 )}
               </div>
               {wifiStatus?.connected ? (
-                <div className="grid grid-cols-2 gap-3 pl-6 text-sm">
-                  <div>
-                    <p className="text-xs text-muted-foreground">SSID</p>
-                    <p className="font-medium">{wifiStatus.ssid}</p>
+                wifiStatus.isHotspot ? (
+                  <div className="pl-6 text-sm space-y-2">
+                    <Alert className="border-warning/50 bg-warning/10 py-2">
+                      <AlertTriangle className="h-4 w-4 text-warning" />
+                      <AlertDescription className="text-warning text-xs">
+                        Le Pi diffuse le hotspot "{wifiStatus.hotspotSsid || "Aurige"}". 
+                        Internet via Ethernet ou USB.
+                      </AlertDescription>
+                    </Alert>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <p className="text-xs text-muted-foreground">IP Hotspot</p>
+                        <p className="font-mono text-xs">{wifiStatus.ipLocal}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">IP Publique</p>
+                        <p className="font-mono text-xs">{wifiStatus.ipPublic || "-"}</p>
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">Signal</p>
-                    <p className="font-medium flex items-center gap-1">
-                      {wifiStatus.signal} dBm
-                      {getSignalIcon(wifiStatus.signal + 100)}
-                    </p>
+                ) : (
+                  <div className="grid grid-cols-2 gap-3 pl-6 text-sm">
+                    <div>
+                      <p className="text-xs text-muted-foreground">SSID</p>
+                      <p className="font-medium">{wifiStatus.ssid || "-"}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Signal</p>
+                      <p className="font-medium flex items-center gap-1">
+                        {wifiStatus.signal} dBm
+                        {getSignalIcon(wifiStatus.signal + 100)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">IP Locale</p>
+                      <p className="font-mono text-xs">{wifiStatus.ipLocal}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">IP Publique</p>
+                      <p className="font-mono text-xs">{wifiStatus.ipPublic || "-"}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Debit TX</p>
+                      <p className="font-medium">{wifiStatus.txRate || "-"}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Debit RX</p>
+                      <p className="font-medium">{wifiStatus.rxRate || "-"}</p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">IP Locale</p>
-                    <p className="font-mono text-xs">{wifiStatus.ipLocal}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">IP Publique</p>
-                    <p className="font-mono text-xs">{wifiStatus.ipPublic || "-"}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">Debit TX</p>
-                    <p className="font-medium">{wifiStatus.txRate}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">Debit RX</p>
-                    <p className="font-medium">{wifiStatus.rxRate}</p>
-                  </div>
-                </div>
+                )
               ) : (
                 <p className="text-xs text-muted-foreground pl-6">Non connecte</p>
               )}

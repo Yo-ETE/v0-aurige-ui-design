@@ -81,6 +81,8 @@ export interface SystemStatus {
   wifiSignal?: number
   wifiTxRate?: string
   wifiRxRate?: string
+  wifiIsHotspot?: boolean
+  wifiHotspotSsid?: string
   ethernetConnected: boolean
   ethernetIp?: string
   can0Up: boolean
@@ -543,6 +545,8 @@ export interface WifiNetwork {
 
 export interface WifiStatus {
   connected: boolean
+  isHotspot: boolean
+  hotspotSsid: string
   ssid: string
   signal: number
   txRate: string
