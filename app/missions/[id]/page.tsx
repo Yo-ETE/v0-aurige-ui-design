@@ -81,12 +81,6 @@ const moduleLinks: ModuleLink[] = [
     description: "Isoler les trames par fonction",
   },
   {
-    name: "Trames",
-    href: "/trames",
-    icon: FileText,
-    description: "Catalogue des trames découvertes",
-  },
-  {
     name: "OBD-II",
     href: "/obd-ii",
     icon: Activity,

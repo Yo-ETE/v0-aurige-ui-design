@@ -25,6 +25,10 @@ import {
   AlertTriangle,
   Terminal,
   ArrowUpCircle,
+  GitBranch,
+  HardDrive,
+  Trash2,
+  Archive,
 } from "lucide-react"
 import {
   scanWifiNetworks,
@@ -36,10 +40,19 @@ import {
   getAptOutput,
   systemReboot,
   systemShutdown,
+  getVersionInfo,
+  listBackups,
+  createBackup,
+  deleteBackup,
+  startUpdate,
+  getUpdateOutput,
   type WifiNetwork,
   type WifiStatus,
   type EthernetStatus,
   type AptOutput,
+  type VersionInfo,
+  type BackupInfo,
+  type UpdateOutput,
 } from "@/lib/api"
 
 export default function ConfigurationPage() {
@@ -59,6 +72,16 @@ export default function ConfigurationPage() {
   const [isRebooting, setIsRebooting] = useState(false)
   const [isShuttingDown, setIsShuttingDown] = useState(false)
   const [systemMessage, setSystemMessage] = useState<string | null>(null)
+
+  // Update state
+  const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null)
+  const [updateOutput, setUpdateOutput] = useState<UpdateOutput>({ running: false, lines: [] })
+  const [isCheckingVersion, setIsCheckingVersion] = useState(false)
+
+  // Backup state
+  const [backups, setBackups] = useState<BackupInfo[]>([])
+  const [isCreatingBackup, setIsCreatingBackup] = useState(false)
+  const [backupMessage, setBackupMessage] = useState<string | null>(null)
 
   // Fetch connection status (wifi + ethernet)
   const fetchConnectionStatus = useCallback(async () => {
@@ -176,11 +199,92 @@ export default function ConfigurationPage() {
     }
   }
 
+  // Fetch version info
+  const fetchVersionInfo = useCallback(async () => {
+    setIsCheckingVersion(true)
+    try {
+      const info = await getVersionInfo()
+      setVersionInfo(info)
+    } catch {
+      setVersionInfo(null)
+    } finally {
+      setIsCheckingVersion(false)
+    }
+  }, [])
+
+  // Fetch backups
+  const fetchBackups = useCallback(async () => {
+    try {
+      const result = await listBackups()
+      setBackups(result.backups)
+    } catch {
+      setBackups([])
+    }
+  }, [])
+
+  // Handle update
+  const handleStartUpdate = async () => {
+    if (!confirm("Voulez-vous mettre a jour Aurige ? Les services seront redemarres.")) return
+    setBackupMessage(null)
+    try {
+      await startUpdate()
+    } catch {
+      setBackupMessage("Erreur lors du lancement de la mise a jour")
+    }
+  }
+
+  // Poll update output
+  useEffect(() => {
+    const pollUpdate = async () => {
+      try {
+        const output = await getUpdateOutput()
+        setUpdateOutput(output)
+      } catch {
+        // Ignore
+      }
+    }
+
+    const interval = setInterval(pollUpdate, 1000)
+    return () => clearInterval(interval)
+  }, [])
+
+  // Handle backup
+  const handleCreateBackup = async () => {
+    setIsCreatingBackup(true)
+    setBackupMessage(null)
+    try {
+      const result = await createBackup()
+      if (result.status === "success") {
+        setBackupMessage(`Sauvegarde creee: ${result.filename}`)
+        fetchBackups()
+      } else {
+        setBackupMessage(result.message)
+      }
+    } catch {
+      setBackupMessage("Erreur lors de la sauvegarde")
+    } finally {
+      setIsCreatingBackup(false)
+    }
+  }
+
+  // Handle delete backup
+  const handleDeleteBackup = async (filename: string) => {
+    if (!confirm(`Supprimer la sauvegarde ${filename} ?`)) return
+    try {
+      await deleteBackup(filename)
+      fetchBackups()
+    } catch {
+      setBackupMessage("Erreur lors de la suppression")
+    }
+  }
+
   // Initial load
   useEffect(() => {
     fetchConnectionStatus()
     handleScan()
-  }, [fetchConnectionStatus])
+    fetchVersionInfo()
+    fetchBackups()
+  }, [fetchConnectionStatus, fetchVersionInfo, fetchBackups])
 
   // Signal strength helper
   const getSignalIcon = (signal: number) => {

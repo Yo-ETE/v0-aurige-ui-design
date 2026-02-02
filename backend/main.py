@@ -581,17 +581,17 @@ async def get_system_status():
                         break
         
         if wifi_connected:
-            # Get SSID
-            nmcli_result = run_command(["nmcli", "-t", "-f", "DEVICE,STATE,CONNECTION", "device"], check=False)
-            for line in nmcli_result.stdout.strip().split("\n"):
-                parts = line.split(":")
-                if len(parts) >= 3 and parts[0] == "wlan0" and parts[1] == "connected":
-                    wifi_ssid = parts[2]
-                    break
+            # Get SSID using iwgetid (more reliable than nmcli CONNECTION)
+            ssid_result = run_command(["iwgetid", "-r", "wlan0"], check=False)
+            if ssid_result.returncode == 0 and ssid_result.stdout.strip():
+                wifi_ssid = ssid_result.stdout.strip()
             
-            # Get signal and rates
+            # Get signal and rates from iw
             iw_result = run_command(["iw", "dev", "wlan0", "link"], check=False)
             for line in iw_result.stdout.split("\n"):
+                # Fallback: get SSID from iw if iwgetid failed
+                if "SSID:" in line and not wifi_ssid:
+                    wifi_ssid = line.split("SSID:")[1].strip()
                 if "signal:" in line:
                     try:
                         wifi_signal = int(line.split("signal:")[1].strip().split()[0])
@@ -2068,28 +2068,35 @@ async def scan_wifi_networks():
 async def get_wifi_status():
     """Get current Wi-Fi connection status with detailed info"""
     try:
-        # Get current connection
-        result = run_command(["nmcli", "-t", "-f", "DEVICE,STATE,CONNECTION", "device"], check=False)
+        # Check if wlan0 has an IP address (connected)
         wifi_connected = False
-        ssid = ""
+        ip_local = ""
         
-        for line in result.stdout.strip().split("\n"):
-            parts = line.split(":")
-            if len(parts) >= 3 and parts[0] == "wlan0" and parts[1] == "connected":
+        ip_result = run_command(["ip", "-4", "addr", "show", "wlan0"], check=False)
+        for line in ip_result.stdout.split("\n"):
+            if "inet " in line:
+                ip_local = line.strip().split()[1].split("/")[0]
                 wifi_connected = True
-                ssid = parts[2]
                 break
         
         # Get detailed info if connected
+        ssid = ""
         signal = 0
         tx_rate = ""
         rx_rate = ""
-        ip_local = ""
         
         if wifi_connected:
-            # Get signal strength
+            # Get SSID using iwgetid (most reliable method)
+            ssid_result = run_command(["iwgetid", "-r", "wlan0"], check=False)
+            if ssid_result.returncode == 0 and ssid_result.stdout.strip():
+                ssid = ssid_result.stdout.strip()
+            
+            # Get signal and rates from iw
             iw_result = run_command(["iw", "dev", "wlan0", "link"], check=False)
             for line in iw_result.stdout.split("\n"):
+                # Fallback: get SSID from iw if iwgetid failed
+                if "SSID:" in line and not ssid:
+                    ssid = line.split("SSID:")[1].strip()
                 if "signal:" in line:
                     try:
                         signal = int(line.split("signal:")[1].strip().split()[0])
@@ -2099,13 +2106,6 @@ async def get_wifi_status():
                     tx_rate = line.split("tx bitrate:")[1].strip().split()[0] + " Mbps"
                 if "rx bitrate:" in line:
                     rx_rate = line.split("rx bitrate:")[1].strip().split()[0] + " Mbps"
-            
-            # Get IP address
-            ip_result = run_command(["ip", "-4", "addr", "show", "wlan0"], check=False)
-            for line in ip_result.stdout.split("\n"):
-                if "inet " in line:
-                    ip_local = line.strip().split()[1].split("/")[0]
-                    break
         
         # Get public IP
         ip_public = ""
@@ -2282,6 +2282,175 @@ async def system_shutdown():
         return {"status": "success", "message": "Arrêt en cours..."}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+# =============================================================================
+# Update and Backup Endpoints
+# =============================================================================
+
+# Store for update process output
+update_output_store: dict = {"lines": [], "running": False, "command": ""}
+
+
+@app.get("/api/system/version")
+async def get_system_version():
+    """Get current git version info"""
+    try:
+        # Get current branch
+        branch_result = run_command(["git", "-C", "/opt/aurige", "branch", "--show-current"], check=False)
+        branch = branch_result.stdout.strip() if branch_result.returncode == 0 else "unknown"
+        
+        # Get current commit hash
+        commit_result = run_command(["git", "-C", "/opt/aurige", "rev-parse", "--short", "HEAD"], check=False)
+        commit = commit_result.stdout.strip() if commit_result.returncode == 0 else "unknown"
+        
+        # Get commit date
+        date_result = run_command(["git", "-C", "/opt/aurige", "log", "-1", "--format=%ci"], check=False)
+        commit_date = date_result.stdout.strip() if date_result.returncode == 0 else ""
+        
+        # Check if there are updates available
+        run_command(["git", "-C", "/opt/aurige", "fetch", "origin"], check=False)
+        behind_result = run_command(["git", "-C", "/opt/aurige", "rev-list", "--count", "HEAD..origin/HEAD"], check=False)
+        commits_behind = int(behind_result.stdout.strip()) if behind_result.returncode == 0 and behind_result.stdout.strip().isdigit() else 0
+        
+        return {
+            "branch": branch,
+            "commit": commit,
+            "commitDate": commit_date,
+            "commitsBehind": commits_behind,
+            "updateAvailable": commits_behind > 0,
+        }
+    except Exception as e:
+        return {"branch": "unknown", "commit": "unknown", "error": str(e)}
+
+
+@app.get("/api/system/backups")
+async def list_backups():
+    """List available backup files"""
+    try:
+        backup_dir = Path("/opt/aurige")
+        backups = []
+        for f in backup_dir.glob("data-backup-*.tar.gz"):
+            stat = f.stat()
+            backups.append({
+                "filename": f.name,
+                "size": stat.st_size,
+                "created": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+            })
+        backups.sort(key=lambda x: x["created"], reverse=True)
+        return {"backups": backups}
+    except Exception as e:
+        return {"backups": [], "error": str(e)}
+
+
+@app.post("/api/system/backup")
+async def create_backup():
+    """Create a backup of the data directory"""
+    try:
+        timestamp = datetime.now().strftime("%Y-%m-%d-%H%M")
+        backup_file = f"/opt/aurige/data-backup-{timestamp}.tar.gz"
+        
+        result = run_command([
+            "tar", "-czf", backup_file, "-C", "/opt/aurige", "data"
+        ], check=False)
+        
+        if result.returncode == 0:
+            # Get file size
+            stat = Path(backup_file).stat()
+            return {
+                "status": "success",
+                "message": f"Sauvegarde créée: {backup_file}",
+                "filename": f"data-backup-{timestamp}.tar.gz",
+                "size": stat.st_size,
+            }
+        else:
+            return {"status": "error", "message": result.stderr or "Erreur lors de la sauvegarde"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.delete("/api/system/backups/{filename}")
+async def delete_backup(filename: str):
+    """Delete a backup file"""
+    try:
+        # Security: only allow deleting backup files with proper naming
+        if not filename.startswith("data-backup-") or not filename.endswith(".tar.gz"):
+            raise HTTPException(status_code=400, detail="Nom de fichier invalide")
+        
+        backup_path = Path("/opt/aurige") / filename
+        if not backup_path.exists():
+            raise HTTPException(status_code=404, detail="Sauvegarde introuvable")
+        
+        backup_path.unlink()
+        return {"status": "success", "message": f"Sauvegarde {filename} supprimée"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/system/update")
+async def start_update():
+    """Start git pull and restart services"""
+    global update_output_store
+    if update_output_store["running"]:
+        return {"status": "error", "message": "Une mise à jour est déjà en cours"}
+    
+    update_output_store = {"lines": [], "running": True, "command": "update"}
+    
+    async def run_update():
+        global update_output_store
+        try:
+            update_output_store["lines"].append(">>> Mise à jour depuis Git...")
+            
+            # Git pull
+            process = await asyncio.create_subprocess_exec(
+                "git", "-C", "/opt/aurige", "pull", "origin",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            while True:
+                line = await process.stdout.readline()
+                if not line:
+                    break
+                update_output_store["lines"].append(line.decode().strip())
+            await process.wait()
+            
+            if process.returncode != 0:
+                update_output_store["lines"].append(f">>> Erreur git pull (code: {process.returncode})")
+                update_output_store["running"] = False
+                return
+            
+            update_output_store["lines"].append(">>> Redémarrage des services...")
+            
+            # Restart services
+            for service in ["aurige-api", "aurige-web"]:
+                proc = await asyncio.create_subprocess_exec(
+                    "sudo", "systemctl", "restart", service,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
+                )
+                await proc.wait()
+                update_output_store["lines"].append(f"Service {service} redémarré")
+            
+            update_output_store["lines"].append(">>> Mise à jour terminée!")
+            
+        except Exception as e:
+            update_output_store["lines"].append(f"Erreur: {str(e)}")
+        finally:
+            update_output_store["running"] = False
+    
+    asyncio.create_task(run_update())
+    return {"status": "started", "message": "Mise à jour démarrée"}
+
+
+@app.get("/api/system/update/output")
+async def get_update_output():
+    """Get update command output"""
+    return {
+        "running": update_output_store["running"],
+        "lines": update_output_store["lines"],
+    }
 
 
 if __name__ == "__main__":

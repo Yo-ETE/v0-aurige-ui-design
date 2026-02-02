@@ -603,6 +603,53 @@ export async function systemShutdown(): Promise<{ status: string; message: strin
 }
 
 // =============================================================================
+// Update and Backup
+// =============================================================================
+
+export interface VersionInfo {
+  branch: string
+  commit: string
+  commitDate?: string
+  commitsBehind: number
+  updateAvailable: boolean
+}
+
+export interface BackupInfo {
+  filename: string
+  size: number
+  created: string
+}
+
+export interface UpdateOutput {
+  running: boolean
+  lines: string[]
+}
+
+export async function getVersionInfo(): Promise<VersionInfo> {
+  return fetchApi("/system/version")
+}
+
+export async function listBackups(): Promise<{ backups: BackupInfo[] }> {
+  return fetchApi("/system/backups")
+}
+
+export async function createBackup(): Promise<{ status: string; message: string; filename?: string; size?: number }> {
+  return fetchApi("/system/backup", { method: "POST" })
+}
+
+export async function deleteBackup(filename: string): Promise<{ status: string; message: string }> {
+  return fetchApi(`/system/backups/${filename}`, { method: "DELETE" })
+}
+
+export async function startUpdate(): Promise<{ status: string; message: string }> {
+  return fetchApi("/system/update", { method: "POST" })
+}
+
+export async function getUpdateOutput(): Promise<UpdateOutput> {
+  return fetchApi("/system/update/output")
+}
+
+// =============================================================================
 // WebSocket Helpers
 // =============================================================================
 
