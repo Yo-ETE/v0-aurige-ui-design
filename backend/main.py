@@ -2308,25 +2308,33 @@ async def system_shutdown():
 update_output_store: dict = {"lines": [], "running": False, "command": ""}
 
 
+# Git repo is in /tmp/aurige, not /opt/aurige
+GIT_REPO_PATH = "/tmp/aurige"
+
+
 @app.get("/api/system/version")
 async def get_system_version():
     """Get current git version info"""
     try:
+        # Check if git repo exists
+        if not Path(GIT_REPO_PATH).exists() or not Path(f"{GIT_REPO_PATH}/.git").exists():
+            return {"branch": "non installe", "commit": "-", "commitsBehind": 0, "updateAvailable": False, "error": "Depot git non trouve dans /tmp/aurige"}
+        
         # Get current branch
-        branch_result = run_command(["git", "-C", "/opt/aurige", "branch", "--show-current"], check=False)
+        branch_result = run_command(["git", "-C", GIT_REPO_PATH, "branch", "--show-current"], check=False)
         branch = branch_result.stdout.strip() if branch_result.returncode == 0 else "unknown"
         
         # Get current commit hash
-        commit_result = run_command(["git", "-C", "/opt/aurige", "rev-parse", "--short", "HEAD"], check=False)
+        commit_result = run_command(["git", "-C", GIT_REPO_PATH, "rev-parse", "--short", "HEAD"], check=False)
         commit = commit_result.stdout.strip() if commit_result.returncode == 0 else "unknown"
         
         # Get commit date
-        date_result = run_command(["git", "-C", "/opt/aurige", "log", "-1", "--format=%ci"], check=False)
+        date_result = run_command(["git", "-C", GIT_REPO_PATH, "log", "-1", "--format=%ci"], check=False)
         commit_date = date_result.stdout.strip() if date_result.returncode == 0 else ""
         
         # Check if there are updates available
-        run_command(["git", "-C", "/opt/aurige", "fetch", "origin"], check=False)
-        behind_result = run_command(["git", "-C", "/opt/aurige", "rev-list", "--count", "HEAD..origin/HEAD"], check=False)
+        run_command(["git", "-C", GIT_REPO_PATH, "fetch", "origin"], check=False)
+        behind_result = run_command(["git", "-C", GIT_REPO_PATH, "rev-list", "--count", "HEAD..origin/HEAD"], check=False)
         commits_behind = int(behind_result.stdout.strip()) if behind_result.returncode == 0 and behind_result.stdout.strip().isdigit() else 0
         
         return {
@@ -2365,9 +2373,14 @@ async def create_backup():
     try:
         timestamp = datetime.now().strftime("%Y-%m-%d-%H%M")
         backup_file = f"/opt/aurige/data-backup-{timestamp}.tar.gz"
+        data_dir = Path("/opt/aurige/data")
+        
+        # Check if data directory exists and has content
+        if not data_dir.exists():
+            return {"status": "error", "message": "Le dossier data n'existe pas"}
         
         result = run_command([
-            "tar", "-czf", backup_file, "-C", "/opt/aurige", "data"
+            "sudo", "tar", "-czf", backup_file, "-C", "/opt/aurige", "data"
         ], check=False)
         
         if result.returncode == 0:
@@ -2407,21 +2420,25 @@ async def delete_backup(filename: str):
 
 @app.post("/api/system/update")
 async def start_update():
-    """Start git pull and restart services"""
+    """Start git pull and run install script"""
     global update_output_store
     if update_output_store["running"]:
         return {"status": "error", "message": "Une mise à jour est déjà en cours"}
+    
+    # Check if git repo exists
+    if not Path(GIT_REPO_PATH).exists() or not Path(f"{GIT_REPO_PATH}/.git").exists():
+        return {"status": "error", "message": "Depot git non trouve dans /tmp/aurige. Clonez d'abord le repo."}
     
     update_output_store = {"lines": [], "running": True, "command": "update"}
     
     async def run_update():
         global update_output_store
         try:
-            update_output_store["lines"].append(">>> Mise à jour depuis Git...")
+            update_output_store["lines"].append(">>> Mise a jour depuis Git...")
             
             # Git pull
             process = await asyncio.create_subprocess_exec(
-                "git", "-C", "/opt/aurige", "pull", "origin",
+                "sudo", "git", "-C", GIT_REPO_PATH, "pull",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
             )
@@ -2437,19 +2454,26 @@ async def start_update():
                 update_output_store["running"] = False
                 return
             
-            update_output_store["lines"].append(">>> Redémarrage des services...")
+            update_output_store["lines"].append(">>> Execution du script d'installation...")
             
-            # Restart services
-            for service in ["aurige-api", "aurige-web"]:
-                proc = await asyncio.create_subprocess_exec(
-                    "sudo", "systemctl", "restart", service,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.STDOUT,
-                )
-                await proc.wait()
-                update_output_store["lines"].append(f"Service {service} redémarré")
+            # Run install script (this copies files to /opt/aurige and restarts services)
+            process = await asyncio.create_subprocess_exec(
+                "sudo", "bash", f"{GIT_REPO_PATH}/scripts/install_pi.sh",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                cwd=GIT_REPO_PATH,
+            )
+            while True:
+                line = await process.stdout.readline()
+                if not line:
+                    break
+                update_output_store["lines"].append(line.decode().strip())
+            await process.wait()
             
-            update_output_store["lines"].append(">>> Mise à jour terminée!")
+            if process.returncode != 0:
+                update_output_store["lines"].append(f">>> Erreur install_pi.sh (code: {process.returncode})")
+            else:
+                update_output_store["lines"].append(">>> Mise a jour terminee! Rechargez la page.")
             
         except Exception as e:
             update_output_store["lines"].append(f"Erreur: {str(e)}")
