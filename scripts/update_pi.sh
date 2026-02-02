@@ -31,37 +31,34 @@ echo -e "${BLUE}    AURIGE Update Script${NC}"
 echo -e "${BLUE}============================================${NC}"
 echo ""
 
-# Stop services
-log_info "Stopping services..."
-systemctl stop aurige-web || true
-systemctl stop aurige-api || true
+# Pull latest changes using fetch + reset to avoid divergent branch issues
+log_info "Fetching latest changes..."
+cd /tmp/aurige
 
-# Pull latest changes
-log_info "Pulling latest changes..."
-cd "$AURIGE_DIR"
-git pull origin main
+# Add safe directory
+git config --global --add safe.directory /tmp/aurige
 
-# Update frontend
-log_info "Updating frontend..."
-cd "$AURIGE_DIR/frontend"
-npm install --legacy-peer-deps
-npm run build
+# Fetch all
+git fetch origin
 
-# Update backend
-log_info "Updating backend..."
-cd "$AURIGE_DIR/backend"
-./venv/bin/pip install -r requirements.txt
+# Get current branch
+CURRENT_BRANCH=$(git branch --show-current)
+log_info "Current branch: $CURRENT_BRANCH"
 
-# Restart services
-log_info "Restarting services..."
-systemctl daemon-reload
-systemctl start aurige-api
-systemctl start aurige-web
-systemctl restart nginx
+# Try to reset to origin/{current_branch}, fallback to origin/main
+if git rev-parse --verify "origin/$CURRENT_BRANCH" >/dev/null 2>&1; then
+    log_info "Resetting to origin/$CURRENT_BRANCH..."
+    git reset --hard "origin/$CURRENT_BRANCH"
+else
+    log_info "Branch $CURRENT_BRANCH not found on origin, using origin/main..."
+    git reset --hard origin/main
+fi
 
+log_success "Git updated to: $(git rev-parse --short HEAD)"
+
+# Run install script to copy files and rebuild
+log_info "Running install script..."
+bash /tmp/aurige/scripts/install_pi.sh
+
+# install_pi.sh already restarts services, so we're done
 log_success "Update complete!"
-echo ""
-echo -e "Services status:"
-systemctl status aurige-web --no-pager -l | head -5
-systemctl status aurige-api --no-pager -l | head -5
-echo ""
