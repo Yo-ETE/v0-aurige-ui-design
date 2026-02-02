@@ -2483,12 +2483,10 @@ async def get_system_version():
         date_result = run_command(["git", "-C", GIT_REPO_PATH, "log", "-1", "--format=%ci"], check=False)
         commit_date = date_result.stdout.strip() if date_result.returncode == 0 else ""
         
-        # Check if there are updates available - compare with origin/current_branch
+        # Check if there are updates available - always compare with origin/main
+        # (local branch may be v0/main-xxx but we update from main)
         run_command(["git", "-C", GIT_REPO_PATH, "fetch", "origin"], check=False)
-        if branch and branch != "unknown":
-            behind_result = run_command(["git", "-C", GIT_REPO_PATH, "rev-list", "--count", f"HEAD..origin/{branch}"], check=False)
-        else:
-            behind_result = run_command(["git", "-C", GIT_REPO_PATH, "rev-list", "--count", "HEAD..origin/main"], check=False)
+        behind_result = run_command(["git", "-C", GIT_REPO_PATH, "rev-list", "--count", "HEAD..origin/main"], check=False)
         commits_behind = int(behind_result.stdout.strip()) if behind_result.returncode == 0 and behind_result.stdout.strip().isdigit() else 0
         
         return {
@@ -2708,20 +2706,11 @@ async def start_update():
                 update_output_store["lines"].append(line.decode().strip())
             await fetch_proc.wait()
             
-            # Get current branch
-            branch_proc = await asyncio.create_subprocess_exec(
-                "sudo", "git", "-C", GIT_REPO_PATH, "branch", "--show-current",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-            )
-            branch_out, _ = await branch_proc.communicate()
-            branch = branch_out.decode().strip() or "main"
-            update_output_store["lines"].append(f">>> Branche: {branch}")
-            
-            # Reset to origin/branch to get exactly what's on remote
-            update_output_store["lines"].append(f">>> Reset vers origin/{branch}...")
+            # Always reset to origin/main (the main branch on remote)
+            # Local branch may be different (e.g. v0/main-xxx) but we want latest from main
+            update_output_store["lines"].append(">>> Reset vers origin/main...")
             process = await asyncio.create_subprocess_exec(
-                "sudo", "git", "-C", GIT_REPO_PATH, "reset", "--hard", f"origin/{branch}",
+                "sudo", "git", "-C", GIT_REPO_PATH, "reset", "--hard", "origin/main",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
             )
