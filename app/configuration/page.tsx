@@ -50,6 +50,7 @@ import {
   restoreBackup,
   startUpdate,
   getUpdateOutput,
+  restartServices,
   type WifiNetwork,
   type WifiStatus,
   type EthernetStatus,
@@ -86,6 +87,8 @@ export default function ConfigurationPage() {
   const [backups, setBackups] = useState<BackupInfo[]>([])
   const [isCreatingBackup, setIsCreatingBackup] = useState(false)
   const [backupMessage, setBackupMessage] = useState<string | null>(null)
+  const [needsRestart, setNeedsRestart] = useState(false)
+  const [isRestarting, setIsRestarting] = useState(false)
 
   // Fetch connection status (wifi + ethernet)
   const fetchConnectionStatus = useCallback(async () => {
@@ -286,11 +289,31 @@ export default function ConfigurationPage() {
   const handleRestoreBackup = async (filename: string) => {
     if (!confirm(`Restaurer la sauvegarde ${filename} ?\nLes donnees actuelles seront ecrasees.`)) return
     setBackupMessage(null)
+    setNeedsRestart(false)
     try {
       const result = await restoreBackup(filename)
       setBackupMessage(result.message)
+      if (result.status === "success") {
+        setNeedsRestart(true)
+      }
     } catch {
       setBackupMessage("Erreur lors de la restauration")
+    }
+  }
+
+  // Handle restart services
+  const handleRestartServices = async () => {
+    setIsRestarting(true)
+    try {
+      await restartServices()
+      setBackupMessage("Services redemarres. La page va se recharger...")
+      setNeedsRestart(false)
+      // Reload page after a short delay
+      setTimeout(() => window.location.reload(), 2000)
+    } catch {
+      setBackupMessage("Erreur lors du redemarrage des services")
+    } finally {
+      setIsRestarting(false)
     }
   }
 
@@ -689,10 +712,26 @@ export default function ConfigurationPage() {
             </Button>
 
             {backupMessage && (
-              <Alert className="border-muted">
-                <CheckCircle2 className="h-4 w-4" />
-                <AlertDescription>{backupMessage}</AlertDescription>
+              <Alert className={needsRestart ? "border-warning/50 bg-warning/10" : "border-muted"}>
+                {needsRestart ? <AlertTriangle className="h-4 w-4 text-warning" /> : <CheckCircle2 className="h-4 w-4" />}
+                <AlertDescription className={needsRestart ? "text-warning" : ""}>{backupMessage}</AlertDescription>
               </Alert>
+            )}
+
+            {needsRestart && (
+              <Button
+                onClick={handleRestartServices}
+                disabled={isRestarting}
+                variant="outline"
+                className="w-full gap-2 border-warning text-warning hover:bg-warning/10"
+              >
+                {isRestarting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4" />
+                )}
+                {isRestarting ? "Redemarrage..." : "Redemarrer les services"}
+              </Button>
             )}
 
             {backups.length > 0 && (

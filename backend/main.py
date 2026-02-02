@@ -601,7 +601,13 @@ async def get_system_status():
                     mode = mode_result.stdout.strip().split(":")[-1] if mode_result.returncode == 0 else ""
                     if mode == "ap" or "hotspot" in conn_name.lower() or "aurige" in conn_name.lower():
                         wifi_is_hotspot = True
-                        wifi_hotspot_ssid = conn_name
+                        # Get actual SSID from connection settings (not connection name)
+                        ssid_result = run_command(["nmcli", "-t", "-f", "802-11-wireless.ssid", "connection", "show", conn_name], check=False)
+                        if ssid_result.returncode == 0:
+                            ssid_line = ssid_result.stdout.strip()
+                            wifi_hotspot_ssid = ssid_line.split(":")[-1] if ":" in ssid_line else conn_name
+                        else:
+                            wifi_hotspot_ssid = conn_name
                     break
             
             if not wifi_is_hotspot:
@@ -2158,7 +2164,13 @@ async def get_wifi_status():
                         mode = mode_result.stdout.strip().split(":")[-1] if mode_result.returncode == 0 else ""
                         if mode == "ap" or "hotspot" in conn_name.lower() or "aurige" in conn_name.lower():
                             is_hotspot = True
-                            hotspot_ssid = conn_name
+                            # Get actual SSID from connection settings (not connection name)
+                            ssid_r = run_command(["nmcli", "-t", "-f", "802-11-wireless.ssid", "connection", "show", conn_name], check=False)
+                            if ssid_r.returncode == 0:
+                                ssid_line = ssid_r.stdout.strip()
+                                hotspot_ssid = ssid_line.split(":")[-1] if ":" in ssid_line else conn_name
+                            else:
+                                hotspot_ssid = conn_name
                         else:
                             client_ssid = conn_name
         
@@ -2643,11 +2655,35 @@ async def start_update():
             )
             await safe_dir_proc.wait()
             
-            update_output_store["lines"].append(">>> Mise a jour depuis Git...")
+            update_output_store["lines"].append(">>> Recuperation des derniers commits...")
             
-            # Git pull
+            # Git fetch to get latest
+            fetch_proc = await asyncio.create_subprocess_exec(
+                "sudo", "git", "-C", GIT_REPO_PATH, "fetch", "origin",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            while True:
+                line = await fetch_proc.stdout.readline()
+                if not line:
+                    break
+                update_output_store["lines"].append(line.decode().strip())
+            await fetch_proc.wait()
+            
+            # Get current branch
+            branch_proc = await asyncio.create_subprocess_exec(
+                "sudo", "git", "-C", GIT_REPO_PATH, "branch", "--show-current",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            branch_out, _ = await branch_proc.communicate()
+            branch = branch_out.decode().strip() or "main"
+            update_output_store["lines"].append(f">>> Branche: {branch}")
+            
+            # Reset to origin/branch to get exactly what's on remote
+            update_output_store["lines"].append(f">>> Reset vers origin/{branch}...")
             process = await asyncio.create_subprocess_exec(
-                "sudo", "git", "-C", GIT_REPO_PATH, "pull",
+                "sudo", "git", "-C", GIT_REPO_PATH, "reset", "--hard", f"origin/{branch}",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
             )
@@ -2659,7 +2695,7 @@ async def start_update():
             await process.wait()
             
             if process.returncode != 0:
-                update_output_store["lines"].append(f">>> Erreur git pull (code: {process.returncode})")
+                update_output_store["lines"].append(f">>> Erreur git reset (code: {process.returncode})")
                 update_output_store["running"] = False
                 return
             
@@ -2700,6 +2736,22 @@ async def get_update_output():
         "running": update_output_store["running"],
         "lines": update_output_store["lines"],
     }
+
+
+@app.post("/api/system/restart-services")
+async def restart_services():
+    """Restart Aurige services (API and Web)"""
+    try:
+        results = []
+        for service in ["aurige-api", "aurige-web"]:
+            result = run_command(["sudo", "systemctl", "restart", service], check=False)
+            if result.returncode == 0:
+                results.append(f"{service}: OK")
+            else:
+                results.append(f"{service}: Erreur")
+        return {"status": "success", "message": f"Services redemarres: {', '.join(results)}"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 
 if __name__ == "__main__":

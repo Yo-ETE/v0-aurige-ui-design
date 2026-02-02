@@ -662,6 +662,10 @@ export async function getUpdateOutput(): Promise<UpdateOutput> {
   return fetchApi("/system/update/output")
 }
 
+export async function restartServices(): Promise<{ status: string; message: string }> {
+  return fetchApi("/system/restart-services", { method: "POST" })
+}
+
 // =============================================================================
 // WebSocket Helpers
 // =============================================================================
