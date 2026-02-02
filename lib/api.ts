@@ -77,6 +77,10 @@ export interface SystemStatus {
   storageTotal: number
   wifiConnected: boolean
   wifiIp?: string
+  wifiSsid?: string
+  wifiSignal?: number
+  wifiTxRate?: string
+  wifiRxRate?: string
   ethernetConnected: boolean
   ethernetIp?: string
   can0Up: boolean
@@ -86,7 +90,7 @@ export interface SystemStatus {
   vcan0Up: boolean
   apiRunning: boolean
   webRunning: boolean
-}
+  }
 
 export interface CANInterfaceStatus {
   interface: string
@@ -505,6 +509,69 @@ export async function fullOBDScan(iface: CANInterface = "can0"): Promise<FullSca
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ interface: iface }),
   })
+}
+
+// =============================================================================
+// Network Configuration
+// =============================================================================
+
+export interface WifiNetwork {
+  ssid: string
+  signal: number
+  security: string
+  bssid: string
+}
+
+export interface WifiStatus {
+  connected: boolean
+  ssid: string
+  signal: number
+  txRate: string
+  rxRate: string
+  ipLocal: string
+  ipPublic: string
+}
+
+export interface AptOutput {
+  running: boolean
+  command: string
+  lines: string[]
+}
+
+export async function scanWifiNetworks(): Promise<{ status: string; networks: WifiNetwork[]; message?: string }> {
+  return fetchApi("/network/wifi/scan")
+}
+
+export async function getWifiStatus(): Promise<WifiStatus> {
+  return fetchApi("/network/wifi/status")
+}
+
+export async function connectToWifi(ssid: string, password: string): Promise<{ status: string; message: string }> {
+  return fetchApi("/network/wifi/connect", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ssid, password }),
+  })
+}
+
+export async function runAptUpdate(): Promise<{ status: string; message: string }> {
+  return fetchApi("/system/apt/update", { method: "POST" })
+}
+
+export async function runAptUpgrade(): Promise<{ status: string; message: string }> {
+  return fetchApi("/system/apt/upgrade", { method: "POST" })
+}
+
+export async function getAptOutput(): Promise<AptOutput> {
+  return fetchApi("/system/apt/output")
+}
+
+export async function systemReboot(): Promise<{ status: string; message: string }> {
+  return fetchApi("/system/reboot", { method: "POST" })
+}
+
+export async function systemShutdown(): Promise<{ status: string; message: string }> {
+  return fetchApi("/system/shutdown", { method: "POST" })
 }
 
 // =============================================================================

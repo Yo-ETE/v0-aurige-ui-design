@@ -1,0 +1,450 @@
+"use client"
+
+import { useState, useEffect, useCallback } from "react"
+import { AppShell } from "@/components/app-shell"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+  Wifi,
+  WifiOff,
+  RefreshCw,
+  Signal,
+  Globe,
+  Network,
+  Download,
+  Power,
+  PowerOff,
+  Lock,
+  Unlock,
+  Loader2,
+  CheckCircle2,
+  AlertTriangle,
+  Terminal,
+  ArrowUpCircle,
+} from "lucide-react"
+import {
+  scanWifiNetworks,
+  getWifiStatus,
+  connectToWifi,
+  runAptUpdate,
+  runAptUpgrade,
+  getAptOutput,
+  systemReboot,
+  systemShutdown,
+  type WifiNetwork,
+  type WifiStatus,
+  type AptOutput,
+} from "@/lib/api"
+
+export default function ConfigurationPage() {
+  // Wi-Fi state
+  const [wifiStatus, setWifiStatus] = useState<WifiStatus | null>(null)
+  const [networks, setNetworks] = useState<WifiNetwork[]>([])
+  const [isScanning, setIsScanning] = useState(false)
+  const [selectedNetwork, setSelectedNetwork] = useState<string | null>(null)
+  const [wifiPassword, setWifiPassword] = useState("")
+  const [isConnecting, setIsConnecting] = useState(false)
+  const [wifiError, setWifiError] = useState<string | null>(null)
+  const [wifiSuccess, setWifiSuccess] = useState<string | null>(null)
+
+  // System state
+  const [aptOutput, setAptOutput] = useState<AptOutput>({ running: false, command: "", lines: [] })
+  const [isRebooting, setIsRebooting] = useState(false)
+  const [isShuttingDown, setIsShuttingDown] = useState(false)
+  const [systemMessage, setSystemMessage] = useState<string | null>(null)
+
+  // Fetch Wi-Fi status
+  const fetchWifiStatus = useCallback(async () => {
+    try {
+      const status = await getWifiStatus()
+      setWifiStatus(status)
+    } catch {
+      setWifiStatus(null)
+    }
+  }, [])
+
+  // Scan for networks
+  const handleScan = async () => {
+    setIsScanning(true)
+    setWifiError(null)
+    try {
+      const result = await scanWifiNetworks()
+      if (result.status === "success") {
+        setNetworks(result.networks)
+      } else {
+        setWifiError(result.message || "Erreur lors du scan")
+      }
+    } catch (err) {
+      setWifiError("Erreur lors du scan Wi-Fi")
+    } finally {
+      setIsScanning(false)
+    }
+  }
+
+  // Connect to network
+  const handleConnect = async () => {
+    if (!selectedNetwork) return
+    setIsConnecting(true)
+    setWifiError(null)
+    setWifiSuccess(null)
+    try {
+      const result = await connectToWifi(selectedNetwork, wifiPassword)
+      if (result.status === "success") {
+        setWifiSuccess(result.message)
+        setWifiPassword("")
+        setSelectedNetwork(null)
+        await fetchWifiStatus()
+      } else {
+        setWifiError(result.message)
+      }
+    } catch {
+      setWifiError("Erreur de connexion")
+    } finally {
+      setIsConnecting(false)
+    }
+  }
+
+  // Apt commands
+  const handleAptUpdate = async () => {
+    setSystemMessage(null)
+    try {
+      await runAptUpdate()
+    } catch {
+      setSystemMessage("Erreur lors du lancement de apt update")
+    }
+  }
+
+  const handleAptUpgrade = async () => {
+    setSystemMessage(null)
+    try {
+      await runAptUpgrade()
+    } catch {
+      setSystemMessage("Erreur lors du lancement de apt upgrade")
+    }
+  }
+
+  // Poll apt output
+  useEffect(() => {
+    const pollApt = async () => {
+      try {
+        const output = await getAptOutput()
+        setAptOutput(output)
+      } catch {
+        // Ignore
+      }
+    }
+
+    pollApt()
+    const interval = setInterval(pollApt, 1000)
+    return () => clearInterval(interval)
+  }, [])
+
+  // System power
+  const handleReboot = async () => {
+    if (!confirm("Voulez-vous vraiment redemarrer le Raspberry Pi ?")) return
+    setIsRebooting(true)
+    try {
+      await systemReboot()
+      setSystemMessage("Redemarrage en cours... La connexion sera perdue.")
+    } catch {
+      setSystemMessage("Erreur lors du redemarrage")
+      setIsRebooting(false)
+    }
+  }
+
+  const handleShutdown = async () => {
+    if (!confirm("Voulez-vous vraiment eteindre le Raspberry Pi ?")) return
+    setIsShuttingDown(true)
+    try {
+      await systemShutdown()
+      setSystemMessage("Arret en cours... La connexion sera perdue.")
+    } catch {
+      setSystemMessage("Erreur lors de l'arret")
+      setIsShuttingDown(false)
+    }
+  }
+
+  // Initial load
+  useEffect(() => {
+    fetchWifiStatus()
+    handleScan()
+  }, [fetchWifiStatus])
+
+  // Signal strength helper
+  const getSignalIcon = (signal: number) => {
+    if (signal >= 70) return <Signal className="h-4 w-4 text-success" />
+    if (signal >= 40) return <Signal className="h-4 w-4 text-warning" />
+    return <Signal className="h-4 w-4 text-destructive" />
+  }
+
+  return (
+    <AppShell
+      title="Configuration"
+      description="Administration reseau et systeme du Raspberry Pi"
+    >
+      <div className="grid gap-6 lg:grid-cols-2">
+        {/* Wi-Fi Status Card */}
+        <Card className="border-border bg-card">
+          <CardHeader>
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                {wifiStatus?.connected ? (
+                  <Wifi className="h-5 w-5 text-primary" />
+                ) : (
+                  <WifiOff className="h-5 w-5 text-muted-foreground" />
+                )}
+              </div>
+              <div>
+                <CardTitle className="text-lg">Etat Wi-Fi</CardTitle>
+                <CardDescription>Connexion actuelle</CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {wifiStatus ? (
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <p className="text-xs text-muted-foreground">SSID</p>
+                    <p className="font-semibold">{wifiStatus.ssid || "Non connecte"}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-xs text-muted-foreground">Signal</p>
+                    <p className="font-semibold flex items-center gap-2">
+                      {wifiStatus.signal} dBm
+                      {getSignalIcon(wifiStatus.signal + 100)}
+                    </p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-xs text-muted-foreground">IP Locale</p>
+                    <p className="font-mono text-sm">{wifiStatus.ipLocal || "-"}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-xs text-muted-foreground">IP Publique</p>
+                    <p className="font-mono text-sm">{wifiStatus.ipPublic || "-"}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-xs text-muted-foreground">Debit TX</p>
+                    <p className="font-semibold">{wifiStatus.txRate || "-"}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-xs text-muted-foreground">Debit RX</p>
+                    <p className="font-semibold">{wifiStatus.rxRate || "-"}</p>
+                  </div>
+                </div>
+                <Button variant="outline" size="sm" onClick={fetchWifiStatus} className="w-full mt-4 bg-transparent">
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Actualiser
+                </Button>
+              </div>
+            ) : (
+              <p className="text-muted-foreground text-sm">Chargement...</p>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Wi-Fi Networks Card */}
+        <Card className="border-border bg-card">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                  <Network className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <CardTitle className="text-lg">Reseaux disponibles</CardTitle>
+                  <CardDescription>Selectionnez un reseau Wi-Fi</CardDescription>
+                </div>
+              </div>
+              <Button variant="outline" size="sm" onClick={handleScan} disabled={isScanning}>
+                <RefreshCw className={`h-4 w-4 mr-2 ${isScanning ? "animate-spin" : ""}`} />
+                Scanner
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {wifiError && (
+              <Alert className="border-destructive/50 bg-destructive/10">
+                <AlertTriangle className="h-4 w-4 text-destructive" />
+                <AlertDescription className="text-destructive">{wifiError}</AlertDescription>
+              </Alert>
+            )}
+            {wifiSuccess && (
+              <Alert className="border-success/50 bg-success/10">
+                <CheckCircle2 className="h-4 w-4 text-success" />
+                <AlertDescription className="text-success">{wifiSuccess}</AlertDescription>
+              </Alert>
+            )}
+
+            <ScrollArea className="h-48 rounded-md border border-border">
+              <div className="p-2 space-y-1">
+                {networks.map((network) => (
+                  <button
+                    key={network.bssid || network.ssid}
+                    onClick={() => setSelectedNetwork(network.ssid)}
+                    className={`w-full flex items-center justify-between p-2 rounded-md text-left transition-colors ${
+                      selectedNetwork === network.ssid
+                        ? "bg-primary/20 border border-primary"
+                        : "hover:bg-secondary"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      {network.security !== "Open" && network.security !== "" ? (
+                        <Lock className="h-4 w-4 text-muted-foreground" />
+                      ) : (
+                        <Unlock className="h-4 w-4 text-muted-foreground" />
+                      )}
+                      <span className="font-medium">{network.ssid}</span>
+                      {wifiStatus?.ssid === network.ssid && (
+                        <CheckCircle2 className="h-4 w-4 text-success" />
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground">{network.signal}%</span>
+                      {getSignalIcon(network.signal)}
+                    </div>
+                  </button>
+                ))}
+                {networks.length === 0 && !isScanning && (
+                  <p className="text-center text-muted-foreground text-sm py-4">
+                    Aucun reseau trouve
+                  </p>
+                )}
+              </div>
+            </ScrollArea>
+
+            {selectedNetwork && (
+              <div className="space-y-3 pt-2 border-t border-border">
+                <p className="font-medium">Connexion a: {selectedNetwork}</p>
+                <div className="space-y-2">
+                  <Label htmlFor="wifi-password">Mot de passe</Label>
+                  <Input
+                    id="wifi-password"
+                    type="password"
+                    value={wifiPassword}
+                    onChange={(e) => setWifiPassword(e.target.value)}
+                    placeholder="Mot de passe Wi-Fi"
+                  />
+                </div>
+                <Button onClick={handleConnect} disabled={isConnecting} className="w-full">
+                  {isConnecting ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Wifi className="h-4 w-4 mr-2" />
+                  )}
+                  {isConnecting ? "Connexion..." : "Se connecter"}
+                </Button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* System Updates Card */}
+        <Card className="border-border bg-card lg:col-span-2">
+          <CardHeader>
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                <Terminal className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <CardTitle className="text-lg">Mises a jour systeme</CardTitle>
+                <CardDescription>apt update & upgrade</CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex gap-3">
+              <Button
+                onClick={handleAptUpdate}
+                disabled={aptOutput.running}
+                variant="outline"
+                className="gap-2 bg-transparent"
+              >
+                <Download className="h-4 w-4" />
+                apt update
+              </Button>
+              <Button
+                onClick={handleAptUpgrade}
+                disabled={aptOutput.running}
+                variant="outline"
+                className="gap-2 bg-transparent"
+              >
+                <ArrowUpCircle className="h-4 w-4" />
+                apt upgrade
+              </Button>
+              {aptOutput.running && (
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span className="text-sm">{aptOutput.command} en cours...</span>
+                </div>
+              )}
+            </div>
+
+            {aptOutput.lines.length > 0 && (
+              <ScrollArea className="h-64 rounded-md border border-border bg-secondary/30 p-3">
+                <pre className="text-xs font-mono text-muted-foreground whitespace-pre-wrap">
+                  {aptOutput.lines.join("\n")}
+                </pre>
+              </ScrollArea>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Power Controls Card */}
+        <Card className="border-border bg-card lg:col-span-2">
+          <CardHeader>
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-destructive/10">
+                <Power className="h-5 w-5 text-destructive" />
+              </div>
+              <div>
+                <CardTitle className="text-lg">Alimentation</CardTitle>
+                <CardDescription>Redemarrage et arret du systeme</CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {systemMessage && (
+              <Alert className="border-warning/50 bg-warning/10">
+                <AlertTriangle className="h-4 w-4 text-warning" />
+                <AlertDescription className="text-warning">{systemMessage}</AlertDescription>
+              </Alert>
+            )}
+            <div className="flex gap-3">
+              <Button
+                onClick={handleReboot}
+                disabled={isRebooting || isShuttingDown}
+                variant="outline"
+                className="gap-2 bg-transparent"
+              >
+                {isRebooting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4" />
+                )}
+                Redemarrer
+              </Button>
+              <Button
+                onClick={handleShutdown}
+                disabled={isRebooting || isShuttingDown}
+                variant="destructive"
+                className="gap-2"
+              >
+                {isShuttingDown ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <PowerOff className="h-4 w-4" />
+                )}
+                Eteindre
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </AppShell>
+  )
+}

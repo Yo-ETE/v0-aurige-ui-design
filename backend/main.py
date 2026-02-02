@@ -224,6 +224,10 @@ class SystemStatus(BaseModel):
     storage_total: float = Field(alias="storageTotal")
     wifi_connected: bool = Field(alias="wifiConnected")
     wifi_ip: Optional[str] = Field(default=None, alias="wifiIp")
+    wifi_ssid: Optional[str] = Field(default=None, alias="wifiSsid")
+    wifi_signal: Optional[int] = Field(default=None, alias="wifiSignal")
+    wifi_tx_rate: Optional[str] = Field(default=None, alias="wifiTxRate")
+    wifi_rx_rate: Optional[str] = Field(default=None, alias="wifiRxRate")
     ethernet_connected: bool = Field(alias="ethernetConnected")
     ethernet_ip: Optional[str] = Field(default=None, alias="ethernetIp")
     can0_up: bool = Field(alias="can0Up")
@@ -233,7 +237,7 @@ class SystemStatus(BaseModel):
     vcan0_up: bool = Field(alias="vcan0Up")
     api_running: bool = Field(alias="apiRunning")
     web_running: bool = Field(alias="webRunning")
-
+    
     class Config:
         populate_by_name = True
 
@@ -561,6 +565,10 @@ async def get_system_status():
     # Network - WiFi
     wifi_connected = False
     wifi_ip = None
+    wifi_ssid = None
+    wifi_signal = None
+    wifi_tx_rate = None
+    wifi_rx_rate = None
     try:
         result = run_command(["ip", "-json", "addr", "show", "wlan0"], check=False)
         if result.returncode == 0:
@@ -571,6 +579,28 @@ async def get_system_status():
                         wifi_ip = addr_info.get("local")
                         wifi_connected = True
                         break
+        
+        if wifi_connected:
+            # Get SSID
+            nmcli_result = run_command(["nmcli", "-t", "-f", "DEVICE,STATE,CONNECTION", "device"], check=False)
+            for line in nmcli_result.stdout.strip().split("\n"):
+                parts = line.split(":")
+                if len(parts) >= 3 and parts[0] == "wlan0" and parts[1] == "connected":
+                    wifi_ssid = parts[2]
+                    break
+            
+            # Get signal and rates
+            iw_result = run_command(["iw", "dev", "wlan0", "link"], check=False)
+            for line in iw_result.stdout.split("\n"):
+                if "signal:" in line:
+                    try:
+                        wifi_signal = int(line.split("signal:")[1].strip().split()[0])
+                    except:
+                        pass
+                if "tx bitrate:" in line:
+                    wifi_tx_rate = line.split("tx bitrate:")[1].strip().split()[0] + " Mbps"
+                if "rx bitrate:" in line:
+                    wifi_rx_rate = line.split("rx bitrate:")[1].strip().split()[0] + " Mbps"
     except Exception:
         pass
     
@@ -614,6 +644,10 @@ async def get_system_status():
         storageTotal=round(storage_total, 1),
         wifiConnected=wifi_connected,
         wifiIp=wifi_ip,
+        wifiSsid=wifi_ssid,
+        wifiSignal=wifi_signal,
+        wifiTxRate=wifi_tx_rate,
+        wifiRxRate=wifi_rx_rate,
         ethernetConnected=ethernet_connected,
         ethernetIp=ethernet_ip,
         can0Up=can0_status.up,
@@ -1937,6 +1971,237 @@ async def health_check():
         "version": "2.0.0",
         "dataDir": str(DATA_DIR),
     }
+
+
+# =============================================================================
+# Network Configuration Endpoints
+# =============================================================================
+
+@app.get("/api/network/wifi/scan")
+async def scan_wifi_networks():
+    """Scan for available Wi-Fi networks"""
+    try:
+        # Use nmcli to scan for networks
+        result = run_command(["nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY,BSSID", "device", "wifi", "list", "--rescan", "yes"], check=False)
+        if result.returncode != 0:
+            return {"status": "error", "message": "Failed to scan Wi-Fi networks", "networks": []}
+        
+        networks = []
+        seen_ssids = set()
+        for line in result.stdout.strip().split("\n"):
+            if not line:
+                continue
+            parts = line.split(":")
+            if len(parts) >= 4:
+                ssid = parts[0]
+                if ssid and ssid not in seen_ssids:
+                    seen_ssids.add(ssid)
+                    networks.append({
+                        "ssid": ssid,
+                        "signal": int(parts[1]) if parts[1].isdigit() else 0,
+                        "security": parts[2] if parts[2] else "Open",
+                        "bssid": parts[3] if len(parts) > 3 else "",
+                    })
+        
+        # Sort by signal strength
+        networks.sort(key=lambda x: x["signal"], reverse=True)
+        return {"status": "success", "networks": networks}
+    except Exception as e:
+        return {"status": "error", "message": str(e), "networks": []}
+
+
+@app.get("/api/network/wifi/status")
+async def get_wifi_status():
+    """Get current Wi-Fi connection status with detailed info"""
+    try:
+        # Get current connection
+        result = run_command(["nmcli", "-t", "-f", "DEVICE,STATE,CONNECTION", "device"], check=False)
+        wifi_connected = False
+        ssid = ""
+        
+        for line in result.stdout.strip().split("\n"):
+            parts = line.split(":")
+            if len(parts) >= 3 and parts[0] == "wlan0" and parts[1] == "connected":
+                wifi_connected = True
+                ssid = parts[2]
+                break
+        
+        # Get detailed info if connected
+        signal = 0
+        tx_rate = ""
+        rx_rate = ""
+        ip_local = ""
+        
+        if wifi_connected:
+            # Get signal strength
+            iw_result = run_command(["iw", "dev", "wlan0", "link"], check=False)
+            for line in iw_result.stdout.split("\n"):
+                if "signal:" in line:
+                    try:
+                        signal = int(line.split("signal:")[1].strip().split()[0])
+                    except:
+                        pass
+                if "tx bitrate:" in line:
+                    tx_rate = line.split("tx bitrate:")[1].strip().split()[0] + " Mbps"
+                if "rx bitrate:" in line:
+                    rx_rate = line.split("rx bitrate:")[1].strip().split()[0] + " Mbps"
+            
+            # Get IP address
+            ip_result = run_command(["ip", "-4", "addr", "show", "wlan0"], check=False)
+            for line in ip_result.stdout.split("\n"):
+                if "inet " in line:
+                    ip_local = line.strip().split()[1].split("/")[0]
+                    break
+        
+        # Get public IP
+        ip_public = ""
+        try:
+            pub_result = run_command(["curl", "-s", "--max-time", "3", "ifconfig.me"], check=False)
+            if pub_result.returncode == 0:
+                ip_public = pub_result.stdout.strip()
+        except:
+            pass
+        
+        return {
+            "connected": wifi_connected,
+            "ssid": ssid,
+            "signal": signal,
+            "txRate": tx_rate,
+            "rxRate": rx_rate,
+            "ipLocal": ip_local,
+            "ipPublic": ip_public,
+        }
+    except Exception as e:
+        return {"connected": False, "ssid": "", "signal": 0, "error": str(e)}
+
+
+class WifiConnectRequest(BaseModel):
+    ssid: str
+    password: str
+
+
+@app.post("/api/network/wifi/connect")
+async def connect_to_wifi(request: WifiConnectRequest):
+    """Connect to a Wi-Fi network"""
+    try:
+        # Use nmcli to connect
+        result = run_command([
+            "nmcli", "device", "wifi", "connect", request.ssid,
+            "password", request.password
+        ], check=False)
+        
+        if result.returncode == 0:
+            return {"status": "success", "message": f"Connecté à {request.ssid}"}
+        else:
+            error_msg = result.stderr.strip() if result.stderr else "Connexion échouée"
+            return {"status": "error", "message": error_msg}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+# =============================================================================
+# System Administration Endpoints
+# =============================================================================
+
+# Store for apt process output
+apt_output_store: dict = {"lines": [], "running": False, "command": ""}
+
+
+@app.post("/api/system/apt/update")
+async def apt_update():
+    """Run apt update"""
+    global apt_output_store
+    if apt_output_store["running"]:
+        return {"status": "error", "message": "Une commande apt est déjà en cours"}
+    
+    apt_output_store = {"lines": [], "running": True, "command": "apt update"}
+    
+    async def run_apt():
+        global apt_output_store
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "sudo", "apt", "update",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            while True:
+                line = await process.stdout.readline()
+                if not line:
+                    break
+                apt_output_store["lines"].append(line.decode().strip())
+            await process.wait()
+            apt_output_store["lines"].append(f"--- Terminé (code: {process.returncode}) ---")
+        except Exception as e:
+            apt_output_store["lines"].append(f"Erreur: {str(e)}")
+        finally:
+            apt_output_store["running"] = False
+    
+    asyncio.create_task(run_apt())
+    return {"status": "started", "message": "apt update démarré"}
+
+
+@app.post("/api/system/apt/upgrade")
+async def apt_upgrade():
+    """Run apt upgrade -y"""
+    global apt_output_store
+    if apt_output_store["running"]:
+        return {"status": "error", "message": "Une commande apt est déjà en cours"}
+    
+    apt_output_store = {"lines": [], "running": True, "command": "apt upgrade"}
+    
+    async def run_apt():
+        global apt_output_store
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "sudo", "apt", "upgrade", "-y",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            while True:
+                line = await process.stdout.readline()
+                if not line:
+                    break
+                apt_output_store["lines"].append(line.decode().strip())
+            await process.wait()
+            apt_output_store["lines"].append(f"--- Terminé (code: {process.returncode}) ---")
+        except Exception as e:
+            apt_output_store["lines"].append(f"Erreur: {str(e)}")
+        finally:
+            apt_output_store["running"] = False
+    
+    asyncio.create_task(run_apt())
+    return {"status": "started", "message": "apt upgrade démarré"}
+
+
+@app.get("/api/system/apt/output")
+async def get_apt_output():
+    """Get apt command output"""
+    return {
+        "running": apt_output_store["running"],
+        "command": apt_output_store["command"],
+        "lines": apt_output_store["lines"],
+    }
+
+
+@app.post("/api/system/reboot")
+async def system_reboot():
+    """Reboot the Raspberry Pi"""
+    try:
+        # Schedule reboot in 2 seconds to allow response
+        asyncio.create_task(asyncio.create_subprocess_exec("sudo", "shutdown", "-r", "+0"))
+        return {"status": "success", "message": "Redémarrage en cours..."}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/system/shutdown")
+async def system_shutdown():
+    """Shutdown the Raspberry Pi"""
+    try:
+        asyncio.create_task(asyncio.create_subprocess_exec("sudo", "shutdown", "-h", "+0"))
+        return {"status": "success", "message": "Arrêt en cours..."}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 
 if __name__ == "__main__":

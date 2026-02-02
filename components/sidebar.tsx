@@ -22,6 +22,7 @@ import {
   Home,
   Menu,
   X,
+  Cog,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
@@ -75,6 +76,12 @@ const baseNavigation: NavSection[] = [
     items: [
       { name: "Fuzzing", href: "/fuzzing", icon: Flame },
       { name: "Générateur", href: "/generateur", icon: Cpu },
+    ],
+  },
+  {
+    title: "Administration",
+    items: [
+      { name: "Configuration Pi", href: "/configuration", icon: Cog },
     ],
   },
 ]

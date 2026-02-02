@@ -55,8 +55,10 @@ function mapStatusToTiles(status: SystemStatus): StatusTile[] {
       id: "wifi",
       icon: Wifi,
       title: "Wi-Fi",
-      value: status.wifiConnected ? "Connecté" : "Déconnecté",
-      subvalue: status.wifiConnected ? "wlan0 actif" : "Aucune connexion",
+      value: status.wifiConnected ? (status.wifiSsid || "Connecté") : "Déconnecté",
+      subvalue: status.wifiConnected 
+        ? `${status.wifiTxRate || "-"} / ${status.wifiRxRate || "-"}` 
+        : "Aucune connexion",
       status: status.wifiConnected ? "ok" : "warning",
     },
     {
