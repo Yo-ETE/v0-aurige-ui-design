@@ -3,7 +3,6 @@
 import React from "react"
 
 import { Sidebar } from "@/components/sidebar"
-import { FloatingTerminal } from "@/components/floating-terminal"
 
 interface AppShellProps {
   children: React.ReactNode
@@ -26,7 +25,6 @@ export function AppShell({ children, title, description }: AppShellProps) {
         </div>
         <div className="p-4 lg:p-8 pb-96">{children}</div>
       </main>
-      <FloatingTerminal />
     </div>
   )
 }

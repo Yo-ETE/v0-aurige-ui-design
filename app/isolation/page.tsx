@@ -37,7 +37,7 @@ import { Label } from "@/components/ui/label"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useIsolationStore, type IsolationLog } from "@/lib/isolation-store"
 import { useExportStore } from "@/lib/export-store"
-import { listMissionLogs, startReplay, stopReplay, getReplayStatus, splitLog, renameLog, getLogContent, type LogEntry, type CANInterface, type LogFrame } from "@/lib/api"
+import { listMissionLogs, startReplay, stopReplay, getReplayStatus, splitLog, renameLog, deleteLog, getLogContent, type LogEntry, type CANInterface, type LogFrame } from "@/lib/api"
 import { useRouter as useNavRouter } from "next/navigation"
 import { useMissionStore } from "@/lib/mission-store"
 
@@ -423,6 +423,24 @@ export default function Isolation() {
   const handleTagChange = (logId: string, tag: "success" | "failed") => {
     updateLogTags(logId, [tag])
   }
+
+  const handleDeleteLog = async (logId: string) => {
+    // Find the log to get its mission ID
+    const log = logs.find(l => l.id === logId) || 
+      logs.flatMap(l => l.children || []).find(c => c.id === logId)
+    
+    if (log) {
+      try {
+        // Delete from server first
+        await deleteLog(log.missionId, logId)
+      } catch {
+        // If server delete fails (file may not exist), continue with store removal
+      }
+    }
+    
+    // Remove from local store
+    removeLog(logId)
+  }
   
   const currentMission = missions.find((m) => m.id === missionId)
 
@@ -543,7 +561,7 @@ export default function Isolation() {
                     item={log}
                     onReplay={handleReplay}
                     onSplit={handleSplit}
-                    onRemove={removeLog}
+                    onRemove={handleDeleteLog}
                     onTagChange={handleTagChange}
                     onRename={handleRename}
                     onView={handleViewLog}

@@ -1,4 +1,5 @@
 import { create } from "zustand"
+import { persist, createJSONStorage } from "zustand/middleware"
 
 export interface ExportedFrame {
   canId: string
@@ -20,22 +21,30 @@ interface ExportStore {
   removeFrame: (index: number) => void
 }
 
-export const useExportStore = create<ExportStore>((set) => ({
-  frames: [],
-  
-  addFrames: (newFrames) => {
-    set((state) => ({
-      frames: [...state.frames, ...newFrames],
-    }))
-  },
-  
-  clearFrames: () => {
-    set({ frames: [] })
-  },
-  
-  removeFrame: (index) => {
-    set((state) => ({
-      frames: state.frames.filter((_, i) => i !== index),
-    }))
-  },
-}))
+export const useExportStore = create<ExportStore>()(
+  persist(
+    (set) => ({
+      frames: [],
+      
+      addFrames: (newFrames) => {
+        set((state) => ({
+          frames: [...state.frames, ...newFrames],
+        }))
+      },
+      
+      clearFrames: () => {
+        set({ frames: [] })
+      },
+      
+      removeFrame: (index) => {
+        set((state) => ({
+          frames: state.frames.filter((_, i) => i !== index),
+        }))
+      },
+    }),
+    {
+      name: "aurige-export-frames",
+      storage: createJSONStorage(() => localStorage),
+    }
+  )
+)
