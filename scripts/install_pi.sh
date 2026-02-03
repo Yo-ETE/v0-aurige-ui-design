@@ -124,6 +124,71 @@ EOF
     log_success "Virtual CAN interface (vcan0) configured"
 }
 
+# Setup WiFi power management disable and hotspot watchdog
+setup_wifi_stability() {
+    log_info "Setting up WiFi stability fixes..."
+    
+    # Disable WiFi power management on all interfaces
+    cat > /etc/NetworkManager/conf.d/default-wifi-powersave-off.conf << 'EOF'
+[connection]
+# Disable WiFi power saving to prevent disconnections
+wifi.powersave = 2
+EOF
+
+    # Create a systemd service to keep hotspot active and disable power management
+    cat > /etc/systemd/system/wifi-stability.service << 'EOF'
+[Unit]
+Description=WiFi stability fixes (disable power management, maintain hotspot)
+After=NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Disable power management on all WiFi interfaces
+ExecStart=/bin/bash -c 'for iface in /sys/class/net/wlan*; do iw dev $(basename $iface) set power_save off 2>/dev/null || true; done'
+# Ensure hotspot connection is up
+ExecStart=/bin/bash -c 'sleep 5 && nmcli connection up Hotspot 2>/dev/null || true'
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Create a timer to periodically check hotspot
+    cat > /etc/systemd/system/wifi-watchdog.service << 'EOF'
+[Unit]
+Description=WiFi hotspot watchdog
+After=NetworkManager.service
+
+[Service]
+Type=oneshot
+# Check if hotspot is down and restart it
+ExecStart=/bin/bash -c 'if ! nmcli -t connection show --active | grep -q "Hotspot"; then nmcli connection up Hotspot 2>/dev/null || true; fi'
+# Re-disable power management
+ExecStart=/bin/bash -c 'for iface in /sys/class/net/wlan*; do iw dev $(basename $iface) set power_save off 2>/dev/null || true; done'
+EOF
+
+    cat > /etc/systemd/system/wifi-watchdog.timer << 'EOF'
+[Unit]
+Description=Run WiFi watchdog every 2 minutes
+
+[Timer]
+OnBootSec=60
+OnUnitActiveSec=120
+
+[Install]
+WantedBy=timers.target
+EOF
+
+    systemctl daemon-reload
+    systemctl enable wifi-stability.service
+    systemctl enable wifi-watchdog.timer
+    systemctl start wifi-stability.service
+    systemctl start wifi-watchdog.timer
+    
+    log_success "WiFi stability fixes configured"
+}
+
 # Install Node.js LTS
 install_nodejs() {
     if command -v node &> /dev/null; then
@@ -428,6 +493,7 @@ check_root
     check_arch
     install_system_deps
     setup_vcan
+    setup_wifi_stability
     install_nodejs
     setup_directories
     setup_git_repo

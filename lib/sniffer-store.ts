@@ -52,7 +52,7 @@ const MAX_LINES = 500
 export const useSnifferStore = create<SnifferState>((set, get) => ({
   isRunning: false,
   isConnecting: false,
-  selectedInterface: "can0",
+  selectedInterface: "can1",
   error: null,
   lines: [],
   isPaused: false,
