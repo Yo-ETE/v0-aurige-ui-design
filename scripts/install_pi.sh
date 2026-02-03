@@ -74,7 +74,8 @@ install_system_deps() {
         can-utils \
         build-essential \
         avahi-daemon \
-        avahi-utils
+        avahi-utils \
+        rsync
 
     log_success "System dependencies installed"
 }
@@ -151,8 +152,46 @@ setup_directories() {
     mkdir -p "$AURIGE_DIR/backend"
     mkdir -p "$AURIGE_DIR/data/missions"
     mkdir -p "$AURIGE_DIR/data/logs"
+    mkdir -p "$AURIGE_DIR/repo"
     
     log_success "Directory structure created at $AURIGE_DIR"
+}
+
+# Clone or update git repo for version tracking
+setup_git_repo() {
+    log_info "Setting up git repository for version tracking..."
+    
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+    
+    # If running from a git repo, copy the entire repo
+    if [ -d "$PROJECT_ROOT/.git" ]; then
+        log_info "Copying git repository from $PROJECT_ROOT..."
+        
+        # Copy the entire repo to /opt/aurige/repo (including source files)
+        if [ -d "$AURIGE_DIR/repo/.git" ]; then
+            # Update existing repo - sync with source
+            cd "$AURIGE_DIR/repo"
+            git config --global --add safe.directory "$AURIGE_DIR/repo"
+            git remote set-url origin "$(cd "$PROJECT_ROOT" && git remote get-url origin)" 2>/dev/null || true
+            
+            # Copy updated files from source
+            rsync -a --delete --exclude='.git' --exclude='node_modules' --exclude='venv' --exclude='.next' \
+                "$PROJECT_ROOT/" "$AURIGE_DIR/repo/"
+            
+            git fetch origin 2>/dev/null || true
+        else
+            # Fresh copy - copy entire directory
+            rsync -a --exclude='node_modules' --exclude='venv' --exclude='.next' \
+                "$PROJECT_ROOT/" "$AURIGE_DIR/repo/"
+            cd "$AURIGE_DIR/repo"
+            git config --global --add safe.directory "$AURIGE_DIR/repo"
+        fi
+        
+        log_success "Git repository set up at $AURIGE_DIR/repo"
+    else
+        log_warn "No git repository found, version tracking will be unavailable"
+    fi
 }
 
 # Copy project files
@@ -386,11 +425,12 @@ main() {
     echo ""
     
 check_root
-  check_arch
-  install_system_deps
-  setup_vcan
-  install_nodejs
-  setup_directories
+    check_arch
+    install_system_deps
+    setup_vcan
+    install_nodejs
+    setup_directories
+    setup_git_repo
     copy_project_files
     setup_frontend
     setup_backend

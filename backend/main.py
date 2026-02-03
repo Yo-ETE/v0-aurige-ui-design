@@ -2334,6 +2334,12 @@ async def connect_to_wifi(request: WifiConnectRequest):
             ], check=False, timeout=30)
         
         if result.returncode == 0:
+            # Enable autoconnect for this network
+            run_command([
+                "nmcli", "connection", "modify", request.ssid,
+                "connection.autoconnect", "yes",
+                "connection.autoconnect-priority", "100"
+            ], check=False)
             return {"status": "success", "message": f"Connecte a {request.ssid}"}
         else:
             error_msg = result.stderr.strip() if result.stderr else result.stdout.strip() if result.stdout else "Connexion echouee"
@@ -2456,7 +2462,7 @@ update_output_store: dict = {"lines": [], "running": False, "command": ""}
 
 
 # Git repo is in /tmp/aurige, not /opt/aurige
-GIT_REPO_PATH = "/tmp/aurige"
+GIT_REPO_PATH = "/opt/aurige/repo"
 
 
 @app.get("/api/system/version")

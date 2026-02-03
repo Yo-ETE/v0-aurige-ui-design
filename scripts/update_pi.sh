@@ -31,12 +31,27 @@ echo -e "${BLUE}    AURIGE Update Script${NC}"
 echo -e "${BLUE}============================================${NC}"
 echo ""
 
+# Determine which repo path to use
+REPO_PATH="$AURIGE_DIR/repo"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SOURCE_REPO="$(dirname "$SCRIPT_DIR")"
+
+# If repo doesn't exist yet, use source location
+if [ ! -d "$REPO_PATH/.git" ]; then
+    if [ -d "$SOURCE_REPO/.git" ]; then
+        REPO_PATH="$SOURCE_REPO"
+        log_info "Using source repo at $REPO_PATH"
+    else
+        log_error "No git repository found. Run install_pi.sh first."
+    fi
+fi
+
 # Pull latest changes using fetch + reset to avoid divergent branch issues
-log_info "Fetching latest changes..."
-cd /tmp/aurige
+log_info "Fetching latest changes from $REPO_PATH..."
+cd "$REPO_PATH"
 
 # Add safe directory
-git config --global --add safe.directory /tmp/aurige
+git config --global --add safe.directory "$REPO_PATH"
 
 # Fetch all
 git fetch origin
@@ -58,7 +73,7 @@ log_success "Git updated to: $(git rev-parse --short HEAD)"
 
 # Run install script to copy files and rebuild
 log_info "Running install script..."
-bash /tmp/aurige/scripts/install_pi.sh
+bash "$REPO_PATH/scripts/install_pi.sh"
 
 # install_pi.sh already restarts services, so we're done
 log_success "Update complete!"
