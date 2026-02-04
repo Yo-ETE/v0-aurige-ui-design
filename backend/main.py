@@ -1264,9 +1264,10 @@ async def list_mission_logs(mission_id: str):
             parent_id = meta.get("parentLog")
         elif meta.get("splitFrom"):
             parent_id = meta.get("splitFrom")
-        # Fallback: detect by naming convention (_A, _B suffixes - uppercase)
-        elif log_stem.endswith("_A") or log_stem.endswith("_B"):
-            potential_parent = log_stem[:-2]  # Remove _A or _B
+        # Fallback: detect by naming convention (_A, _B suffixes)
+        # For nested splits like foo_A_B, parent is foo_A (not foo)
+        elif log_stem.endswith(("_A", "_B", "_a", "_b")):
+            potential_parent = log_stem[:-2]  # Remove _A, _B, _a, or _b
             if potential_parent in log_names:
                 parent_id = potential_parent
         

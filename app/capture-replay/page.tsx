@@ -407,7 +407,9 @@ const handleDeleteLog = async (logId: string) => {
                 <div className="space-y-2 pr-4">
                   {(() => {
                     // Group logs by family (origin logs with their children)
-                    const originLogs = logs.filter(l => !l.parentId)
+                    // A log is a "root" if it has no parent OR its parent doesn't exist in the list
+                    const logIds = new Set(logs.map(l => l.id))
+                    const originLogs = logs.filter(l => !l.parentId || !logIds.has(l.parentId))
                     const childrenMap = new Map<string, LogEntry[]>()
                     
                     logs.forEach(l => {
