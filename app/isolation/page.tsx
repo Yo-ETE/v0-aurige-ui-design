@@ -168,7 +168,7 @@ function LogTreeItem({
               <Button
                 size="icon"
                 variant="ghost"
-                className="h-7 w-7 text-primary hover:text-primary"
+                className="h-7 w-7"
                 onClick={() => onAnalyze(item)}
                 title="Analyser co-occurrence ECU"
               >
@@ -297,6 +297,7 @@ export default function Isolation() {
   const [analysisDirection, setAnalysisDirection] = useState<"before" | "after" | "both">("both")
   const [selectedFrame, setSelectedFrame] = useState<LogFrame | null>(null)
   const [originLogId, setOriginLogId] = useState<string | null>(null)
+  const [availableLogsForAnalysis, setAvailableLogsForAnalysis] = useState<Array<{id: string, name: string}>>([])
   
   // Get mission ID from localStorage and sync with store
   useEffect(() => {
@@ -473,19 +474,38 @@ export default function Isolation() {
   // Co-occurrence analysis handlers
   // Step 1: Open the log viewer to select a frame
   const handleAnalyzeCoOccurrence = async (log: IsolationLog) => {
-    // Find the origin log (root parent) for analysis
-    let rootLogId = log.id
+    // Collect all logs in the family tree (for selection)
+    const collectAllLogs = (logs: IsolationLog[]): Array<{id: string, name: string}> => {
+      const result: Array<{id: string, name: string}> = []
+      const traverse = (items: IsolationLog[]) => {
+        for (const item of items) {
+          result.push({ id: item.id, name: item.name })
+          if (item.children && item.children.length > 0) {
+            traverse(item.children)
+          }
+        }
+      }
+      traverse(logs)
+      return result
+    }
+    
+    // Find the origin log (root parent) and collect all family logs
+    let rootLog: IsolationLog = log
     let currentLog: IsolationLog | undefined = log
     while (currentLog?.parentId) {
       const parent = findLog(currentLog.parentId)
       if (parent) {
-        rootLogId = parent.id
+        rootLog = parent
         currentLog = parent
       } else {
         break
       }
     }
-    setOriginLogId(rootLogId)
+    
+    // Collect all logs from root
+    const allLogs = collectAllLogs([rootLog])
+    setAvailableLogsForAnalysis(allLogs)
+    setOriginLogId(rootLog.id) // Default to root, user can change
     setSelectedFrame(null)
     setCoOccurrenceResult(null)
     
@@ -529,6 +549,7 @@ export default function Isolation() {
     setCoOccurrenceResult(null)
     setSelectedFrame(null)
     setOriginLogId(null)
+    setAvailableLogsForAnalysis([])
   }
   
   const [isSplitting, setIsSplitting] = useState<string | null>(null)
@@ -570,17 +591,21 @@ export default function Isolation() {
   }
 
   const handleDeleteLog = async (logId: string) => {
-    // Find the log to get its mission ID
-    const log = logs.find(l => l.id === logId) || 
-      logs.flatMap(l => l.children || []).find(c => c.id === logId)
+    // Find the log recursively to get its mission ID
+    const foundLog = findLog(logId)
+    const log = foundLog || logs.find(l => l.id === logId)
     
     if (log) {
       try {
         // Delete from server first
         await deleteLog(log.missionId, logId)
-      } catch {
+        console.log("[v0] Deleted log from server:", logId)
+      } catch (error) {
         // If server delete fails (file may not exist), continue with store removal
+        console.log("[v0] Server delete failed (may not exist):", logId, error)
       }
+    } else {
+      console.log("[v0] Log not found for deletion:", logId)
     }
     
     // Remove from local store
@@ -1038,14 +1063,25 @@ export default function Isolation() {
                 </Select>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-sm text-muted-foreground">Log origine:</span>
-                <Badge variant="secondary" className="font-mono text-xs">{originLogId}</Badge>
+                <Label className="text-sm whitespace-nowrap">Analyser sur:</Label>
+                <Select value={originLogId || ""} onValueChange={(v) => setOriginLogId(v)}>
+                  <SelectTrigger className="w-48 h-8 font-mono text-xs">
+                    <SelectValue placeholder="Choisir un log" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableLogsForAnalysis.map((log) => (
+                      <SelectItem key={log.id} value={log.id} className="font-mono text-xs">
+                        {log.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               {selectedFrame && (
-                <div className="flex items-center gap-2 ml-auto">
+                <div className="flex items-center gap-2">
                   <span className="text-sm text-muted-foreground">Trame:</span>
                   <Badge className="font-mono">{selectedFrame.canId}</Badge>
-                  <span className="font-mono text-xs text-muted-foreground truncate max-w-32">{selectedFrame.data}</span>
+                  <span className="font-mono text-xs text-muted-foreground truncate max-w-24">{selectedFrame.data}</span>
                 </div>
               )}
             </div>
@@ -1101,7 +1137,7 @@ export default function Isolation() {
 
       {/* Co-occurrence Analysis Dialog */}
       <Dialog open={analyzingLog !== null} onOpenChange={(open) => !open && closeCoOccurrenceDialog()}>
-        <DialogContent className="sm:max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
+        <DialogContent className="max-w-[95vw] sm:max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Network className="h-5 w-5" />
@@ -1161,53 +1197,55 @@ export default function Isolation() {
                 )}
                 
                 {/* Related Frames Table */}
-                <ScrollArea className="flex-1 border rounded-lg">
-                  <table className="w-full text-xs">
-                    <thead className="sticky top-0 bg-secondary">
-                      <tr className="text-left text-muted-foreground">
-                        <th className="p-2 w-20">CAN ID</th>
-                        <th className="p-2 w-16">Score</th>
-                        <th className="p-2 w-20">Type</th>
-                        <th className="p-2 w-16">Count</th>
-                        <th className="p-2 w-20">Avant</th>
-                        <th className="p-2 w-20">Apres</th>
-                        <th className="p-2 w-24">Delai moy.</th>
-                        <th className="p-2">Exemples de data</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {coOccurrenceResult.relatedFrames.map((frame, idx) => (
-                        <tr key={idx} className="border-t border-border/50 hover:bg-secondary/50">
-                          <td className="p-2 font-mono font-semibold text-primary">{frame.canId}</td>
-                          <td className="p-2">
-                            <div className="flex items-center gap-1">
-                              <div 
-                                className="h-2 rounded-full bg-primary" 
-                                style={{ width: `${frame.score * 40}px` }}
-                              />
-                              <span className="text-muted-foreground">{(frame.score * 100).toFixed(0)}%</span>
-                            </div>
-                          </td>
-                          <td className="p-2">
-                            <Badge 
-                              variant={frame.frameType === "ack" ? "default" : frame.frameType === "command" ? "secondary" : "outline"}
-                              className={frame.frameType === "ack" ? "bg-success text-success-foreground" : ""}
-                            >
-                              {frame.frameType}
-                            </Badge>
-                          </td>
-                          <td className="p-2 text-center">{frame.count}</td>
-                          <td className="p-2 text-center">{frame.countBefore}</td>
-                          <td className="p-2 text-center">{frame.countAfter}</td>
-                          <td className="p-2 text-center">{frame.avgDelayMs > 0 ? "+" : ""}{frame.avgDelayMs.toFixed(1)} ms</td>
-                          <td className="p-2 font-mono text-muted-foreground truncate max-w-[200px]">
-                            {frame.sampleData.slice(0, 2).join(", ")}
-                            {frame.dataVariations > 2 && ` (+${frame.dataVariations - 2})`}
-                          </td>
+                <ScrollArea className="flex-1 border rounded-lg" orientation="both">
+                  <div className="min-w-[600px]">
+                    <table className="w-full text-xs">
+                      <thead className="sticky top-0 bg-secondary">
+                        <tr className="text-left text-muted-foreground">
+                          <th className="p-2 w-20">CAN ID</th>
+                          <th className="p-2 w-16">Score</th>
+                          <th className="p-2 w-20">Type</th>
+                          <th className="p-2 w-16">Count</th>
+                          <th className="p-2 w-20">Avant</th>
+                          <th className="p-2 w-20">Apres</th>
+                          <th className="p-2 w-24">Delai moy.</th>
+                          <th className="p-2">Exemples de data</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {coOccurrenceResult.relatedFrames.map((frame, idx) => (
+                          <tr key={idx} className="border-t border-border/50 hover:bg-secondary/50">
+                            <td className="p-2 font-mono font-semibold text-primary">{frame.canId}</td>
+                            <td className="p-2">
+                              <div className="flex items-center gap-1">
+                                <div 
+                                  className="h-2 rounded-full bg-primary" 
+                                  style={{ width: `${frame.score * 40}px` }}
+                                />
+                                <span className="text-muted-foreground">{(frame.score * 100).toFixed(0)}%</span>
+                              </div>
+                            </td>
+                            <td className="p-2">
+                              <Badge 
+                                variant={frame.frameType === "ack" ? "default" : frame.frameType === "command" ? "secondary" : "outline"}
+                                className={frame.frameType === "ack" ? "bg-success text-success-foreground" : ""}
+                              >
+                                {frame.frameType}
+                              </Badge>
+                            </td>
+                            <td className="p-2 text-center">{frame.count}</td>
+                            <td className="p-2 text-center">{frame.countBefore}</td>
+                            <td className="p-2 text-center">{frame.countAfter}</td>
+                            <td className="p-2 text-center">{frame.avgDelayMs > 0 ? "+" : ""}{frame.avgDelayMs.toFixed(1)} ms</td>
+                            <td className="p-2 font-mono text-muted-foreground truncate max-w-[200px]">
+                              {frame.sampleData.slice(0, 2).join(", ")}
+                              {frame.dataVariations > 2 && ` (+${frame.dataVariations - 2})`}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </ScrollArea>
                 
                 {/* Actions */}
@@ -1238,7 +1276,7 @@ export default function Isolation() {
                   pour identifier les trames liees a la trame causale.
                 </p>
                 <p className="text-xs text-muted-foreground mt-2">
-                  L&apos;analyse se fait sur le log d&apos;origine: <span className="font-mono">{analyzingLog?.name}</span>
+                  L&apos;analyse se fait sur le log d&apos;origine: {analyzingLog?.name}
                 </p>
               </div>
             )}

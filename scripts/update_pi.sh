@@ -14,6 +14,8 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 AURIGE_DIR="/opt/aurige"
+GITHUB_REPO="https://github.com/Yo-ETE/v0-aurige-ui-design.git"
+TEMP_DIR="/tmp/aurige-update"
 
 log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 log_success() { echo -e "${GREEN}[OK]${NC} $1"; }
@@ -31,49 +33,39 @@ echo -e "${BLUE}    AURIGE Update Script${NC}"
 echo -e "${BLUE}============================================${NC}"
 echo ""
 
-# Determine which repo path to use
-REPO_PATH="$AURIGE_DIR/repo"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SOURCE_REPO="$(dirname "$SCRIPT_DIR")"
+# Stop services first
+log_info "Stopping services..."
+systemctl stop aurige-web aurige-api 2>/dev/null || true
 
-# If repo doesn't exist yet, use source location
-if [ ! -d "$REPO_PATH/.git" ]; then
-    if [ -d "$SOURCE_REPO/.git" ]; then
-        REPO_PATH="$SOURCE_REPO"
-        log_info "Using source repo at $REPO_PATH"
+# Clean up temp directory
+rm -rf "$TEMP_DIR"
+
+# Clone fresh from GitHub
+log_info "Cloning latest from GitHub..."
+git clone "$GITHUB_REPO" "$TEMP_DIR"
+cd "$TEMP_DIR"
+
+# Get current branch from existing installation or use main
+if [ -f "$AURIGE_DIR/repo/.git/HEAD" ]; then
+    CURRENT_BRANCH=$(cat "$AURIGE_DIR/repo/.git/HEAD" | sed 's/ref: refs\/heads\///')
+    log_info "Detected branch: $CURRENT_BRANCH"
+    
+    # Check if this branch exists on origin
+    if git rev-parse --verify "origin/$CURRENT_BRANCH" >/dev/null 2>&1; then
+        git checkout "$CURRENT_BRANCH"
     else
-        log_error "No git repository found. Run install_pi.sh first."
+        log_warn "Branch $CURRENT_BRANCH not found, using main"
+        git checkout main
     fi
 fi
 
-# Pull latest changes using fetch + reset to avoid divergent branch issues
-log_info "Fetching latest changes from $REPO_PATH..."
-cd "$REPO_PATH"
+log_success "Git cloned: $(git rev-parse --short HEAD)"
 
-# Add safe directory
-git config --global --add safe.directory "$REPO_PATH"
-
-# Fetch all
-git fetch origin
-
-# Get current branch
-CURRENT_BRANCH=$(git branch --show-current)
-log_info "Current branch: $CURRENT_BRANCH"
-
-# Try to reset to origin/{current_branch}, fallback to origin/main
-if git rev-parse --verify "origin/$CURRENT_BRANCH" >/dev/null 2>&1; then
-    log_info "Resetting to origin/$CURRENT_BRANCH..."
-    git reset --hard "origin/$CURRENT_BRANCH"
-else
-    log_info "Branch $CURRENT_BRANCH not found on origin, using origin/main..."
-    git reset --hard origin/main
-fi
-
-log_success "Git updated to: $(git rev-parse --short HEAD)"
-
-# Run install script to copy files and rebuild
+# Run install script
 log_info "Running install script..."
-bash "$REPO_PATH/scripts/install_pi.sh"
+bash "$TEMP_DIR/scripts/install_pi.sh"
 
-# install_pi.sh already restarts services, so we're done
+# Clean up
+rm -rf "$TEMP_DIR"
+
 log_success "Update complete!"
