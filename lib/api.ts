@@ -64,6 +64,8 @@ export interface LogEntry {
   createdAt: string
   durationSeconds?: number
   description?: string
+  parentId?: string  // ID of parent log if this is a split
+  isOrigin?: boolean  // True if this is an origin log (has children)
 }
 
 export interface SystemStatus {
@@ -400,6 +402,10 @@ export async function listMissionLogs(missionId: string): Promise<LogEntry[]> {
 
 export function getLogDownloadUrl(missionId: string, logId: string): string {
   return `${getApiBaseUrl()}/api/missions/${missionId}/logs/${logId}/download`
+}
+
+export function getLogFamilyDownloadUrl(missionId: string, logId: string): string {
+  return `${getApiBaseUrl()}/api/missions/${missionId}/logs/${logId}/download-family`
 }
 
 export async function deleteLog(missionId: string, logId: string): Promise<void> {

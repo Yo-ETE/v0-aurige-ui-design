@@ -20,6 +20,7 @@ import {
   Trash2,
   FileText,
   ChevronRight,
+  ChevronDown,
   Info,
   FolderOpen,
   Import,
@@ -30,6 +31,8 @@ import {
   Eye,
   X,
   Send,
+  Download,
+  FolderTree,
 } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
@@ -37,7 +40,7 @@ import { Label } from "@/components/ui/label"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useIsolationStore, type IsolationLog } from "@/lib/isolation-store"
 import { useExportStore } from "@/lib/export-store"
-import { listMissionLogs, startReplay, stopReplay, getReplayStatus, splitLog, renameLog, deleteLog, getLogContent, type LogEntry, type CANInterface, type LogFrame } from "@/lib/api"
+import { listMissionLogs, startReplay, stopReplay, getReplayStatus, splitLog, renameLog, deleteLog, getLogContent, getLogDownloadUrl, getLogFamilyDownloadUrl, type LogEntry, type CANInterface, type LogFrame } from "@/lib/api"
 import { useRouter as useNavRouter } from "next/navigation"
 import { useMissionStore } from "@/lib/mission-store"
 
@@ -303,7 +306,7 @@ export default function Isolation() {
       filename: log.filename,
       missionId: importMissionId,
       tags: ["original"],
-      frameCount: log.frameCount,
+      frameCount: log.framesCount,
     })
     setShowImportDialog(false)
   }
@@ -610,7 +613,7 @@ export default function Isolation() {
               </Select>
             </div>
             
-            {/* Logs List */}
+            {/* Logs List - Grouped by family */}
             <div>
             {isLoadingLogs ? (
               <div className="flex items-center justify-center py-8">
@@ -627,38 +630,189 @@ export default function Isolation() {
                 </p>
               </div>
             ) : (
-              <div className="space-y-2 max-h-80 overflow-y-auto">
-                {missionLogs.map((log) => {
-                  const isImported = logs.some((l) => l.id === log.id)
-                  return (
-                    <div
-                      key={log.id}
-                      className={`flex items-center justify-between rounded-lg border border-border p-3 ${
-                        isImported ? "bg-muted/50 opacity-60" : "bg-secondary/50 hover:bg-secondary cursor-pointer"
-                      }`}
-                      onClick={() => !isImported && handleImportLog(log)}
-                    >
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate font-mono text-sm text-foreground">
-                          {log.filename}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {log.frameCount ? `${log.frameCount} trames` : ""}
-                          {log.description && ` - ${log.description}`}
-                        </p>
-                      </div>
-                      {isImported ? (
-                        <Badge variant="secondary">Importe</Badge>
-                      ) : (
-                        <Button size="sm" variant="outline">
-                          <Import className="h-4 w-4 mr-2" />
-                          Importer
-                        </Button>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
+              <ScrollArea className="h-80">
+                <div className="space-y-2 pr-4">
+                  {(() => {
+                    // Group logs by family (origin logs with their children)
+                    const originLogs = missionLogs.filter(l => !l.parentId)
+                    const childrenMap = new Map<string, LogEntry[]>()
+                    
+                    missionLogs.forEach(l => {
+                      if (l.parentId) {
+                        const children = childrenMap.get(l.parentId) || []
+                        children.push(l)
+                        childrenMap.set(l.parentId, children)
+                      }
+                    })
+                    
+                    // Recursively get all descendants
+                    const getAllDescendants = (logId: string): LogEntry[] => {
+                      const directChildren = childrenMap.get(logId) || []
+                      const allDescendants: LogEntry[] = [...directChildren]
+                      directChildren.forEach(child => {
+                        allDescendants.push(...getAllDescendants(child.id))
+                      })
+                      return allDescendants
+                    }
+                    
+                    return originLogs.map((originLog) => {
+                      const family = getAllDescendants(originLog.id)
+                      const hasFamily = family.length > 0
+                      const isOriginImported = logs.some((l) => l.id === originLog.id)
+                      const allFamilyImported = family.every(f => logs.some(l => l.id === f.id))
+                      const anyFamilyImported = family.some(f => logs.some(l => l.id === f.id))
+                      
+                      return (
+                        <div key={originLog.id} className="rounded-lg border border-border overflow-hidden">
+                          {/* Origin log header */}
+                          <div
+                            className={`flex items-center gap-2 p-3 ${
+                              isOriginImported ? "bg-muted/50" : "bg-secondary/50"
+                            }`}
+                          >
+                            {hasFamily && (
+                              <FolderTree className="h-4 w-4 text-primary shrink-0" />
+                            )}
+                            <div className="min-w-0 flex-1">
+                              <p className="font-mono text-sm text-foreground break-all">
+                                {originLog.filename}
+                              </p>
+                              <p className="text-xs text-muted-foreground truncate">
+                                {originLog.framesCount ? `${originLog.framesCount} trames` : ""}
+                                {hasFamily && ` - ${family.length} division(s)`}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              {hasFamily && (
+                                <>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-8 px-2"
+                                    onClick={() => {
+                                      // Import entire family
+                                      if (!isOriginImported) handleImportLog(originLog)
+                                      family.forEach(f => {
+                                        if (!logs.some(l => l.id === f.id)) {
+                                          handleImportLog(f)
+                                        }
+                                      })
+                                    }}
+                                    disabled={isOriginImported && allFamilyImported}
+                                    title="Importer tout le dossier"
+                                  >
+                                    <FolderOpen className="h-4 w-4" />
+                                  </Button>
+                                  <a
+                                    href={getLogFamilyDownloadUrl(importMissionId, originLog.id)}
+                                    download
+                                    className="inline-flex"
+                                  >
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-8 px-2"
+                                      title="Telecharger le dossier (ZIP)"
+                                    >
+                                      <Download className="h-4 w-4" />
+                                    </Button>
+                                  </a>
+                                </>
+                              )}
+                              {!hasFamily && (
+                                <a
+                                  href={getLogDownloadUrl(importMissionId, originLog.id)}
+                                  download
+                                  className="inline-flex"
+                                >
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-8 px-2"
+                                    title="Telecharger"
+                                  >
+                                    <Download className="h-4 w-4" />
+                                  </Button>
+                                </a>
+                              )}
+                              {isOriginImported ? (
+                                <Badge variant="secondary" className="text-xs">Importe</Badge>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-8"
+                                  onClick={() => handleImportLog(originLog)}
+                                >
+                                  <Import className="h-3 w-3 mr-1" />
+                                  <span className="hidden sm:inline">Importer</span>
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                          
+                          {/* Children (splits) - shown indented */}
+                          {hasFamily && (
+                            <div className="border-t border-border bg-background/50">
+                              {family.map((child, idx) => {
+                                const isChildImported = logs.some((l) => l.id === child.id)
+                                const depth = (child.id.match(/_[ab]/g) || []).length
+                                return (
+                                  <div
+                                    key={child.id}
+                                    className={`flex items-center gap-2 p-2 border-b border-border/50 last:border-b-0 ${
+                                      isChildImported ? "opacity-60" : "hover:bg-secondary/30"
+                                    }`}
+                                    style={{ paddingLeft: `${depth * 16 + 12}px` }}
+                                  >
+                                    <ChevronRight className="h-3 w-3 text-muted-foreground shrink-0" />
+                                    <div className="min-w-0 flex-1">
+                                      <p className="font-mono text-xs text-foreground break-all">
+                                        {child.filename}
+                                      </p>
+                                      <p className="text-xs text-muted-foreground">
+                                        {child.framesCount} trames
+                                      </p>
+                                    </div>
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      <a
+                                        href={getLogDownloadUrl(importMissionId, child.id)}
+                                        download
+                                        className="inline-flex"
+                                      >
+                                        <Button
+                                          size="sm"
+                                          variant="ghost"
+                                          className="h-6 w-6 p-0"
+                                          title="Telecharger"
+                                        >
+                                          <Download className="h-3 w-3" />
+                                        </Button>
+                                      </a>
+                                      {isChildImported ? (
+                                        <Badge variant="secondary" className="text-xs">Importe</Badge>
+                                      ) : (
+                                        <Button
+                                          size="sm"
+                                          variant="ghost"
+                                          className="h-6 px-2 text-xs"
+                                          onClick={() => handleImportLog(child)}
+                                        >
+                                          <Import className="h-3 w-3" />
+                                        </Button>
+                                      )}
+                                    </div>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })
+                  })()}
+                </div>
+              </ScrollArea>
             )}
             </div>
           </div>

@@ -151,6 +151,8 @@ class LogEntry(BaseModel):
     created_at: datetime = Field(alias="createdAt")
     duration_seconds: Optional[int] = Field(default=None, alias="durationSeconds")
     description: Optional[str] = None
+    parent_id: Optional[str] = Field(default=None, alias="parentId")  # ID of parent log if this is a split
+    is_origin: bool = Field(default=False, alias="isOrigin")  # True if this is an origin log (has children)
 
     class Config:
         populate_by_name = True
@@ -1228,11 +1230,16 @@ async def duplicate_mission(mission_id: str):
 
 @app.get("/api/missions/{mission_id}/logs", response_model=list[LogEntry])
 async def list_mission_logs(mission_id: str):
-    """List all logs for a mission"""
+    """List all logs for a mission, with parent/child relationships detected"""
     load_mission(mission_id)  # Verify exists
     
     logs_dir = get_mission_logs_dir(mission_id)
     logs = []
+    log_names = set()
+    
+    # First pass: collect all log names
+    for log_file in logs_dir.glob("*.log"):
+        log_names.add(log_file.stem)
     
     for log_file in logs_dir.glob("*.log"):
         stat = log_file.stat()
@@ -1248,14 +1255,32 @@ async def list_mission_logs(mission_id: str):
             except Exception:
                 pass
         
+        log_stem = log_file.stem
+        parent_id = None
+        is_origin = False
+        
+        # Detect parent/child relationships based on naming convention
+        # Split logs end with _a, _b, _a_a, _a_b, etc.
+        if log_stem.endswith("_a") or log_stem.endswith("_b"):
+            # This is a child - find parent
+            potential_parent = log_stem[:-2]  # Remove _a or _b
+            if potential_parent in log_names:
+                parent_id = potential_parent
+        
+        # Check if this log has children (is an origin)
+        if f"{log_stem}_a" in log_names or f"{log_stem}_b" in log_names:
+            is_origin = True
+        
         logs.append(LogEntry(
-            id=log_file.stem,
+            id=log_stem,
             filename=log_file.name,
             size=stat.st_size,
             framesCount=frames_count,
             createdAt=datetime.fromtimestamp(stat.st_ctime),
             durationSeconds=meta.get("durationSeconds"),
             description=meta.get("description"),
+            parentId=parent_id,
+            isOrigin=is_origin,
         ))
     
     return sorted(logs, key=lambda x: x.created_at, reverse=True)
@@ -1277,6 +1302,51 @@ async def download_log(mission_id: str, log_id: str):
         filename=f"{log_id}.log",
         media_type="text/plain",
     )
+
+
+@app.get("/api/missions/{mission_id}/logs/{log_id}/download-family")
+async def download_log_family(mission_id: str, log_id: str):
+    """Download a log and all its children (splits) as a ZIP file"""
+    import zipfile
+    import tempfile
+    
+    load_mission(mission_id)
+    logs_dir = get_mission_logs_dir(mission_id)
+    
+    # Find all files that belong to this family
+    family_files = []
+    
+    # Add the main log
+    main_log = logs_dir / f"{log_id}.log"
+    if main_log.exists():
+        family_files.append(main_log)
+    
+    # Find all children recursively (log_a, log_b, log_a_a, log_a_b, etc.)
+    def find_children(parent_stem: str):
+        for suffix in ["_a", "_b"]:
+            child_stem = f"{parent_stem}{suffix}"
+            child_file = logs_dir / f"{child_stem}.log"
+            if child_file.exists():
+                family_files.append(child_file)
+                find_children(child_stem)  # Recursively find grandchildren
+    
+    find_children(log_id)
+    
+    if not family_files:
+        raise HTTPException(status_code=404, detail="Log not found")
+    
+    # Create ZIP file
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp:
+        with zipfile.ZipFile(tmp.name, 'w', zipfile.ZIP_DEFLATED) as zf:
+            for log_file in family_files:
+                zf.write(log_file, log_file.name)
+        
+        return FileResponse(
+            path=tmp.name,
+            filename=f"{log_id}_famille.zip",
+            media_type="application/zip",
+            background=None,  # Don't delete immediately
+        )
 
 
 @app.get("/api/missions/{mission_id}/logs/{log_id}/content")
