@@ -464,6 +464,59 @@ export async function splitLog(missionId: string, logId: string): Promise<SplitL
 }
 
 // =============================================================================
+// Co-occurrence Analysis
+// =============================================================================
+
+export interface CoOccurrenceRequest {
+  logId: string
+  targetCanId: string
+  targetTimestamp: number
+  windowMs?: number
+  direction?: "before" | "after" | "both"
+}
+
+export interface CoOccurrenceFrame {
+  canId: string
+  count: number
+  countBefore: number
+  countAfter: number
+  avgDelayMs: number
+  dataVariations: number
+  sampleData: string[]
+  frameType: "command" | "ack" | "status" | "unknown"
+  score: number
+}
+
+export interface EcuFamily {
+  name: string
+  idRangeStart: string
+  idRangeEnd: string
+  frameIds: string[]
+  totalFrames: number
+}
+
+export interface CoOccurrenceResponse {
+  targetFrame: { canId: string; timestamp: number }
+  windowMs: number
+  totalFramesAnalyzed: number
+  uniqueIdsFound: number
+  relatedFrames: CoOccurrenceFrame[]
+  ecuFamilies: EcuFamily[]
+}
+
+export async function analyzeCoOccurrence(
+  missionId: string, 
+  logId: string, 
+  request: CoOccurrenceRequest
+): Promise<CoOccurrenceResponse> {
+  return fetchApi<CoOccurrenceResponse>(`/missions/${missionId}/logs/${logId}/co-occurrence`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  })
+}
+
+// =============================================================================
 // OBD-II Diagnostics
 // =============================================================================
 

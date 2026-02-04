@@ -33,6 +33,8 @@ import {
   Send,
   Download,
   FolderTree,
+  Search,
+  Network,
 } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
@@ -40,7 +42,7 @@ import { Label } from "@/components/ui/label"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useIsolationStore, type IsolationLog } from "@/lib/isolation-store"
 import { useExportStore } from "@/lib/export-store"
-import { listMissionLogs, startReplay, stopReplay, getReplayStatus, splitLog, renameLog, deleteLog, getLogContent, getLogDownloadUrl, getLogFamilyDownloadUrl, type LogEntry, type CANInterface, type LogFrame } from "@/lib/api"
+import { listMissionLogs, startReplay, stopReplay, getReplayStatus, splitLog, renameLog, deleteLog, getLogContent, getLogDownloadUrl, getLogFamilyDownloadUrl, analyzeCoOccurrence, type LogEntry, type CANInterface, type LogFrame, type CoOccurrenceResponse, type CoOccurrenceFrame, type EcuFamily } from "@/lib/api"
 import { useRouter as useNavRouter } from "next/navigation"
 import { useMissionStore } from "@/lib/mission-store"
 
@@ -55,12 +57,14 @@ const steps = [
 function LogTreeItem({
   item,
   depth = 0,
+  missionId,
   onReplay,
   onSplit,
   onRemove,
   onTagChange,
   onRename,
   onView,
+  onAnalyze,
   isReplaying,
   isSplitting,
   renamingLog,
@@ -70,12 +74,14 @@ function LogTreeItem({
 }: {
   item: IsolationLog
   depth?: number
+  missionId: string
   onReplay: (log: IsolationLog) => void
   onSplit: (log: IsolationLog) => void
   onRemove: (logId: string) => void
   onTagChange: (logId: string, tag: "success" | "failed") => void
   onRename: (log: IsolationLog) => void
   onView: (log: IsolationLog) => void
+  onAnalyze: (log: IsolationLog) => void
   isReplaying: string | null
   isSplitting: string | null
   renamingLog: string | null
@@ -158,6 +164,17 @@ function LogTreeItem({
             >
               <CheckCircle2 className="h-3 w-3" />
             </Button>
+            {item.tags.includes("success") && (
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-7 w-7 text-primary hover:text-primary"
+                onClick={() => onAnalyze(item)}
+                title="Analyser co-occurrence ECU"
+              >
+                <Network className="h-3 w-3" />
+              </Button>
+            )}
             <Button
               size="icon"
               variant="ghost"
@@ -166,6 +183,17 @@ function LogTreeItem({
               title="Voir les trames"
             >
               <Eye className="h-3 w-3" />
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-7 w-7"
+              title="Telecharger"
+              asChild
+            >
+              <a href={getLogDownloadUrl(missionId, item.id)} download={item.filename}>
+                <Download className="h-3 w-3" />
+              </a>
             </Button>
             <Button
               size="icon"
@@ -213,6 +241,8 @@ function LogTreeItem({
               key={child.id}
               item={child}
               depth={depth + 1}
+              missionId={missionId}
+              onAnalyze={onAnalyze}
               onReplay={onReplay}
               onSplit={onSplit}
               onRemove={onRemove}
@@ -258,6 +288,13 @@ export default function Isolation() {
   const [logFrames, setLogFrames] = useState<LogFrame[]>([])
   const [isLoadingFrames, setIsLoadingFrames] = useState(false)
   const [totalFrames, setTotalFrames] = useState(0)
+  
+  // Co-occurrence analysis state
+  const [analyzingLog, setAnalyzingLog] = useState<IsolationLog | null>(null)
+  const [coOccurrenceResult, setCoOccurrenceResult] = useState<CoOccurrenceResponse | null>(null)
+  const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [analysisWindowMs, setAnalysisWindowMs] = useState(200)
+  const [analysisDirection, setAnalysisDirection] = useState<"before" | "after" | "both">("both")
   
   // Get mission ID from localStorage and sync with store
   useEffect(() => {
@@ -425,6 +462,64 @@ export default function Isolation() {
     addFrames(exportedFrames)
     closeLogViewer()
     navRouter.push("/replay-rapide")
+  }
+  
+  // Co-occurrence analysis handlers
+  const handleAnalyzeCoOccurrence = async (log: IsolationLog) => {
+    setAnalyzingLog(log)
+    setCoOccurrenceResult(null)
+  }
+  
+  const runCoOccurrenceAnalysis = async () => {
+    if (!analyzingLog || !missionId) return
+    
+    setIsAnalyzing(true)
+    try {
+      // First, we need to get the log content to find a representative frame
+      // We'll use the first frame as the target (the user should select from viewer)
+      const response = await getLogContent(missionId, analyzingLog.id, 0, 10)
+      if (!response.frames.length) {
+        throw new Error("Aucune trame dans le log")
+      }
+      
+      // Get the first frame with valid canId and timestamp
+      const targetFrame = response.frames.find(f => f.canId && f.timestamp)
+      if (!targetFrame || !targetFrame.canId || !targetFrame.timestamp) {
+        throw new Error("Aucune trame valide trouvee")
+      }
+      
+      // Find the origin log to analyze (parent chain up to root)
+      let originLogId = analyzingLog.id
+      let currentLog: IsolationLog | undefined = analyzingLog
+      while (currentLog?.parentId) {
+        const parent = findLog(currentLog.parentId)
+        if (parent) {
+          originLogId = parent.id
+          currentLog = parent
+        } else {
+          break
+        }
+      }
+      
+      const result = await analyzeCoOccurrence(missionId, originLogId, {
+        logId: originLogId,
+        targetCanId: targetFrame.canId,
+        targetTimestamp: parseFloat(targetFrame.timestamp),
+        windowMs: analysisWindowMs,
+        direction: analysisDirection,
+      })
+      
+      setCoOccurrenceResult(result)
+    } catch (error) {
+      console.error("[v0] Co-occurrence analysis error:", error)
+    } finally {
+      setIsAnalyzing(false)
+    }
+  }
+  
+  const closeCoOccurrenceDialog = () => {
+    setAnalyzingLog(null)
+    setCoOccurrenceResult(null)
   }
   
   const [isSplitting, setIsSplitting] = useState<string | null>(null)
@@ -600,12 +695,14 @@ export default function Isolation() {
                   <LogTreeItem
                     key={log.id}
                     item={log}
+                    missionId={missionId}
                     onReplay={handleReplay}
                     onSplit={handleSplit}
                     onRemove={handleDeleteLog}
                     onTagChange={handleTagChange}
                     onRename={handleRename}
                     onView={handleViewLog}
+                    onAnalyze={handleAnalyzeCoOccurrence}
                     isReplaying={isReplaying}
                     isSplitting={isSplitting}
                     renamingLog={renamingLog}
@@ -906,6 +1003,182 @@ export default function Isolation() {
                   </table>
                 </div>
               </ScrollArea>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Co-occurrence Analysis Dialog */}
+      <Dialog open={analyzingLog !== null} onOpenChange={(open) => !open && closeCoOccurrenceDialog()}>
+        <DialogContent className="sm:max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Network className="h-5 w-5" />
+              Analyse Co-occurrence ECU
+            </DialogTitle>
+            <DialogDescription>
+              Identifiez les trames liees a la trame causale validee
+            </DialogDescription>
+          </DialogHeader>
+          
+          {/* Parameters */}
+          <div className="flex flex-wrap items-center gap-4 py-4 border-b border-border">
+            <div className="flex items-center gap-2">
+              <Label className="text-sm whitespace-nowrap">Fenetre:</Label>
+              <Select value={analysisWindowMs.toString()} onValueChange={(v) => setAnalysisWindowMs(parseInt(v))}>
+                <SelectTrigger className="w-28">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="100">100 ms</SelectItem>
+                  <SelectItem value="200">200 ms</SelectItem>
+                  <SelectItem value="500">500 ms</SelectItem>
+                  <SelectItem value="1000">1000 ms</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center gap-2">
+              <Label className="text-sm whitespace-nowrap">Direction:</Label>
+              <Select value={analysisDirection} onValueChange={(v) => setAnalysisDirection(v as "before" | "after" | "both")}>
+                <SelectTrigger className="w-32">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="before">Avant</SelectItem>
+                  <SelectItem value="after">Apres</SelectItem>
+                  <SelectItem value="both">Avant + Apres</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <Button onClick={runCoOccurrenceAnalysis} disabled={isAnalyzing} className="ml-auto">
+              {isAnalyzing ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Search className="h-4 w-4 mr-2" />}
+              Analyser
+            </Button>
+          </div>
+          
+          {/* Results */}
+          <div className="flex-1 overflow-hidden">
+            {isAnalyzing ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                <span className="ml-3 text-muted-foreground">Analyse en cours...</span>
+              </div>
+            ) : coOccurrenceResult ? (
+              <div className="h-full flex flex-col gap-4">
+                {/* Summary */}
+                <div className="flex items-center gap-6 text-sm">
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground">Trame cible:</span>
+                    <Badge variant="outline" className="font-mono">{coOccurrenceResult.targetFrame.canId}</Badge>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground">IDs trouves:</span>
+                    <span className="font-semibold">{coOccurrenceResult.uniqueIdsFound}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground">Trames analysees:</span>
+                    <span className="font-semibold">{coOccurrenceResult.totalFramesAnalyzed}</span>
+                  </div>
+                </div>
+                
+                {/* ECU Families */}
+                {coOccurrenceResult.ecuFamilies.length > 0 && (
+                  <div className="rounded-lg border border-primary/30 bg-primary/5 p-3">
+                    <h4 className="font-medium text-sm mb-2 flex items-center gap-2">
+                      <Network className="h-4 w-4 text-primary" />
+                      Familles ECU detectees
+                    </h4>
+                    <div className="flex flex-wrap gap-2">
+                      {coOccurrenceResult.ecuFamilies.map((family, idx) => (
+                        <Badge key={idx} variant="secondary" className="font-mono">
+                          {family.name} ({family.totalFrames} trames)
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                
+                {/* Related Frames Table */}
+                <ScrollArea className="flex-1 border rounded-lg">
+                  <table className="w-full text-xs">
+                    <thead className="sticky top-0 bg-secondary">
+                      <tr className="text-left text-muted-foreground">
+                        <th className="p-2 w-20">CAN ID</th>
+                        <th className="p-2 w-16">Score</th>
+                        <th className="p-2 w-20">Type</th>
+                        <th className="p-2 w-16">Count</th>
+                        <th className="p-2 w-20">Avant</th>
+                        <th className="p-2 w-20">Apres</th>
+                        <th className="p-2 w-24">Delai moy.</th>
+                        <th className="p-2">Exemples de data</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {coOccurrenceResult.relatedFrames.map((frame, idx) => (
+                        <tr key={idx} className="border-t border-border/50 hover:bg-secondary/50">
+                          <td className="p-2 font-mono font-semibold text-primary">{frame.canId}</td>
+                          <td className="p-2">
+                            <div className="flex items-center gap-1">
+                              <div 
+                                className="h-2 rounded-full bg-primary" 
+                                style={{ width: `${frame.score * 40}px` }}
+                              />
+                              <span className="text-muted-foreground">{(frame.score * 100).toFixed(0)}%</span>
+                            </div>
+                          </td>
+                          <td className="p-2">
+                            <Badge 
+                              variant={frame.frameType === "ack" ? "default" : frame.frameType === "command" ? "secondary" : "outline"}
+                              className={frame.frameType === "ack" ? "bg-success text-success-foreground" : ""}
+                            >
+                              {frame.frameType}
+                            </Badge>
+                          </td>
+                          <td className="p-2 text-center">{frame.count}</td>
+                          <td className="p-2 text-center">{frame.countBefore}</td>
+                          <td className="p-2 text-center">{frame.countAfter}</td>
+                          <td className="p-2 text-center">{frame.avgDelayMs > 0 ? "+" : ""}{frame.avgDelayMs.toFixed(1)} ms</td>
+                          <td className="p-2 font-mono text-muted-foreground truncate max-w-[200px]">
+                            {frame.sampleData.slice(0, 2).join(", ")}
+                            {frame.dataVariations > 2 && ` (+${frame.dataVariations - 2})`}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </ScrollArea>
+                
+                {/* Actions */}
+                <div className="flex items-center gap-2 pt-2 border-t border-border">
+                  <Button variant="outline" size="sm" onClick={() => {
+                    // Export ECU family IDs to filter
+                    if (coOccurrenceResult.ecuFamilies.length > 0) {
+                      const allIds = coOccurrenceResult.ecuFamilies.flatMap(f => f.frameIds)
+                      navigator.clipboard.writeText(allIds.join(","))
+                    }
+                  }}>
+                    Copier IDs ECU
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => {
+                    // Export all related frame IDs
+                    const ids = coOccurrenceResult.relatedFrames.map(f => f.canId)
+                    navigator.clipboard.writeText(ids.join(","))
+                  }}>
+                    Copier tous les IDs
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <Network className="h-12 w-12 text-muted-foreground/50 mb-4" />
+                <p className="text-sm text-muted-foreground">
+                  Configurez les parametres et cliquez sur Analyser<br/>
+                  pour identifier les trames liees a la trame causale.
+                </p>
+                <p className="text-xs text-muted-foreground mt-2">
+                  L&apos;analyse se fait sur le log d&apos;origine: <span className="font-mono">{analyzingLog?.name}</span>
+                </p>
+              </div>
             )}
           </div>
         </DialogContent>

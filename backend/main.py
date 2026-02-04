@@ -215,6 +215,59 @@ class GeneratorRequest(BaseModel):
         populate_by_name = True
 
 
+class CoOccurrenceRequest(BaseModel):
+    """Request for co-occurrence analysis"""
+    log_id: str = Field(alias="logId")  # Origin log to analyze
+    target_can_id: str = Field(alias="targetCanId")  # The causal frame ID (hex)
+    target_timestamp: float = Field(alias="targetTimestamp")  # Timestamp of causal frame
+    window_ms: int = Field(alias="windowMs", default=200)  # Window size in ms
+    direction: str = "both"  # before, after, both
+
+    class Config:
+        populate_by_name = True
+
+
+class CoOccurrenceFrame(BaseModel):
+    """A frame found in co-occurrence analysis"""
+    can_id: str = Field(alias="canId")
+    count: int  # Number of occurrences in window
+    count_before: int = Field(alias="countBefore")  # Occurrences before causal frame
+    count_after: int = Field(alias="countAfter")  # Occurrences after causal frame
+    avg_delay_ms: float = Field(alias="avgDelayMs")  # Average delay from causal frame
+    data_variations: int = Field(alias="dataVariations")  # Number of unique payloads
+    sample_data: list[str] = Field(alias="sampleData")  # Sample payloads
+    frame_type: str = Field(alias="frameType")  # command, ack, status, unknown
+    score: float  # Relevance score
+
+    class Config:
+        populate_by_name = True
+
+
+class EcuFamily(BaseModel):
+    """A group of IDs that likely belong to the same ECU"""
+    name: str  # e.g. "ECU 0x700-0x70F"
+    id_range_start: str = Field(alias="idRangeStart")
+    id_range_end: str = Field(alias="idRangeEnd")
+    frame_ids: list[str] = Field(alias="frameIds")
+    total_frames: int = Field(alias="totalFrames")
+
+    class Config:
+        populate_by_name = True
+
+
+class CoOccurrenceResponse(BaseModel):
+    """Response from co-occurrence analysis"""
+    target_frame: dict = Field(alias="targetFrame")  # The causal frame info
+    window_ms: int = Field(alias="windowMs")
+    total_frames_analyzed: int = Field(alias="totalFramesAnalyzed")
+    unique_ids_found: int = Field(alias="uniqueIdsFound")
+    related_frames: list[CoOccurrenceFrame] = Field(alias="relatedFrames")
+    ecu_families: list[EcuFamily] = Field(alias="ecuFamilies")
+
+    class Config:
+        populate_by_name = True
+
+
 class SystemStatus(BaseModel):
     hostname: str
     uptime_seconds: int = Field(alias="uptimeSeconds")
@@ -1556,6 +1609,195 @@ async def split_log(mission_id: str, log_id: str):
         logBId=log_b_id,
         logBName=f"{log_b_id}.log",
         logBFrames=len(lines_b),
+    )
+
+
+# =============================================================================
+# Co-occurrence Analysis
+# =============================================================================
+
+@app.post("/api/missions/{mission_id}/logs/{log_id}/co-occurrence", response_model=CoOccurrenceResponse)
+async def analyze_co_occurrence(mission_id: str, log_id: str, request: CoOccurrenceRequest):
+    """
+    Analyze frames that co-occur with a causal frame within a time window.
+    
+    This helps identify:
+    - ACK frames (appear just after the causal frame)
+    - Status frames (appear during the action)
+    - Related ECU traffic (similar ID ranges)
+    """
+    load_mission(mission_id)
+    logs_dir = get_mission_logs_dir(mission_id)
+    log_file = logs_dir / f"{log_id}.log"
+    
+    if not log_file.exists():
+        raise HTTPException(status_code=404, detail="Log not found")
+    
+    # Parse the log file
+    frames = []
+    with open(log_file, "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            # Format: (timestamp) interface canId#data
+            try:
+                parts = line.split()
+                if len(parts) >= 3:
+                    ts_str = parts[0].strip("()")
+                    timestamp = float(ts_str)
+                    can_part = parts[2]  # canId#data
+                    if "#" in can_part:
+                        can_id, data = can_part.split("#", 1)
+                        frames.append({
+                            "timestamp": timestamp,
+                            "canId": can_id.upper(),
+                            "data": data.upper()
+                        })
+            except (ValueError, IndexError):
+                continue
+    
+    if not frames:
+        raise HTTPException(status_code=400, detail="No frames in log")
+    
+    # Find frames within the time window
+    target_ts = request.target_timestamp
+    window_sec = request.window_ms / 1000.0
+    target_can_id = request.target_can_id.upper()
+    
+    # Determine window bounds based on direction
+    if request.direction == "before":
+        ts_start = target_ts - window_sec
+        ts_end = target_ts
+    elif request.direction == "after":
+        ts_start = target_ts
+        ts_end = target_ts + window_sec
+    else:  # both
+        ts_start = target_ts - window_sec
+        ts_end = target_ts + window_sec
+    
+    # Collect frames in window, grouped by CAN ID
+    id_data: dict[str, list[dict]] = {}
+    for frame in frames:
+        if ts_start <= frame["timestamp"] <= ts_end:
+            can_id = frame["canId"]
+            if can_id not in id_data:
+                id_data[can_id] = []
+            id_data[can_id].append({
+                "timestamp": frame["timestamp"],
+                "data": frame["data"],
+                "delay_ms": (frame["timestamp"] - target_ts) * 1000
+            })
+    
+    # Analyze each ID
+    related_frames: list[CoOccurrenceFrame] = []
+    for can_id, occurrences in id_data.items():
+        if can_id == target_can_id:
+            continue  # Skip the target frame itself
+        
+        count_before = sum(1 for o in occurrences if o["delay_ms"] < 0)
+        count_after = sum(1 for o in occurrences if o["delay_ms"] > 0)
+        avg_delay = sum(o["delay_ms"] for o in occurrences) / len(occurrences)
+        unique_data = set(o["data"] for o in occurrences)
+        
+        # Determine frame type based on heuristics
+        frame_type = "unknown"
+        score = 0.0
+        
+        # ACK: appears just after (0-50ms) with few variations
+        if count_after > 0 and count_before == 0 and 0 < avg_delay < 50:
+            frame_type = "ack"
+            score = 0.9 - (len(unique_data) * 0.1)
+        # Command: appears just before with few variations
+        elif count_before > 0 and count_after == 0 and -50 < avg_delay < 0:
+            frame_type = "command"
+            score = 0.8 - (len(unique_data) * 0.1)
+        # Status: appears both before and after, often with variations
+        elif count_before > 0 and count_after > 0:
+            frame_type = "status"
+            score = 0.5 + (len(unique_data) * 0.05)
+        # Unknown but present
+        else:
+            score = 0.3
+        
+        # Boost score for IDs close to target
+        try:
+            target_int = int(target_can_id, 16)
+            can_int = int(can_id, 16)
+            if abs(target_int - can_int) <= 0x10:
+                score += 0.2
+            elif abs(target_int - can_int) <= 0x20:
+                score += 0.1
+        except ValueError:
+            pass
+        
+        related_frames.append(CoOccurrenceFrame(
+            canId=can_id,
+            count=len(occurrences),
+            countBefore=count_before,
+            countAfter=count_after,
+            avgDelayMs=round(avg_delay, 2),
+            dataVariations=len(unique_data),
+            sampleData=list(unique_data)[:5],
+            frameType=frame_type,
+            score=round(min(score, 1.0), 2)
+        ))
+    
+    # Sort by score descending
+    related_frames.sort(key=lambda x: x.score, reverse=True)
+    
+    # Group IDs into ECU families (IDs within 0x10 of each other)
+    ecu_families: list[EcuFamily] = []
+    used_ids = set()
+    
+    for frame in related_frames:
+        if frame.can_id in used_ids:
+            continue
+        
+        try:
+            base_int = int(frame.can_id, 16)
+        except ValueError:
+            continue
+        
+        # Find all IDs within range
+        family_ids = [frame.can_id]
+        family_count = frame.count
+        
+        for other in related_frames:
+            if other.can_id in used_ids or other.can_id == frame.can_id:
+                continue
+            try:
+                other_int = int(other.can_id, 16)
+                if abs(base_int - other_int) <= 0x10:
+                    family_ids.append(other.can_id)
+                    family_count += other.count
+                    used_ids.add(other.can_id)
+            except ValueError:
+                continue
+        
+        used_ids.add(frame.can_id)
+        
+        if len(family_ids) >= 2:
+            # Sort IDs and get range
+            sorted_ids = sorted(family_ids, key=lambda x: int(x, 16))
+            ecu_families.append(EcuFamily(
+                name=f"ECU 0x{sorted_ids[0]}-0x{sorted_ids[-1]}",
+                idRangeStart=sorted_ids[0],
+                idRangeEnd=sorted_ids[-1],
+                frameIds=sorted_ids,
+                totalFrames=family_count
+            ))
+    
+    return CoOccurrenceResponse(
+        targetFrame={
+            "canId": target_can_id,
+            "timestamp": target_ts
+        },
+        windowMs=request.window_ms,
+        totalFramesAnalyzed=sum(len(v) for v in id_data.values()),
+        uniqueIdsFound=len(id_data),
+        relatedFrames=related_frames[:20],  # Top 20
+        ecuFamilies=ecu_families
     )
 
 
