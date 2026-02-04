@@ -312,6 +312,12 @@ export default function Isolation() {
   const [showSignalEditor, setShowSignalEditor] = useState(false)
   const [editingSignal, setEditingSignal] = useState<Partial<DBCSignal> | null>(null)
   
+  // Time windows for diff analysis
+  const [diffBeforeStart, setDiffBeforeStart] = useState("0")
+  const [diffBeforeEnd, setDiffBeforeEnd] = useState("1")
+  const [diffAfterStart, setDiffAfterStart] = useState("1")
+  const [diffAfterEnd, setDiffAfterEnd] = useState("2")
+  
   // Get mission ID from localStorage and sync with store
   useEffect(() => {
     const localId = localStorage.getItem("activeMissionId")
@@ -1525,53 +1531,84 @@ export default function Isolation() {
           {!familyDiffResult && (
             <div className="space-y-4 py-4">
               <p className="text-sm text-muted-foreground">
-                Definissez deux fenetres temporelles dans le log pour comparer les trames AVANT et APRES l&apos;action.
+                Definissez deux fenetres temporelles (en secondes depuis le debut du log) pour comparer les trames AVANT et APRES l&apos;action.
               </p>
               
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2 p-4 rounded-lg border bg-secondary/30">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-3 p-4 rounded-lg border bg-secondary/30">
                   <Label className="text-sm font-medium">AVANT (baseline)</Label>
                   <p className="text-xs text-muted-foreground">Periode avant le declenchement de l&apos;action</p>
-                  <div className="flex items-center gap-2 mt-2">
-                    <span className="text-xs">Debut:</span>
-                    <Input id="before-start" type="number" step="0.1" defaultValue="0" className="w-24 h-8 text-xs" />
-                    <span className="text-xs">Fin:</span>
-                    <Input id="before-end" type="number" step="0.1" defaultValue="1" className="w-24 h-8 text-xs" />
-                    <span className="text-xs text-muted-foreground">sec</span>
+                  <div className="grid grid-cols-2 gap-3 mt-2">
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Debut (sec)</Label>
+                      <Input 
+                        type="number" 
+                        step="0.1" 
+                        value={diffBeforeStart}
+                        onChange={(e) => setDiffBeforeStart(e.target.value)}
+                        className="h-9 text-sm font-mono"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Fin (sec)</Label>
+                      <Input 
+                        type="number" 
+                        step="0.1" 
+                        value={diffBeforeEnd}
+                        onChange={(e) => setDiffBeforeEnd(e.target.value)}
+                        className="h-9 text-sm font-mono"
+                      />
+                    </div>
                   </div>
                 </div>
                 
-                <div className="space-y-2 p-4 rounded-lg border bg-primary/10 border-primary/30">
+                <div className="space-y-3 p-4 rounded-lg border bg-primary/10 border-primary/30">
                   <Label className="text-sm font-medium">APRES (action)</Label>
                   <p className="text-xs text-muted-foreground">Periode juste apres l&apos;action</p>
-                  <div className="flex items-center gap-2 mt-2">
-                    <span className="text-xs">Debut:</span>
-                    <Input id="after-start" type="number" step="0.1" defaultValue="1" className="w-24 h-8 text-xs" />
-                    <span className="text-xs">Fin:</span>
-                    <Input id="after-end" type="number" step="0.1" defaultValue="2" className="w-24 h-8 text-xs" />
-                    <span className="text-xs text-muted-foreground">sec</span>
+                  <div className="grid grid-cols-2 gap-3 mt-2">
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Debut (sec)</Label>
+                      <Input 
+                        type="number" 
+                        step="0.1" 
+                        value={diffAfterStart}
+                        onChange={(e) => setDiffAfterStart(e.target.value)}
+                        className="h-9 text-sm font-mono"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Fin (sec)</Label>
+                      <Input 
+                        type="number" 
+                        step="0.1" 
+                        value={diffAfterEnd}
+                        onChange={(e) => setDiffAfterEnd(e.target.value)}
+                        className="h-9 text-sm font-mono"
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
               
               <div className="flex items-center gap-2">
                 <Badge variant="secondary" className="font-mono">{selectedFamilyIds.length} IDs</Badge>
-                <span className="text-xs text-muted-foreground">{selectedFamilyIds.join(", ")}</span>
+                <span className="text-xs text-muted-foreground truncate">{selectedFamilyIds.slice(0, 10).join(", ")}{selectedFamilyIds.length > 10 ? "..." : ""}</span>
               </div>
               
               <Button 
                 onClick={() => {
-                  const beforeStart = parseFloat((document.getElementById("before-start") as HTMLInputElement)?.value || "0")
-                  const beforeEnd = parseFloat((document.getElementById("before-end") as HTMLInputElement)?.value || "1")
-                  const afterStart = parseFloat((document.getElementById("after-start") as HTMLInputElement)?.value || "1")
-                  const afterEnd = parseFloat((document.getElementById("after-end") as HTMLInputElement)?.value || "2")
-                  runFamilyDiffAnalysis(beforeStart, beforeEnd, afterStart, afterEnd)
+                  runFamilyDiffAnalysis(
+                    parseFloat(diffBeforeStart) || 0,
+                    parseFloat(diffBeforeEnd) || 1,
+                    parseFloat(diffAfterStart) || 1,
+                    parseFloat(diffAfterEnd) || 2
+                  )
                 }}
                 disabled={isAnalyzingFamily}
                 className="gap-2"
               >
                 {isAnalyzingFamily ? <Loader2 className="h-4 w-4 animate-spin" /> : <FlaskConical className="h-4 w-4" />}
-                Analyser
+                Analyser les differences
               </Button>
             </div>
           )}
