@@ -854,10 +854,22 @@ export interface AnalyzeFamilyRequest {
 }
 
 export async function analyzeFamilyDiff(request: AnalyzeFamilyRequest): Promise<FamilyAnalysisResponse> {
-  return fetchApi("/analysis/family-diff", {
+  const body = JSON.stringify(request)
+  console.log("[v0] analyzeFamilyDiff request body:", body)
+  
+  const response = await fetch(`${getApiBaseUrl()}/api/analysis/family-diff`, {
     method: "POST",
-    body: JSON.stringify(request),
+    headers: { "Content-Type": "application/json" },
+    body,
   })
+  
+  if (!response.ok) {
+    const errorText = await response.text()
+    console.error("[v0] analyzeFamilyDiff error response:", errorText)
+    throw new Error(`API error ${response.status}: ${errorText}`)
+  }
+  
+  return response.json()
 }
 
 // =============================================================================

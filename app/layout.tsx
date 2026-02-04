@@ -23,8 +23,8 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="fr">
-      <body className="font-sans antialiased bg-background text-foreground">
+    <html lang="fr" suppressHydrationWarning>
+      <body className="font-sans antialiased bg-background text-foreground" suppressHydrationWarning>
         {children}
         <FloatingTerminal />
       </body>
