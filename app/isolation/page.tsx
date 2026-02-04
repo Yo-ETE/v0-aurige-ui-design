@@ -1513,6 +1513,13 @@ export default function Isolation() {
                     Replay Rapide
                   </Button>
                   <Button variant="outline" size="sm" className="bg-transparent" onClick={() => {
+                    // Go back to log selection
+                    setCoOccurrenceResult(null)
+                    setCoOccStep("select")
+                  }}>
+                    Nouvelle analyse
+                  </Button>
+                  <Button variant="outline" size="sm" className="bg-transparent" onClick={() => {
                     // Export selected IDs or all if none selected
                     const ids = selectedCoOccurrenceIds.size > 0 
                       ? Array.from(selectedCoOccurrenceIds)
