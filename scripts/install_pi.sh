@@ -319,30 +319,24 @@ setup_git_repo() {
     if [ -d "$PROJECT_ROOT/.git" ]; then
         log_info "Copying git repository from $PROJECT_ROOT..."
         
-        # Copy the entire repo to /opt/aurige/repo (including source files)
-        if [ -d "$AURIGE_DIR/repo/.git" ]; then
-            # Update existing repo - sync with source
-            cd "$AURIGE_DIR/repo"
-            git config --global --add safe.directory "$AURIGE_DIR/repo"
-            git remote set-url origin "$(cd "$PROJECT_ROOT" && git remote get-url origin)" 2>/dev/null || true
-            
-            # Copy updated files from source
-            rsync -a --delete --exclude='.git' --exclude='node_modules' --exclude='venv' --exclude='.next' \
-                "$PROJECT_ROOT/" "$AURIGE_DIR/repo/"
-            
-            git fetch origin 2>/dev/null || true
-        else
-            # Fresh copy - copy entire directory
-            rsync -a --exclude='node_modules' --exclude='venv' --exclude='.next' \
-                "$PROJECT_ROOT/" "$AURIGE_DIR/repo/"
-            cd "$AURIGE_DIR/repo"
-            git config --global --add safe.directory "$AURIGE_DIR/repo"
-        fi
+        # Always do a fresh copy to ensure .git is in sync
+        # Remove old repo first to avoid stale .git issues
+        rm -rf "$AURIGE_DIR/repo"
+        mkdir -p "$AURIGE_DIR/repo"
         
-        log_success "Git repository set up at $AURIGE_DIR/repo"
+        # Copy entire directory including .git
+        rsync -a --exclude='node_modules' --exclude='venv' --exclude='.next' \
+            "$PROJECT_ROOT/" "$AURIGE_DIR/repo/"
+        
+        cd "$AURIGE_DIR/repo"
+        git config --global --add safe.directory "$AURIGE_DIR/repo"
+        
+        # Get current commit info
+        CURRENT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+        log_success "Git repository set up at $AURIGE_DIR/repo (commit: $CURRENT_COMMIT)"
         
         # Save current branch for future updates
-        CURRENT_BRANCH=$(cd "$PROJECT_ROOT" && git branch --show-current 2>/dev/null || echo "main")
+        CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "main")
         echo "$CURRENT_BRANCH" > "$AURIGE_DIR/branch.txt"
         log_info "Saved branch for updates: $CURRENT_BRANCH"
     else
