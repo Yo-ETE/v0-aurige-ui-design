@@ -1941,23 +1941,36 @@ export default function Isolation() {
               
               {/* Actions */}
               <div className="flex flex-wrap items-center gap-2 pt-2 border-t">
-                <Button variant="outline" className="bg-transparent" onClick={() => setFamilyDiffResult(null)}>
+                <Button variant="outline" className="bg-transparent" onClick={() => {
+                  // Close family diff and go back to co-occurrence analysis
+                  setShowFamilyDiff(false)
+                  setFamilyDiffResult(null)
+                  setCoOccStep("select")
+                  // Re-open co-occurrence dialog with current log
+                  if (originLogId) {
+                    const log = logs.find(l => l.name.replace(".log", "") === originLogId)
+                    if (log) setAnalyzingLog(log)
+                  }
+                }}>
                   Nouvelle analyse
                 </Button>
                 <Button 
                   variant="default" 
                   className="gap-1"
                   onClick={() => {
-                    // Send qualified frames to Replay Rapide
-                    const statusFrames = familyDiffResult.frames_analysis
+                    // Send qualified frames to Replay Rapide using addFrames like co-occurrence
+                    const qualifiedFrames = familyDiffResult.frames_analysis
                       .filter(f => f.classification === "status" || f.classification === "ack")
-                      .map(f => f.can_id)
-                    if (statusFrames.length > 0) {
-                      // Store in localStorage for Replay Rapide page
-                      localStorage.setItem("replayRapideFrameIds", JSON.stringify(statusFrames))
-                      localStorage.setItem("replayRapideMissionId", missionId || "")
-                      localStorage.setItem("replayRapideLogId", originLogId || "")
-                      window.location.href = "/replay-rapide"
+                    if (qualifiedFrames.length > 0) {
+                      const framesToSend = qualifiedFrames.map(f => ({
+                        canId: f.can_id,
+                        data: f.sample_status !== "N/A" ? f.sample_status : (f.sample_ack !== "N/A" ? f.sample_ack : f.sample_before),
+                        timestamp: "0",
+                        source: `qualified-${originLogId}`,
+                      }))
+                      addFrames(framesToSend)
+                      setShowFamilyDiff(false)
+                      navRouter.push("/replay-rapide")
                     }
                   }}
                   disabled={!familyDiffResult.frames_analysis.some(f => f.classification === "status" || f.classification === "ack")}
