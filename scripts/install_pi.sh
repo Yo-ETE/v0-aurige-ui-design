@@ -124,7 +124,7 @@ EOF
     log_success "Virtual CAN interface (vcan0) configured"
 }
 
-# Setup WiFi power management disable and hotspot watchdog
+# Setup WiFi power management disable and network watchdog
 setup_wifi_stability() {
     log_info "Setting up WiFi stability fixes..."
     
@@ -135,7 +135,7 @@ setup_wifi_stability() {
 wifi.powersave = 2
 EOF
 
-    # Create a systemd service to keep hotspot active and disable power management
+    # Create a systemd service to keep hotspot active and disable power management at boot
     cat > /etc/systemd/system/wifi-stability.service << 'EOF'
 [Unit]
 Description=WiFi stability fixes (disable power management, maintain hotspot)
@@ -154,39 +154,125 @@ ExecStart=/bin/bash -c 'sleep 5 && nmcli connection up Hotspot 2>/dev/null || tr
 WantedBy=multi-user.target
 EOF
 
-    # Create a timer to periodically check hotspot
-    cat > /etc/systemd/system/wifi-watchdog.service << 'EOF'
+    # Create robust network watchdog script that checks REAL internet connectivity
+    cat > /usr/local/bin/aurige-net-watchdog.sh << 'WATCHDOG_EOF'
+#!/bin/bash
+# Aurige Network Watchdog - checks real internet connectivity and forces reconnection if needed
+
+TARGET_URL="https://clients3.google.com/generate_204"
+FAILCOUNT_FILE="/run/aurige-net.fail"
+MAX_FAILS=3
+
+# Read current fail count
+failcount=0
+[ -f "$FAILCOUNT_FILE" ] && failcount=$(cat "$FAILCOUNT_FILE")
+
+# Test real internet connectivity (not just link state)
+if curl -fs --max-time 5 "$TARGET_URL" >/dev/null 2>&1; then
+    # Internet OK - reset counter
+    echo 0 > "$FAILCOUNT_FILE"
+    
+    # Also ensure hotspot is still up
+    if ! nmcli -t connection show --active | grep -q "Hotspot"; then
+        logger "[Aurige] Hotspot down, restarting..."
+        nmcli connection up Hotspot 2>/dev/null || true
+    fi
+    
+    # Re-disable power management (it can get re-enabled)
+    for iface in /sys/class/net/wlan*; do
+        iw dev "$(basename "$iface")" set power_save off 2>/dev/null || true
+    done
+    
+    exit 0
+fi
+
+# Internet KO - increment counter
+failcount=$((failcount+1))
+echo "$failcount" > "$FAILCOUNT_FILE"
+
+logger "[Aurige] Internet KO ($failcount/$MAX_FAILS)"
+
+if [ "$failcount" -ge "$MAX_FAILS" ]; then
+    logger "[Aurige] Max failures reached, forcing uplink reconnection..."
+    
+    # Find the uplink interface (wlan1 or any non-AP wifi)
+    UPLINK_IFACE=""
+    for iface in wlan1 wlan2 enx*; do
+        if [ -e "/sys/class/net/$iface" ]; then
+            UPLINK_IFACE="$iface"
+            break
+        fi
+    done
+    
+    if [ -n "$UPLINK_IFACE" ]; then
+        logger "[Aurige] Disconnecting uplink interface: $UPLINK_IFACE"
+        nmcli device disconnect "$UPLINK_IFACE" 2>/dev/null || true
+        sleep 3
+        
+        logger "[Aurige] Reconnecting uplink interface: $UPLINK_IFACE"
+        nmcli device connect "$UPLINK_IFACE" 2>/dev/null || true
+        sleep 2
+    fi
+    
+    # Also try to bring up any known WiFi connections with autoconnect
+    nmcli connection show | grep wifi | grep -v Hotspot | awk '{print $1}' | while read conn; do
+        nmcli connection up "$conn" 2>/dev/null || true
+    done
+    
+    # Ensure hotspot stays up (we never touch the hotspot itself)
+    nmcli connection up Hotspot 2>/dev/null || true
+    
+    # Disable power management again
+    for iface in /sys/class/net/wlan*; do
+        iw dev "$(basename "$iface")" set power_save off 2>/dev/null || true
+    done
+    
+    # Reset counter
+    echo 0 > "$FAILCOUNT_FILE"
+    
+    logger "[Aurige] Uplink reconnection complete"
+fi
+WATCHDOG_EOF
+
+    chmod +x /usr/local/bin/aurige-net-watchdog.sh
+
+    # Create systemd service for the watchdog
+    cat > /etc/systemd/system/aurige-net-watchdog.service << 'EOF'
 [Unit]
-Description=WiFi hotspot watchdog
-After=NetworkManager.service
+Description=Aurige Network Watchdog (checks real internet connectivity)
 
 [Service]
 Type=oneshot
-# Check if hotspot is down and restart it
-ExecStart=/bin/bash -c 'if ! nmcli -t connection show --active | grep -q "Hotspot"; then nmcli connection up Hotspot 2>/dev/null || true; fi'
-# Re-disable power management
-ExecStart=/bin/bash -c 'for iface in /sys/class/net/wlan*; do iw dev $(basename $iface) set power_save off 2>/dev/null || true; done'
+ExecStart=/usr/local/bin/aurige-net-watchdog.sh
 EOF
 
-    cat > /etc/systemd/system/wifi-watchdog.timer << 'EOF'
+    # Create timer to run watchdog every 2 minutes
+    cat > /etc/systemd/system/aurige-net-watchdog.timer << 'EOF'
 [Unit]
-Description=Run WiFi watchdog every 2 minutes
+Description=Aurige Network Watchdog Timer
 
 [Timer]
-OnBootSec=60
-OnUnitActiveSec=120
+OnBootSec=2min
+OnUnitActiveSec=2min
+AccuracySec=30s
 
 [Install]
 WantedBy=timers.target
 EOF
 
+    # Remove old wifi-watchdog if it exists
+    systemctl disable wifi-watchdog.timer 2>/dev/null || true
+    systemctl stop wifi-watchdog.timer 2>/dev/null || true
+    rm -f /etc/systemd/system/wifi-watchdog.service
+    rm -f /etc/systemd/system/wifi-watchdog.timer
+
     systemctl daemon-reload
     systemctl enable wifi-stability.service
-    systemctl enable wifi-watchdog.timer
+    systemctl enable aurige-net-watchdog.timer
     systemctl start wifi-stability.service
-    systemctl start wifi-watchdog.timer
+    systemctl start aurige-net-watchdog.timer
     
-    log_success "WiFi stability fixes configured"
+    log_success "WiFi stability and network watchdog configured"
 }
 
 # Install Node.js LTS
