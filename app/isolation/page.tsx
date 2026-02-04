@@ -660,9 +660,21 @@ export default function Isolation() {
   
   // Run the family diff analysis with 3 windows (AVANT / ACK / STATUS)
   const runFamilyDiffAnalysis = async () => {
-    if (!missionId || !originLogId || selectedFamilyIds.length === 0 || !coOccurrenceResult) return
+    if (!missionId || !originLogId || selectedFamilyIds.length === 0 || !coOccurrenceResult) {
+      console.error("[v0] Missing required data for family diff analysis")
+      return
+    }
     
     const t0 = coOccurrenceResult.targetFrame.timestamp
+    console.log("[v0] Running family diff analysis with:", {
+      mission_id: missionId,
+      log_id: originLogId,
+      family_ids: selectedFamilyIds,
+      t0_timestamp: t0,
+      before_offset_ms: beforeOffsetMs,
+      ack_offset_ms: ackOffsetMs,
+      status_offset_ms: statusOffsetMs,
+    })
     
     setIsAnalyzingFamily(true)
     try {
