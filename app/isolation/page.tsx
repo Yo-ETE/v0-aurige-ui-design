@@ -35,8 +35,6 @@ import {
   FolderTree,
   Search,
   Network,
-  Maximize2,
-  Minimize2,
 } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
@@ -319,9 +317,8 @@ export default function Isolation() {
   const [ackOffsetMs, setAckOffsetMs] = useState<[number, number]>([0, 100])
   const [statusOffsetMs, setStatusOffsetMs] = useState<[number, number]>([200, 1500])
   
-  // Fullscreen mode for dialogs
-  const [coOccFullscreen, setCoOccFullscreen] = useState(false)
-  const [familyDiffFullscreen, setFamilyDiffFullscreen] = useState(false)
+  // State for co-occurrence dialog navigation
+  const [coOccStep, setCoOccStep] = useState<"select" | "results">("select")
   
   // Get mission ID from localStorage and sync with store
   useEffect(() => {
@@ -1347,26 +1344,25 @@ export default function Isolation() {
       </Dialog>
 
       {/* Co-occurrence Analysis Dialog */}
-      <Dialog open={analyzingLog !== null} onOpenChange={(open) => !open && closeCoOccurrenceDialog()}>
+      <Dialog open={analyzingLog !== null} onOpenChange={(open) => { if (!open) { closeCoOccurrenceDialog(); setCoOccStep("select"); } }}>
         <DialogContent 
           className="overflow-hidden flex flex-col"
-          style={coOccFullscreen 
-            ? { position: "fixed", inset: "8px", width: "calc(100vw - 16px)", height: "calc(100vh - 16px)", maxWidth: "none", maxHeight: "none", transform: "none", left: "8px", top: "8px" }
-            : { width: "98vw", maxWidth: "1400px", height: "90vh", maxHeight: "900px" }
-          }
+          style={{ width: "98vw", maxWidth: "1400px", height: "90vh", maxHeight: "900px" }}
         >
           <DialogHeader className="shrink-0">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              {coOccStep === "results" && coOccurrenceResult && (
+                <Button variant="ghost" size="icon" className="h-8 w-8 bg-transparent" onClick={() => { setCoOccurrenceResult(null); setCoOccStep("select"); }}>
+                  <ArrowLeft className="h-4 w-4" />
+                </Button>
+              )}
               <DialogTitle className="flex items-center gap-2">
                 <Network className="h-5 w-5 text-primary" />
                 Analyse Co-occurrence ECU
               </DialogTitle>
-              <Button variant="ghost" size="icon" className="h-8 w-8 bg-transparent" onClick={() => setCoOccFullscreen(!coOccFullscreen)}>
-                {coOccFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-              </Button>
             </div>
             <DialogDescription>
-              Trames liees a la trame causale dans une fenetre de {analysisWindowMs}ms
+              {coOccStep === "select" ? "Selectionnez un log a analyser" : `Trames liees a la trame causale dans une fenetre de ${analysisWindowMs}ms`}
             </DialogDescription>
           </DialogHeader>
           
@@ -1536,15 +1532,41 @@ export default function Isolation() {
                 </div>
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center py-12 text-center">
-                <Network className="h-12 w-12 text-muted-foreground/50 mb-4" />
-                <p className="text-sm text-muted-foreground">
-                  Configurez les parametres et cliquez sur Analyser<br/>
-                  pour identifier les trames liees a la trame causale.
-                </p>
-                <p className="text-xs text-muted-foreground mt-2">
-                  L&apos;analyse se fait sur le log d&apos;origine: {analyzingLog?.name}
-                </p>
+              <div className="flex flex-col gap-4 p-4">
+                <h4 className="font-medium">Selectionnez un log a analyser</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 max-h-[400px] overflow-auto">
+                  {logs.map((log) => (
+                    <Button
+                      key={log.name}
+                      variant={originLogId === log.name.replace(".log", "") ? "default" : "outline"}
+                      className={`justify-start gap-2 h-auto py-2 ${originLogId === log.name.replace(".log", "") ? "" : "bg-transparent"}`}
+                      onClick={() => {
+                        const logId = log.name.replace(".log", "")
+                        setOriginLogId(logId)
+                        setAnalyzingLog(log)
+                      }}
+                    >
+                      <FileText className="h-4 w-4 shrink-0" />
+                      <span className="truncate text-sm">{log.name}</span>
+                    </Button>
+                  ))}
+                </div>
+                {originLogId && (
+                  <div className="flex items-center gap-4 pt-4 border-t">
+                    <span className="text-sm text-muted-foreground">Log selectionne: <span className="font-mono font-medium">{originLogId}.log</span></span>
+                    <Button 
+                      onClick={async () => {
+                        await runCoOccurrenceAnalysis()
+                        setCoOccStep("results")
+                      }}
+                      disabled={isAnalyzing}
+                      className="gap-2"
+                    >
+                      {isAnalyzing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                      Analyser les co-occurrences
+                    </Button>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1555,21 +1577,13 @@ export default function Isolation() {
       <Dialog open={showFamilyDiff} onOpenChange={setShowFamilyDiff}>
         <DialogContent 
           className="overflow-hidden flex flex-col"
-          style={familyDiffFullscreen 
-            ? { position: "fixed", inset: "8px", width: "calc(100vw - 16px)", height: "calc(100vh - 16px)", maxWidth: "none", maxHeight: "none", transform: "none", left: "8px", top: "8px" }
-            : { width: "98vw", maxWidth: "1400px", height: "92vh", maxHeight: "950px" }
-          }
+          style={{ width: "98vw", maxWidth: "1400px", height: "92vh", maxHeight: "950px" }}
         >
           <DialogHeader className="shrink-0">
-            <div className="flex items-center justify-between">
-              <DialogTitle className="flex items-center gap-2">
-                <FlaskConical className="h-5 w-5 text-primary" />
-                Qualifier la famille - Diff AVANT/APRES
-              </DialogTitle>
-              <Button variant="ghost" size="icon" className="h-8 w-8 bg-transparent" onClick={() => setFamilyDiffFullscreen(!familyDiffFullscreen)}>
-                {familyDiffFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-              </Button>
-            </div>
+            <DialogTitle className="flex items-center gap-2">
+              <FlaskConical className="h-5 w-5 text-primary" />
+              Qualifier la famille - Diff AVANT/APRES
+            </DialogTitle>
             <DialogDescription>
               Comparez les payloads avant et apres l&apos;action pour classifier les trames (STATUS, ACK, INFO)
             </DialogDescription>
@@ -1926,9 +1940,43 @@ export default function Isolation() {
               </div>
               
               {/* Actions */}
-              <div className="flex items-center gap-2 pt-2 border-t">
+              <div className="flex flex-wrap items-center gap-2 pt-2 border-t">
                 <Button variant="outline" className="bg-transparent" onClick={() => setFamilyDiffResult(null)}>
                   Nouvelle analyse
+                </Button>
+                <Button 
+                  variant="default" 
+                  className="gap-1"
+                  onClick={() => {
+                    // Send qualified frames to Replay Rapide
+                    const statusFrames = familyDiffResult.frames_analysis
+                      .filter(f => f.classification === "status" || f.classification === "ack")
+                      .map(f => f.can_id)
+                    if (statusFrames.length > 0) {
+                      // Store in localStorage for Replay Rapide page
+                      localStorage.setItem("replayRapideFrameIds", JSON.stringify(statusFrames))
+                      localStorage.setItem("replayRapideMissionId", missionId || "")
+                      localStorage.setItem("replayRapideLogId", originLogId || "")
+                      window.location.href = "/replay-rapide"
+                    }
+                  }}
+                  disabled={!familyDiffResult.frames_analysis.some(f => f.classification === "status" || f.classification === "ack")}
+                >
+                  <Send className="h-4 w-4" />
+                  Envoyer vers Replay Rapide
+                </Button>
+                <Button 
+                  variant="outline" 
+                  className="bg-transparent gap-1"
+                  onClick={() => {
+                    // Copy qualified frame IDs to clipboard
+                    const qualifiedFrames = familyDiffResult.frames_analysis
+                      .filter(f => f.classification === "status" || f.classification === "ack")
+                      .map(f => f.can_id)
+                    navigator.clipboard.writeText(qualifiedFrames.join(","))
+                  }}
+                >
+                  Copier IDs qualifies
                 </Button>
                 {missionId && (
                   <Button variant="outline" className="bg-transparent gap-1" asChild>
