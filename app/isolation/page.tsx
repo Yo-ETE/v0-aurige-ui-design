@@ -1090,55 +1090,54 @@ export default function Isolation() {
           if (!analyzingLog) setOriginLogId(null)
         }
       }}>
-        <DialogContent className="sm:max-w-4xl max-h-[80vh]">
-          <DialogHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <DialogTitle className="flex items-center gap-2">
-                  <FileText className="h-5 w-5" />
-                  {viewingLog?.name}
-                </DialogTitle>
-                <DialogDescription>
-                  {totalFrames} trames au total
-                  {logFrames.length < totalFrames && ` (affichage des ${logFrames.length} premieres)`}
-                  {originLogId && (
-                    <span className="ml-2 text-primary">
-                      - Selectionnez la trame causale pour l&apos;analyse
-                    </span>
-                  )}
-                </DialogDescription>
-              </div>
-              <div className="flex items-center gap-2">
-                {originLogId && selectedFrame && (
-                  <Button
-                    onClick={runCoOccurrenceAnalysis}
-                    className="gap-2"
-                    variant="default"
-                  >
-                    <Network className="h-4 w-4" />
-                    Analyser co-occurrence
-                  </Button>
-                )}
-                <Button
-                  onClick={handleExportToReplay}
-                  disabled={logFrames.length === 0}
-                  variant="outline"
-                  className="gap-2 bg-transparent"
-                >
-                  <Send className="h-4 w-4" />
-                  Exporter vers Replay
-                </Button>
-              </div>
-            </div>
+        <DialogContent className="w-[95vw] max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
+          <DialogHeader className="shrink-0">
+            <DialogTitle className="flex items-center gap-2 text-sm sm:text-base">
+              <FileText className="h-4 w-4 sm:h-5 sm:w-5 shrink-0" />
+              <span className="truncate">{viewingLog?.name}</span>
+            </DialogTitle>
+            <DialogDescription className="text-xs sm:text-sm">
+              {totalFrames} trames
+              {logFrames.length < totalFrames && ` (${logFrames.length} affichees)`}
+              {originLogId && (
+                <span className="block sm:inline sm:ml-2 text-primary">
+                  Selectionnez la trame causale
+                </span>
+              )}
+            </DialogDescription>
           </DialogHeader>
           
-          {/* Analysis parameters and selected frame */}
+          {/* Action buttons - responsive */}
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            {originLogId && selectedFrame && (
+              <Button
+                onClick={runCoOccurrenceAnalysis}
+                size="sm"
+                className="gap-1"
+              >
+                <Network className="h-3 w-3" />
+                <span className="hidden sm:inline">Analyser</span> co-occurrence
+              </Button>
+            )}
+            <Button
+              onClick={handleExportToReplay}
+              disabled={logFrames.length === 0}
+              variant="outline"
+              size="sm"
+              className="gap-1 bg-transparent"
+            >
+              <Send className="h-3 w-3" />
+              <span className="hidden sm:inline">Exporter vers</span> Replay
+            </Button>
+          </div>
+          
+          {/* Analysis parameters - responsive grid */}
           {originLogId && (
-            <div className="flex flex-wrap items-center gap-4 p-3 rounded-lg border border-primary/30 bg-primary/5">
-              <div className="flex items-center gap-2">
-                <Label className="text-sm whitespace-nowrap">Fenetre:</Label>
+            <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 sm:gap-3 p-2 sm:p-3 rounded-lg border border-primary/30 bg-primary/5 shrink-0">
+              <div className="flex items-center gap-1">
+                <Label className="text-xs whitespace-nowrap">Fenetre:</Label>
                 <Select value={analysisWindowMs.toString()} onValueChange={(v) => setAnalysisWindowMs(parseInt(v))}>
-                  <SelectTrigger className="w-24 h-8">
+                  <SelectTrigger className="w-20 h-7 text-xs">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -1149,10 +1148,10 @@ export default function Isolation() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="flex items-center gap-2">
-                <Label className="text-sm whitespace-nowrap">Direction:</Label>
+              <div className="flex items-center gap-1">
+                <Label className="text-xs whitespace-nowrap">Direction:</Label>
                 <Select value={analysisDirection} onValueChange={(v) => setAnalysisDirection(v as "before" | "after" | "both")}>
-                  <SelectTrigger className="w-28 h-8">
+                  <SelectTrigger className="w-24 h-7 text-xs">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -1162,18 +1161,18 @@ export default function Isolation() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="flex items-center gap-2">
-                <Label className="text-sm whitespace-nowrap">Analyser sur:</Label>
+              <div className="flex items-center gap-1 col-span-2 sm:col-span-1">
+                <Label className="text-xs whitespace-nowrap">Analyser sur:</Label>
                 <Select value={originLogId || ""} onValueChange={(v) => setOriginLogId(v)}>
-                  <SelectTrigger className="w-56 h-8 font-mono text-xs">
-                    <SelectValue placeholder="Choisir un log" />
+                  <SelectTrigger className="flex-1 sm:w-40 h-7 font-mono text-xs">
+                    <SelectValue placeholder="Log" />
                   </SelectTrigger>
                   <SelectContent className="max-h-60">
                     {availableLogsForAnalysis.map((log) => (
                       <SelectItem key={log.id} value={log.id} className="font-mono text-xs">
-                        <span style={{ paddingLeft: `${(log.depth || 0) * 12}px` }} className="flex items-center gap-1">
+                        <span style={{ paddingLeft: `${(log.depth || 0) * 8}px` }} className="flex items-center gap-1">
                           {(log.depth || 0) > 0 && <ChevronRight className="h-3 w-3 text-muted-foreground" />}
-                          {log.name}
+                          {log.name.length > 25 ? log.name.slice(0, 25) + "..." : log.name}
                         </span>
                       </SelectItem>
                     ))}
@@ -1181,10 +1180,10 @@ export default function Isolation() {
                 </Select>
               </div>
               {selectedFrame && (
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-muted-foreground">Trame:</span>
-                  <Badge className="font-mono">{selectedFrame.canId}</Badge>
-                  <span className="font-mono text-xs text-muted-foreground truncate max-w-24">{selectedFrame.data}</span>
+                <div className="flex items-center gap-1 col-span-2 sm:col-span-1">
+                  <span className="text-xs text-muted-foreground">Trame:</span>
+                  <Badge className="font-mono text-xs h-6">{selectedFrame.canId}</Badge>
+                  <span className="font-mono text-xs text-muted-foreground truncate max-w-16">{selectedFrame.data}</span>
                 </div>
               )}
             </div>

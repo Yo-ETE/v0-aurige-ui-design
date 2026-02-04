@@ -2784,48 +2784,59 @@ GIT_REPO_PATH = "/opt/aurige/repo"
 
 @app.get("/api/system/version")
 async def get_system_version():
-    """Get current git version info"""
+    """Get current git version info - checks installed version in /opt/aurige/repo"""
+    # Prefer the installed repo over /tmp/aurige
+    INSTALLED_REPO = "/opt/aurige/repo"
+    repo_to_check = INSTALLED_REPO if Path(f"{INSTALLED_REPO}/.git").exists() else GIT_REPO_PATH
+    
     try:
         # Check if git repo exists
-        if not Path(GIT_REPO_PATH).exists() or not Path(f"{GIT_REPO_PATH}/.git").exists():
-            return {"branch": "non installe", "commit": "-", "commitsBehind": 0, "updateAvailable": False, "error": "Depot git non trouve dans /tmp/aurige"}
+        if not Path(repo_to_check).exists() or not Path(f"{repo_to_check}/.git").exists():
+            return {"branch": "non installe", "commit": "-", "commitsBehind": 0, "updateAvailable": False, "error": "Aucun depot git trouve"}
         
         # Add safe.directory to avoid "dubious ownership" error
-        run_command(["git", "config", "--global", "--add", "safe.directory", GIT_REPO_PATH], check=False)
+        run_command(["git", "config", "--global", "--add", "safe.directory", repo_to_check], check=False)
         
         # Get current branch
-        branch_result = run_command(["git", "-C", GIT_REPO_PATH, "branch", "--show-current"], check=False)
+        branch_result = run_command(["git", "-C", repo_to_check, "branch", "--show-current"], check=False)
         branch = branch_result.stdout.strip() if branch_result.returncode == 0 else "unknown"
         
+        # Also check saved branch preference
+        saved_branch_file = Path("/opt/aurige/branch.txt")
+        saved_branch = ""
+        if saved_branch_file.exists():
+            saved_branch = saved_branch_file.read_text().strip()
+        
         # Get current commit hash
-        commit_result = run_command(["git", "-C", GIT_REPO_PATH, "rev-parse", "--short", "HEAD"], check=False)
+        commit_result = run_command(["git", "-C", repo_to_check, "rev-parse", "--short", "HEAD"], check=False)
         commit = commit_result.stdout.strip() if commit_result.returncode == 0 else "unknown"
         
         # Get commit date
-        date_result = run_command(["git", "-C", GIT_REPO_PATH, "log", "-1", "--format=%ci"], check=False)
+        date_result = run_command(["git", "-C", repo_to_check, "log", "-1", "--format=%ci"], check=False)
         commit_date = date_result.stdout.strip() if date_result.returncode == 0 else ""
         
-        # Check if there are updates available
-        # v0 pushes to origin/{local_branch} (e.g. origin/v0/main-xxx)
-        run_command(["git", "-C", GIT_REPO_PATH, "fetch", "origin"], check=False)
+        # Check if there are updates available by fetching from remote
+        run_command(["git", "-C", repo_to_check, "fetch", "origin"], check=False)
         
-        # Try origin/{branch} first (where v0 pushes), fallback to origin/main
-        remote_branch = f"origin/{branch}" if branch and branch != "unknown" else "origin/main"
-        behind_result = run_command(["git", "-C", GIT_REPO_PATH, "rev-list", "--count", f"HEAD..{remote_branch}"], check=False)
+        # Use saved branch preference or current branch
+        check_branch = saved_branch or branch
+        remote_branch = f"origin/{check_branch}" if check_branch and check_branch != "unknown" else "origin/main"
+        behind_result = run_command(["git", "-C", repo_to_check, "rev-list", "--count", f"HEAD..{remote_branch}"], check=False)
         
         # If that fails (branch doesn't exist on remote), try origin/main
         if behind_result.returncode != 0 or not behind_result.stdout.strip().isdigit():
             remote_branch = "origin/main"
-            behind_result = run_command(["git", "-C", GIT_REPO_PATH, "rev-list", "--count", "HEAD..origin/main"], check=False)
+            behind_result = run_command(["git", "-C", repo_to_check, "rev-list", "--count", "HEAD..origin/main"], check=False)
         
         commits_behind = int(behind_result.stdout.strip()) if behind_result.returncode == 0 and behind_result.stdout.strip().isdigit() else 0
         
         return {
-            "branch": branch,
+            "branch": saved_branch or branch,
             "commit": commit,
             "commitDate": commit_date,
             "commitsBehind": commits_behind,
             "updateAvailable": commits_behind > 0,
+            "repoPath": repo_to_check,
         }
     except Exception as e:
         return {"branch": "unknown", "commit": "unknown", "error": str(e)}
