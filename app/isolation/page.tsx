@@ -1348,12 +1348,12 @@ export default function Isolation() {
 
       {/* Co-occurrence Analysis Dialog */}
       <Dialog open={analyzingLog !== null} onOpenChange={(open) => !open && closeCoOccurrenceDialog()}>
-<DialogContent 
-          className={coOccFullscreen 
-            ? "fixed inset-2 w-auto h-auto max-w-none max-h-none translate-x-0 translate-y-0 left-2 top-2" 
-            : "w-[98vw] max-w-6xl h-[90vh] max-h-[900px]"
-          } 
-          style={{ overflow: "hidden", display: "flex", flexDirection: "column" }}
+        <DialogContent 
+          className="overflow-hidden flex flex-col"
+          style={coOccFullscreen 
+            ? { position: "fixed", inset: "8px", width: "calc(100vw - 16px)", height: "calc(100vh - 16px)", maxWidth: "none", maxHeight: "none", transform: "none", left: "8px", top: "8px" }
+            : { width: "98vw", maxWidth: "1400px", height: "90vh", maxHeight: "900px" }
+          }
         >
           <DialogHeader className="shrink-0">
             <div className="flex items-center justify-between">
@@ -1554,11 +1554,11 @@ export default function Isolation() {
       {/* Family Diff Analysis Dialog */}
       <Dialog open={showFamilyDiff} onOpenChange={setShowFamilyDiff}>
         <DialogContent 
-          className={familyDiffFullscreen 
-            ? "fixed inset-2 w-auto h-auto max-w-none max-h-none translate-x-0 translate-y-0 left-2 top-2" 
-            : "w-[98vw] max-w-7xl h-[92vh] max-h-[950px]"
-          } 
-          style={{ overflow: "hidden", display: "flex", flexDirection: "column" }}
+          className="overflow-hidden flex flex-col"
+          style={familyDiffFullscreen 
+            ? { position: "fixed", inset: "8px", width: "calc(100vw - 16px)", height: "calc(100vh - 16px)", maxWidth: "none", maxHeight: "none", transform: "none", left: "8px", top: "8px" }
+            : { width: "98vw", maxWidth: "1400px", height: "92vh", maxHeight: "950px" }
+          }
         >
           <DialogHeader className="shrink-0">
             <div className="flex items-center justify-between">
