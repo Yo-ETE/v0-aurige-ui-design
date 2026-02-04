@@ -3204,19 +3204,28 @@ async def analyze_family_diff(request: AnalyzeFamilyRequest) -> FamilyAnalysisRe
     Analyse les differences AVANT/ACK/STATUS pour une famille d'IDs.
     Compare les payloads dans trois fenetres temporelles autour de t0.
     """
-    mission_dir = Path(MISSIONS_DIR) / request.mission_id / "logs"
-    if not mission_dir.exists():
-        raise HTTPException(status_code=404, detail="Mission non trouvee")
-    
-    # Find log file
-    log_file = None
-    for f in mission_dir.glob("*.log"):
-        if f.stem == request.log_id or f.name == request.log_id:
-            log_file = f
-            break
-    
-    if not log_file:
-        raise HTTPException(status_code=404, detail="Log non trouve")
+    import traceback
+    try:
+        print(f"[DEBUG] family-diff request: mission={request.mission_id}, log={request.log_id}, t0={request.t0_timestamp}")
+        print(f"[DEBUG] family_ids: {request.family_ids}")
+        print(f"[DEBUG] offsets: before={request.before_offset_ms}, ack={request.ack_offset_ms}, status={request.status_offset_ms}")
+        
+        mission_dir = Path(MISSIONS_DIR) / request.mission_id / "logs"
+        if not mission_dir.exists():
+            raise HTTPException(status_code=404, detail=f"Mission non trouvee: {mission_dir}")
+        
+        # Find log file
+        log_file = None
+        for f in mission_dir.glob("*.log"):
+            if f.stem == request.log_id or f.name == request.log_id:
+                log_file = f
+                break
+        
+        if not log_file:
+            available_logs = [f.name for f in mission_dir.glob("*.log")]
+            raise HTTPException(status_code=404, detail=f"Log non trouve: {request.log_id}. Disponibles: {available_logs}")
+        
+        print(f"[DEBUG] Found log file: {log_file}")
     
     # Calculate absolute timestamps from t0 and offsets
     t0 = request.t0_timestamp
@@ -3395,6 +3404,12 @@ async def analyze_family_diff(request: AnalyzeFamilyRequest) -> FamilyAnalysisRe
         },
         t0_timestamp=t0
     )
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] family-diff failed: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Erreur interne: {str(e)}")
 
 
 # DBC Signal storage
