@@ -3194,9 +3194,9 @@ class AnalyzeFamilyRequest(BaseModel):
     log_id: str
     family_ids: list[str]
     t0_timestamp: float  # Reference timestamp (causal frame)
-    before_offset_ms: tuple[float, float] = (-500, -50)  # t0-500ms to t0-50ms
-    ack_offset_ms: tuple[float, float] = (0, 100)  # t0 to t0+100ms
-    status_offset_ms: tuple[float, float] = (200, 1500)  # t0+200ms to t0+1500ms
+    before_offset_ms: list[float] = [-500, -50]  # t0-500ms to t0-50ms
+    ack_offset_ms: list[float] = [0, 100]  # t0 to t0+100ms
+    status_offset_ms: list[float] = [200, 1500]  # t0+200ms to t0+1500ms
 
 @app.post("/api/analysis/family-diff")
 async def analyze_family_diff(request: AnalyzeFamilyRequest) -> FamilyAnalysisResponse:
