@@ -15,6 +15,7 @@ CAN commands use Linux can-utils:
 """
 
 import os
+import re
 import json
 import shutil
 import asyncio
