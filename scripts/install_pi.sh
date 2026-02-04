@@ -319,12 +319,15 @@ setup_git_repo() {
     if [ -d "$PROJECT_ROOT/.git" ]; then
         log_info "Copying git repository from $PROJECT_ROOT..."
         
-        # Always do a fresh copy to ensure .git is in sync
-        # Remove old repo first to avoid stale .git issues
+        # IMPORTANT: Change to a safe directory before removing repo
+        # This avoids "getcwd(): No such file or directory" error
+        cd /tmp
+        
+        # Remove old repo and create fresh one
         rm -rf "$AURIGE_DIR/repo"
         mkdir -p "$AURIGE_DIR/repo"
         
-        # Copy entire directory including .git
+        # Copy entire directory including .git from source
         rsync -a --exclude='node_modules' --exclude='venv' --exclude='.next' \
             "$PROJECT_ROOT/" "$AURIGE_DIR/repo/"
         
