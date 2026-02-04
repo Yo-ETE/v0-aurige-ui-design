@@ -305,6 +305,10 @@ export default function Isolation() {
       setMissionId(effectiveMissionId)
       // Sync isolation store with current mission - clears logs if mission changed
       setMission(effectiveMissionId)
+    } else {
+      // No mission - clear isolation store
+      setMissionId("")
+      setMission(null)
     }
   }, [currentMissionId, setMission])
   
@@ -870,7 +874,7 @@ export default function Isolation() {
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  className="h-8"
+                                  className="h-8 bg-transparent"
                                   onClick={() => handleImportLog(originLog)}
                                 >
                                   <Import className="h-3 w-3 mr-1" />

@@ -8,7 +8,6 @@
  */
 
 import { create } from "zustand"
-import { persist, createJSONStorage } from "zustand/middleware"
 
 export interface IsolationLog {
   id: string
@@ -28,7 +27,10 @@ interface IsolationStore {
   logs: IsolationLog[]
   
   // Set current mission (clears logs if mission changes)
-  setMission: (missionId: string) => void
+  setMission: (missionId: string | null) => void
+  
+  // Clear mission and all logs
+  clearMission: () => void
   
   // Import a log from a mission
   importLog: (log: IsolationLog) => void
@@ -87,17 +89,20 @@ function removeLogRecursive(logs: IsolationLog[], logId: string): IsolationLog[]
 }
 
 export const useIsolationStore = create<IsolationStore>()(
-  persist(
     (set, get) => ({
       currentMissionId: null,
       logs: [],
 
       setMission: (missionId) => {
         const current = get().currentMissionId
-        if (current !== missionId) {
-          // Clear logs when switching missions
+        // Always update mission and clear logs when mission changes or is null
+        if (current !== missionId || missionId === null) {
           set({ currentMissionId: missionId, logs: [] })
         }
+      },
+      
+      clearMission: () => {
+        set({ currentMissionId: null, logs: [] })
       },
 
       importLog: (log) => {
@@ -152,10 +157,5 @@ export const useIsolationStore = create<IsolationStore>()(
       findLog: (logId) => {
         return findLogRecursive(get().logs, logId)
       },
-    }),
-    {
-      name: "aurige-isolation",
-      storage: createJSONStorage(() => sessionStorage),
-    }
-  )
+    })
 )
