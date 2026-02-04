@@ -754,6 +754,24 @@ export default function ConfigurationPage() {
                   )}
                   {updateOutput.running ? "Mise a jour..." : "Mettre a jour Aurige"}
                 </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={async () => {
+                    try {
+                      await restartServices()
+                      setTimeout(() => {
+                        window.location.reload()
+                      }, 3000)
+                    } catch (e) {
+                      console.error("Failed to restart services:", e)
+                    }
+                  }}
+                  className="gap-2 bg-transparent"
+                >
+                  <RotateCcw className="h-4 w-4" />
+                  Redemarrer services
+                </Button>
               </div>
             ) : (
               <p className="text-muted-foreground text-sm">Chargement...</p>

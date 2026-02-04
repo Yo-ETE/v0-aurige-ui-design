@@ -1348,7 +1348,13 @@ export default function Isolation() {
 
       {/* Co-occurrence Analysis Dialog */}
       <Dialog open={analyzingLog !== null} onOpenChange={(open) => !open && closeCoOccurrenceDialog()}>
-<DialogContent className={coOccFullscreen ? "w-screen h-screen max-w-none max-h-none rounded-none" : "w-[98vw] max-w-6xl h-[90vh] max-h-[900px]"} style={{ overflow: "hidden", display: "flex", flexDirection: "column" }}>
+<DialogContent 
+          className={coOccFullscreen 
+            ? "fixed inset-2 w-auto h-auto max-w-none max-h-none translate-x-0 translate-y-0 left-2 top-2" 
+            : "w-[98vw] max-w-6xl h-[90vh] max-h-[900px]"
+          } 
+          style={{ overflow: "hidden", display: "flex", flexDirection: "column" }}
+        >
           <DialogHeader className="shrink-0">
             <div className="flex items-center justify-between">
               <DialogTitle className="flex items-center gap-2">
@@ -1547,7 +1553,13 @@ export default function Isolation() {
       
       {/* Family Diff Analysis Dialog */}
       <Dialog open={showFamilyDiff} onOpenChange={setShowFamilyDiff}>
-        <DialogContent className={familyDiffFullscreen ? "w-screen h-screen max-w-none max-h-none rounded-none" : "w-[98vw] max-w-7xl h-[92vh] max-h-[950px]"} style={{ overflow: "hidden", display: "flex", flexDirection: "column" }}>
+        <DialogContent 
+          className={familyDiffFullscreen 
+            ? "fixed inset-2 w-auto h-auto max-w-none max-h-none translate-x-0 translate-y-0 left-2 top-2" 
+            : "w-[98vw] max-w-7xl h-[92vh] max-h-[950px]"
+          } 
+          style={{ overflow: "hidden", display: "flex", flexDirection: "column" }}
+        >
           <DialogHeader className="shrink-0">
             <div className="flex items-center justify-between">
               <DialogTitle className="flex items-center gap-2">

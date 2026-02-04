@@ -96,7 +96,7 @@ export interface SystemStatus {
   vcan0Up: boolean
   apiRunning: boolean
   webRunning: boolean
-  }
+}
 
 export interface CANInterfaceStatus {
   interface: string
@@ -674,6 +674,10 @@ export async function systemShutdown(): Promise<{ status: string; message: strin
   return fetchApi("/system/shutdown", { method: "POST" })
 }
 
+export async function restartServices(): Promise<{ success: boolean; message: string }> {
+  return fetchApi("/system/restart-services", { method: "POST" })
+}
+
 // =============================================================================
 // Update and Backup
 // =============================================================================
@@ -725,10 +729,6 @@ export async function startUpdate(): Promise<{ status: string; message: string }
 
 export async function getUpdateOutput(): Promise<UpdateOutput> {
   return fetchApi("/system/update/output")
-}
-
-export async function restartServices(): Promise<{ status: string; message: string }> {
-  return fetchApi("/system/restart-services", { method: "POST" })
 }
 
 // =============================================================================

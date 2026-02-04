@@ -3609,6 +3609,63 @@ async def export_dbc(mission_id: str):
     )
 
 
+# Service management endpoints
+@app.post("/api/system/restart-services")
+async def restart_services():
+    """Restart aurige-web and aurige-api services after update"""
+    import subprocess
+    try:
+        # Create a script that will restart services after a delay
+        # This allows the API to respond before being killed
+        script = """
+#!/bin/bash
+sleep 2
+systemctl restart aurige-web
+# Note: we don't restart aurige-api here as it would kill this script
+"""
+        script_path = "/tmp/restart_services.sh"
+        with open(script_path, "w") as f:
+            f.write(script)
+        os.chmod(script_path, 0o755)
+        
+        # Run in background
+        subprocess.Popen(["sudo", script_path], 
+                        stdout=subprocess.DEVNULL, 
+                        stderr=subprocess.DEVNULL,
+                        start_new_session=True)
+        
+        return {"success": True, "message": "Services will restart in 2 seconds"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to restart: {str(e)}")
+
+@app.get("/api/system/check-update")
+async def check_update():
+    """Check if there's a new version available via git"""
+    import subprocess
+    try:
+        repo_dir = Path("/opt/aurige/repo")
+        if not repo_dir.exists():
+            return {"has_update": False, "message": "No git repo found"}
+        
+        # Fetch latest
+        subprocess.run(["git", "fetch", "origin"], cwd=repo_dir, capture_output=True)
+        
+        # Compare with remote
+        local = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo_dir, capture_output=True, text=True)
+        remote = subprocess.run(["git", "rev-parse", "origin/HEAD"], cwd=repo_dir, capture_output=True, text=True)
+        
+        local_hash = local.stdout.strip()
+        remote_hash = remote.stdout.strip()
+        
+        return {
+            "has_update": local_hash != remote_hash,
+            "local_version": local_hash[:8],
+            "remote_version": remote_hash[:8] if remote_hash else "unknown"
+        }
+    except Exception as e:
+        return {"has_update": False, "error": str(e)}
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
