@@ -312,11 +312,16 @@ export default function Isolation() {
   const [showSignalEditor, setShowSignalEditor] = useState(false)
   const [editingSignal, setEditingSignal] = useState<Partial<DBCSignal> | null>(null)
   
-  // Time windows for diff analysis
-  const [diffBeforeStart, setDiffBeforeStart] = useState("0")
-  const [diffBeforeEnd, setDiffBeforeEnd] = useState("1")
-  const [diffAfterStart, setDiffAfterStart] = useState("1")
-  const [diffAfterEnd, setDiffAfterEnd] = useState("2")
+  // Time windows for diff analysis (offsets in ms from t0)
+  const [beforeOffsetMs, setBeforeOffsetMs] = useState<[number, number]>([-500, -50])
+  const [ackOffsetMs, setAckOffsetMs] = useState<[number, number]>([0, 100])
+  const [statusOffsetMs, setStatusOffsetMs] = useState<[number, number]>([200, 1500])
+  
+  // Time window inputs for family diff (in seconds)
+  const [diffBeforeStart, setDiffBeforeStart] = useState<string>("0")
+  const [diffBeforeEnd, setDiffBeforeEnd] = useState<string>("1")
+  const [diffAfterStart, setDiffAfterStart] = useState<string>("1")
+  const [diffAfterEnd, setDiffAfterEnd] = useState<string>("2")
   
   // Get mission ID from localStorage and sync with store
   useEffect(() => {
@@ -653,9 +658,11 @@ export default function Isolation() {
     setSelectedDiffFrame(null)
   }
   
-  // Run the family diff analysis with AVANT/APRES windows
-  const runFamilyDiffAnalysis = async (beforeStart: number, beforeEnd: number, afterStart: number, afterEnd: number) => {
-    if (!missionId || !originLogId || selectedFamilyIds.length === 0) return
+  // Run the family diff analysis with 3 windows (AVANT / ACK / STATUS)
+  const runFamilyDiffAnalysis = async () => {
+    if (!missionId || !originLogId || selectedFamilyIds.length === 0 || !coOccurrenceResult) return
+    
+    const t0 = coOccurrenceResult.targetFrame.timestamp
     
     setIsAnalyzingFamily(true)
     try {
@@ -663,10 +670,10 @@ export default function Isolation() {
         mission_id: missionId,
         log_id: originLogId,
         family_ids: selectedFamilyIds,
-        before_start_ts: beforeStart,
-        before_end_ts: beforeEnd,
-        after_start_ts: afterStart,
-        after_end_ts: afterEnd,
+        t0_timestamp: t0,
+        before_offset_ms: beforeOffsetMs,
+        ack_offset_ms: ackOffsetMs,
+        status_offset_ms: statusOffsetMs,
       })
       setFamilyDiffResult(result)
       if (result.frames_analysis.length > 0) {
@@ -677,6 +684,13 @@ export default function Isolation() {
     } finally {
       setIsAnalyzingFamily(false)
     }
+  }
+  
+  // Reset to default presets
+  const resetToDefaultPresets = () => {
+    setBeforeOffsetMs([-500, -50])
+    setAckOffsetMs([0, 100])
+    setStatusOffsetMs([200, 1500])
   }
   
   // Open signal editor for a specific byte/bit
@@ -1527,88 +1541,141 @@ export default function Isolation() {
             </DialogDescription>
           </DialogHeader>
           
-          {/* Time window selection */}
-          {!familyDiffResult && (
+          {/* Time window selection with t0 reference */}
+          {!familyDiffResult && coOccurrenceResult && (
             <div className="space-y-4 py-4">
-              <p className="text-sm text-muted-foreground">
-                Definissez deux fenetres temporelles (en secondes depuis le debut du log) pour comparer les trames AVANT et APRES l&apos;action.
-              </p>
+              {/* t0 reference info */}
+              <div className="flex items-center gap-3 p-3 rounded-lg bg-primary/10 border border-primary/30">
+                <div className="flex items-center justify-center w-8 h-8 rounded-full bg-primary text-primary-foreground font-bold text-sm">t0</div>
+                <div>
+                  <p className="text-sm font-medium">Trame causale: <span className="font-mono">{coOccurrenceResult.targetFrame.canId}</span></p>
+                  <p className="text-xs text-muted-foreground font-mono">Timestamp: {coOccurrenceResult.targetFrame.timestamp.toFixed(6)}s</p>
+                </div>
+              </div>
               
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-3 p-4 rounded-lg border bg-secondary/30">
-                  <Label className="text-sm font-medium">AVANT (baseline)</Label>
-                  <p className="text-xs text-muted-foreground">Periode avant le declenchement de l&apos;action</p>
-                  <div className="grid grid-cols-2 gap-3 mt-2">
-                    <div className="space-y-1">
-                      <Label className="text-xs text-muted-foreground">Debut (sec)</Label>
-                      <Input 
-                        type="number" 
-                        step="0.1" 
-                        value={diffBeforeStart}
-                        onChange={(e) => setDiffBeforeStart(e.target.value)}
-                        className="h-9 text-sm font-mono"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs text-muted-foreground">Fin (sec)</Label>
-                      <Input 
-                        type="number" 
-                        step="0.1" 
-                        value={diffBeforeEnd}
-                        onChange={(e) => setDiffBeforeEnd(e.target.value)}
-                        className="h-9 text-sm font-mono"
-                      />
-                    </div>
+              {/* Mini timeline visualization */}
+              <div className="relative h-12 bg-secondary/30 rounded-lg overflow-hidden">
+                {/* Timeline axis */}
+                <div className="absolute top-1/2 left-0 right-0 h-0.5 bg-border -translate-y-1/2" />
+                
+                {/* t0 marker */}
+                <div className="absolute top-0 bottom-0 left-1/2 w-0.5 bg-primary -translate-x-1/2 z-10" />
+                <div className="absolute top-1 left-1/2 -translate-x-1/2 text-[10px] font-bold text-primary">t0</div>
+                
+                {/* AVANT window */}
+                <div 
+                  className="absolute top-1/2 h-4 bg-muted-foreground/30 rounded -translate-y-1/2"
+                  style={{ 
+                    left: `calc(50% + ${beforeOffsetMs[0] / 20}px)`, 
+                    width: `${(beforeOffsetMs[1] - beforeOffsetMs[0]) / 20}px` 
+                  }}
+                />
+                
+                {/* ACK window */}
+                <div 
+                  className="absolute top-1/2 h-4 bg-primary/50 rounded -translate-y-1/2"
+                  style={{ 
+                    left: `calc(50% + ${ackOffsetMs[0] / 20}px)`, 
+                    width: `${(ackOffsetMs[1] - ackOffsetMs[0]) / 20}px` 
+                  }}
+                />
+                
+                {/* STATUS window */}
+                <div 
+                  className="absolute top-1/2 h-4 bg-success/50 rounded -translate-y-1/2"
+                  style={{ 
+                    left: `calc(50% + ${statusOffsetMs[0] / 20}px)`, 
+                    width: `${Math.min((statusOffsetMs[1] - statusOffsetMs[0]) / 20, 100)}px` 
+                  }}
+                />
+                
+                {/* Labels */}
+                <div className="absolute bottom-0.5 left-[20%] text-[9px] text-muted-foreground">AVANT</div>
+                <div className="absolute bottom-0.5 left-[52%] text-[9px] text-primary">ACK</div>
+                <div className="absolute bottom-0.5 left-[65%] text-[9px] text-success">STATUS</div>
+              </div>
+              
+              {/* 3 windows configuration */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {/* AVANT */}
+                <div className="p-3 rounded-lg border bg-secondary/30">
+                  <Label className="text-xs font-medium text-muted-foreground">AVANT (baseline)</Label>
+                  <div className="flex items-center gap-1 mt-2">
+                    <Input 
+                      type="number" 
+                      value={beforeOffsetMs[0]}
+                      onChange={(e) => setBeforeOffsetMs([parseInt(e.target.value) || -500, beforeOffsetMs[1]])}
+                      className="h-8 text-xs font-mono w-20"
+                    />
+                    <span className="text-xs">a</span>
+                    <Input 
+                      type="number" 
+                      value={beforeOffsetMs[1]}
+                      onChange={(e) => setBeforeOffsetMs([beforeOffsetMs[0], parseInt(e.target.value) || -50])}
+                      className="h-8 text-xs font-mono w-20"
+                    />
+                    <span className="text-xs text-muted-foreground">ms</span>
                   </div>
                 </div>
                 
-                <div className="space-y-3 p-4 rounded-lg border bg-primary/10 border-primary/30">
-                  <Label className="text-sm font-medium">APRES (action)</Label>
-                  <p className="text-xs text-muted-foreground">Periode juste apres l&apos;action</p>
-                  <div className="grid grid-cols-2 gap-3 mt-2">
-                    <div className="space-y-1">
-                      <Label className="text-xs text-muted-foreground">Debut (sec)</Label>
-                      <Input 
-                        type="number" 
-                        step="0.1" 
-                        value={diffAfterStart}
-                        onChange={(e) => setDiffAfterStart(e.target.value)}
-                        className="h-9 text-sm font-mono"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs text-muted-foreground">Fin (sec)</Label>
-                      <Input 
-                        type="number" 
-                        step="0.1" 
-                        value={diffAfterEnd}
-                        onChange={(e) => setDiffAfterEnd(e.target.value)}
-                        className="h-9 text-sm font-mono"
-                      />
-                    </div>
+                {/* ACK */}
+                <div className="p-3 rounded-lg border bg-primary/10 border-primary/30">
+                  <Label className="text-xs font-medium text-primary">ACK (transitoire)</Label>
+                  <div className="flex items-center gap-1 mt-2">
+                    <Input 
+                      type="number" 
+                      value={ackOffsetMs[0]}
+                      onChange={(e) => setAckOffsetMs([parseInt(e.target.value) || 0, ackOffsetMs[1]])}
+                      className="h-8 text-xs font-mono w-20"
+                    />
+                    <span className="text-xs">a</span>
+                    <Input 
+                      type="number" 
+                      value={ackOffsetMs[1]}
+                      onChange={(e) => setAckOffsetMs([ackOffsetMs[0], parseInt(e.target.value) || 100])}
+                      className="h-8 text-xs font-mono w-20"
+                    />
+                    <span className="text-xs text-muted-foreground">ms</span>
+                  </div>
+                </div>
+                
+                {/* STATUS */}
+                <div className="p-3 rounded-lg border bg-success/10 border-success/30">
+                  <Label className="text-xs font-medium text-success">STATUS (persistant)</Label>
+                  <div className="flex items-center gap-1 mt-2">
+                    <Input 
+                      type="number" 
+                      value={statusOffsetMs[0]}
+                      onChange={(e) => setStatusOffsetMs([parseInt(e.target.value) || 200, statusOffsetMs[1]])}
+                      className="h-8 text-xs font-mono w-20"
+                    />
+                    <span className="text-xs">a</span>
+                    <Input 
+                      type="number" 
+                      value={statusOffsetMs[1]}
+                      onChange={(e) => setStatusOffsetMs([statusOffsetMs[0], parseInt(e.target.value) || 1500])}
+                      className="h-8 text-xs font-mono w-20"
+                    />
+                    <span className="text-xs text-muted-foreground">ms</span>
                   </div>
                 </div>
               </div>
               
-              <div className="flex items-center gap-2">
-                <Badge variant="secondary" className="font-mono">{selectedFamilyIds.length} IDs</Badge>
-                <span className="text-xs text-muted-foreground truncate">{selectedFamilyIds.slice(0, 10).join(", ")}{selectedFamilyIds.length > 10 ? "..." : ""}</span>
+              {/* Info and actions */}
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="secondary" className="font-mono">{selectedFamilyIds.length} IDs a analyser</Badge>
+                <Button variant="outline" size="sm" className="h-7 text-xs bg-transparent" onClick={resetToDefaultPresets}>
+                  Valeurs par defaut
+                </Button>
               </div>
               
               <Button 
-                onClick={() => {
-                  runFamilyDiffAnalysis(
-                    parseFloat(diffBeforeStart) || 0,
-                    parseFloat(diffBeforeEnd) || 1,
-                    parseFloat(diffAfterStart) || 1,
-                    parseFloat(diffAfterEnd) || 2
-                  )
-                }}
+                onClick={runFamilyDiffAnalysis}
                 disabled={isAnalyzingFamily}
                 className="gap-2"
               >
                 {isAnalyzingFamily ? <Loader2 className="h-4 w-4 animate-spin" /> : <FlaskConical className="h-4 w-4" />}
-                Analyser les differences
+                Analyser (3 fenetres)
               </Button>
             </div>
           )}
@@ -1654,8 +1721,8 @@ export default function Isolation() {
               </div>
               
               <div className="flex-1 overflow-hidden flex gap-4">
-                {/* Frame list */}
-                <div className="w-64 shrink-0 overflow-auto border rounded-lg">
+                {/* Frame list with confidence scores */}
+                <div className="w-72 shrink-0 overflow-auto border rounded-lg">
                   {familyDiffResult.frames_analysis.map((frame, idx) => (
                     <div
                       key={idx}
@@ -1670,9 +1737,17 @@ export default function Isolation() {
                         >
                           {frame.classification}
                         </Badge>
+                        <span className="text-[10px] text-muted-foreground ml-auto">{frame.confidence.toFixed(0)}%</span>
                       </div>
-                      <div className="text-xs text-muted-foreground">
-                        {frame.bytes_diff.length} octet(s) change(s)
+                      <div className="flex items-center justify-between text-xs text-muted-foreground mt-1">
+                        <span>{frame.bytes_diff.length} octet(s)</span>
+                        {frame.persistence === "persistent" && <span className="text-success">persistant</span>}
+                        {frame.persistence === "transient" && <span className="text-primary">transitoire</span>}
+                      </div>
+                      <div className="flex items-center gap-1 text-[10px] text-muted-foreground mt-1">
+                        <span>Av:{frame.count_before}</span>
+                        <span>Ack:{frame.count_ack}</span>
+                        <span>St:{frame.count_status}</span>
                       </div>
                     </div>
                   ))}
@@ -1682,48 +1757,79 @@ export default function Isolation() {
                 <div className="flex-1 overflow-auto border rounded-lg p-4">
                   {selectedDiffFrame ? (
                     <div className="space-y-4">
-                      <div className="flex items-center gap-4">
+                      <div className="flex flex-wrap items-center gap-3">
                         <h4 className="font-mono text-lg font-semibold">{selectedDiffFrame.can_id}</h4>
                         <Badge className={`${selectedDiffFrame.classification === "status" ? "bg-success text-success-foreground" : selectedDiffFrame.classification === "ack" ? "bg-primary" : ""}`}>
                           {selectedDiffFrame.classification}
                         </Badge>
-                        <span className="text-xs text-muted-foreground">
-                          Avant: {selectedDiffFrame.count_before} trames | Apres: {selectedDiffFrame.count_after} trames
-                        </span>
+                        <Badge variant="outline" className="bg-transparent font-normal">
+                          {selectedDiffFrame.confidence.toFixed(0)}% confiance
+                        </Badge>
+                        {selectedDiffFrame.persistence === "persistent" && (
+                          <Badge variant="outline" className="bg-transparent text-success border-success/50">Persistant</Badge>
+                        )}
+                        {selectedDiffFrame.persistence === "transient" && (
+                          <Badge variant="outline" className="bg-transparent text-primary border-primary/50">Transitoire</Badge>
+                        )}
                       </div>
                       
-                      {/* Byte-level diff like cansniffer */}
-                      <div className="space-y-2">
+                      {/* Frame counts per window */}
+                      <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                        <span>AVANT: {selectedDiffFrame.count_before} trames</span>
+                        <span>ACK: {selectedDiffFrame.count_ack} trames</span>
+                        <span>STATUS: {selectedDiffFrame.count_status} trames</span>
+                      </div>
+                      
+                      {/* 3-line diff like cansniffer */}
+                      <div className="space-y-2 p-3 rounded-lg bg-secondary/30">
                         <div className="flex items-center gap-2">
-                          <span className="w-20 text-xs text-muted-foreground">AVANT:</span>
+                          <span className="w-16 text-xs text-muted-foreground shrink-0">AVANT:</span>
                           <div className="flex gap-1 font-mono text-sm">
-                            {selectedDiffFrame.sample_before.match(/.{1,2}/g)?.map((byte, i) => {
+                            {selectedDiffFrame.sample_before !== "N/A" ? selectedDiffFrame.sample_before.match(/.{1,2}/g)?.map((byte, i) => {
                               const changed = selectedDiffFrame.bytes_diff.some(d => d.byte_index === i)
                               return (
                                 <span 
                                   key={i} 
-                                  className={`px-1 rounded ${changed ? "bg-destructive/30 text-destructive" : ""}`}
+                                  className={`px-1 rounded ${changed ? "bg-muted-foreground/30" : ""}`}
                                 >
                                   {byte}
                                 </span>
                               )
-                            })}
+                            }) : <span className="text-muted-foreground italic">N/A</span>}
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className="w-20 text-xs text-muted-foreground">APRES:</span>
+                          <span className="w-16 text-xs text-primary shrink-0">ACK:</span>
                           <div className="flex gap-1 font-mono text-sm">
-                            {selectedDiffFrame.sample_after.match(/.{1,2}/g)?.map((byte, i) => {
-                              const changed = selectedDiffFrame.bytes_diff.some(d => d.byte_index === i)
+                            {selectedDiffFrame.sample_ack !== "N/A" ? selectedDiffFrame.sample_ack.match(/.{1,2}/g)?.map((byte, i) => {
+                              const beforeByte = selectedDiffFrame.sample_before.match(/.{1,2}/g)?.[i] || "00"
+                              const changed = byte !== beforeByte
                               return (
                                 <span 
                                   key={i} 
-                                  className={`px-1 rounded ${changed ? "bg-success/30 text-success" : ""}`}
+                                  className={`px-1 rounded ${changed ? "bg-primary/30 text-primary font-semibold" : ""}`}
                                 >
                                   {byte}
                                 </span>
                               )
-                            })}
+                            }) : <span className="text-muted-foreground italic">N/A</span>}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="w-16 text-xs text-success shrink-0">STATUS:</span>
+                          <div className="flex gap-1 font-mono text-sm">
+                            {selectedDiffFrame.sample_status !== "N/A" ? selectedDiffFrame.sample_status.match(/.{1,2}/g)?.map((byte, i) => {
+                              const beforeByte = selectedDiffFrame.sample_before.match(/.{1,2}/g)?.[i] || "00"
+                              const changed = byte !== beforeByte
+                              return (
+                                <span 
+                                  key={i} 
+                                  className={`px-1 rounded ${changed ? "bg-success/30 text-success font-semibold" : ""}`}
+                                >
+                                  {byte}
+                                </span>
+                              )
+                            }) : <span className="text-muted-foreground italic">N/A</span>}
                           </div>
                         </div>
                       </div>

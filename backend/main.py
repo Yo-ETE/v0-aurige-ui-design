@@ -3172,32 +3172,37 @@ class ByteDiff(BaseModel):
 class FrameDiff(BaseModel):
     can_id: str
     count_before: int
-    count_after: int
+    count_ack: int  # Count in ACK window
+    count_status: int  # Count in STATUS window
     bytes_diff: list[ByteDiff]
     classification: str  # "status", "ack", "info", "unchanged"
+    confidence: float  # 0-100 confidence score
     sample_before: str
-    sample_after: str
+    sample_ack: str
+    sample_status: str
+    persistence: str  # "persistent", "transient", "none"
 
 class FamilyAnalysisResponse(BaseModel):
     family_name: str
     frame_ids: list[str]
     frames_analysis: list[FrameDiff]
     summary: dict
+    t0_timestamp: float  # Reference timestamp for UI
 
 class AnalyzeFamilyRequest(BaseModel):
     mission_id: str
     log_id: str
     family_ids: list[str]
-    before_start_ts: float
-    before_end_ts: float
-    after_start_ts: float
-    after_end_ts: float
+    t0_timestamp: float  # Reference timestamp (causal frame)
+    before_offset_ms: tuple[float, float] = (-500, -50)  # t0-500ms to t0-50ms
+    ack_offset_ms: tuple[float, float] = (0, 100)  # t0 to t0+100ms
+    status_offset_ms: tuple[float, float] = (200, 1500)  # t0+200ms to t0+1500ms
 
 @app.post("/api/analysis/family-diff")
 async def analyze_family_diff(request: AnalyzeFamilyRequest) -> FamilyAnalysisResponse:
     """
-    Analyse les differences AVANT/APRES pour une famille d'IDs.
-    Compare les payloads dans deux fenetres temporelles.
+    Analyse les differences AVANT/ACK/STATUS pour une famille d'IDs.
+    Compare les payloads dans trois fenetres temporelles autour de t0.
     """
     mission_dir = Path(MISSIONS_DIR) / request.mission_id / "logs"
     if not mission_dir.exists():
@@ -3213,9 +3218,19 @@ async def analyze_family_diff(request: AnalyzeFamilyRequest) -> FamilyAnalysisRe
     if not log_file:
         raise HTTPException(status_code=404, detail="Log non trouve")
     
-    # Parse log and extract frames in windows
+    # Calculate absolute timestamps from t0 and offsets
+    t0 = request.t0_timestamp
+    before_start = t0 + request.before_offset_ms[0] / 1000
+    before_end = t0 + request.before_offset_ms[1] / 1000
+    ack_start = t0 + request.ack_offset_ms[0] / 1000
+    ack_end = t0 + request.ack_offset_ms[1] / 1000
+    status_start = t0 + request.status_offset_ms[0] / 1000
+    status_end = t0 + request.status_offset_ms[1] / 1000
+    
+    # Parse log and extract frames in 3 windows
     frames_before: dict[str, list[str]] = {id: [] for id in request.family_ids}
-    frames_after: dict[str, list[str]] = {id: [] for id in request.family_ids}
+    frames_ack: dict[str, list[str]] = {id: [] for id in request.family_ids}
+    frames_status: dict[str, list[str]] = {id: [] for id in request.family_ids}
     
     with open(log_file, "r") as f:
         for line in f:
@@ -3223,7 +3238,6 @@ async def analyze_family_diff(request: AnalyzeFamilyRequest) -> FamilyAnalysisRe
             if not line:
                 continue
             
-            # Parse: (timestamp) interface canId#data
             match = re.match(r"\((\d+\.\d+)\)\s+\w+\s+([0-9A-Fa-f]+)#([0-9A-Fa-f]*)", line)
             if not match:
                 continue
@@ -3235,11 +3249,20 @@ async def analyze_family_diff(request: AnalyzeFamilyRequest) -> FamilyAnalysisRe
             if can_id not in request.family_ids:
                 continue
             
-            # Classify into before/after windows
-            if request.before_start_ts <= ts <= request.before_end_ts:
+            # Classify into 3 windows
+            if before_start <= ts <= before_end:
                 frames_before[can_id].append(data)
-            elif request.after_start_ts <= ts <= request.after_end_ts:
-                frames_after[can_id].append(data)
+            if ack_start <= ts <= ack_end:
+                frames_ack[can_id].append(data)
+            if status_start <= ts <= status_end:
+                frames_status[can_id].append(data)
+    
+    # Helper to get representative payload
+    def get_representative(data_list: list[str]) -> str:
+        if not data_list:
+            return ""
+        from collections import Counter
+        return Counter(data_list).most_common(1)[0][0]
     
     # Analyze differences for each ID
     frames_analysis = []
@@ -3250,31 +3273,32 @@ async def analyze_family_diff(request: AnalyzeFamilyRequest) -> FamilyAnalysisRe
     
     for can_id in request.family_ids:
         before_data = frames_before.get(can_id, [])
-        after_data = frames_after.get(can_id, [])
+        ack_data = frames_ack.get(can_id, [])
+        status_data = frames_status.get(can_id, [])
         
-        # Get most common payload in each window
-        def most_common(data_list: list[str]) -> str:
-            if not data_list:
-                return ""
-            from collections import Counter
-            return Counter(data_list).most_common(1)[0][0]
+        sample_before = get_representative(before_data) or ""
+        sample_ack = get_representative(ack_data) or ""
+        sample_status = get_representative(status_data) or ""
         
-        sample_before = most_common(before_data) or "00000000"
-        sample_after = most_common(after_data) or "00000000"
+        # Pad all to same length for comparison
+        max_len = max(len(sample_before), len(sample_ack), len(sample_status), 16)
+        if sample_before:
+            sample_before = sample_before.ljust(max_len, "0")[:max_len]
+        if sample_ack:
+            sample_ack = sample_ack.ljust(max_len, "0")[:max_len]
+        if sample_status:
+            sample_status = sample_status.ljust(max_len, "0")[:max_len]
         
-        # Pad to same length
-        max_len = max(len(sample_before), len(sample_after), 16)
-        sample_before = sample_before.ljust(max_len, "0")
-        sample_after = sample_after.ljust(max_len, "0")
-        
-        # Calculate byte-level diff
+        # Calculate byte-level diff (BEFORE vs STATUS for persistence)
         bytes_diff = []
-        for i in range(0, min(len(sample_before), len(sample_after)), 2):
-            byte_before = sample_before[i:i+2]
-            byte_after = sample_after[i:i+2]
+        compare_before = sample_before or "0" * max_len
+        compare_after = sample_status or sample_ack or "0" * max_len
+        
+        for i in range(0, min(len(compare_before), len(compare_after)), 2):
+            byte_before = compare_before[i:i+2] if i+2 <= len(compare_before) else "00"
+            byte_after = compare_after[i:i+2] if i+2 <= len(compare_after) else "00"
             
             if byte_before != byte_after:
-                # Find changed bits
                 try:
                     val_before = int(byte_before, 16)
                     val_after = int(byte_after, 16)
@@ -3290,43 +3314,73 @@ async def analyze_family_diff(request: AnalyzeFamilyRequest) -> FamilyAnalysisRe
                     changed_bits=changed_bits
                 ))
         
-        # Classify frame
+        # Classification based on 3-window persistence
         has_before = len(before_data) > 0
-        has_after = len(after_data) > 0
-        has_changes = len(bytes_diff) > 0
+        has_ack = len(ack_data) > 0
+        has_status = len(status_data) > 0
         
-        if not has_changes:
-            classification = "unchanged"
-            unchanged_count += 1
-        elif has_before and has_after and has_changes:
-            # Present in both with changes = STATUS
+        # Check if ACK differs from BEFORE
+        ack_differs = sample_ack and sample_before and sample_ack != sample_before
+        # Check if STATUS differs from BEFORE
+        status_differs = sample_status and sample_before and sample_status != sample_before
+        # Check if ACK same as STATUS (persistent change)
+        ack_persists = sample_ack and sample_status and sample_ack == sample_status
+        
+        # Classification logic based on persistence
+        confidence = 0.0
+        persistence = "none"
+        
+        if status_differs and has_status:
+            # STATUS: payload different in STATUS window = persistent state change
             classification = "status"
             status_count += 1
-        elif not has_before and has_after:
-            # Only appears after = ACK
+            persistence = "persistent"
+            confidence = 90.0 if (has_before and len(status_data) > 3) else 70.0
+        elif ack_differs and has_ack and not status_differs:
+            # ACK: changes in ACK window but not persistent in STATUS
             classification = "ack"
             ack_count += 1
-        elif has_before and not has_after:
-            # Disappears after = transitoire
+            persistence = "transient"
+            confidence = 80.0 if len(ack_data) > 1 else 50.0
+        elif not has_before and (has_ack or has_status):
+            # New frame appearing after t0
+            if has_status:
+                classification = "status"
+                status_count += 1
+                persistence = "persistent"
+                confidence = 60.0
+            else:
+                classification = "ack"
+                ack_count += 1
+                persistence = "transient"
+                confidence = 50.0
+        elif len(bytes_diff) > 0:
+            # Some change detected
             classification = "info"
             info_count += 1
+            confidence = 40.0
         else:
-            classification = "info"
-            info_count += 1
+            classification = "unchanged"
+            unchanged_count += 1
+            confidence = 100.0
         
         frames_analysis.append(FrameDiff(
             can_id=can_id,
             count_before=len(before_data),
-            count_after=len(after_data),
+            count_ack=len(ack_data),
+            count_status=len(status_data),
             bytes_diff=bytes_diff,
             classification=classification,
-            sample_before=sample_before,
-            sample_after=sample_after
+            confidence=confidence,
+            sample_before=sample_before or "N/A",
+            sample_ack=sample_ack or "N/A",
+            sample_status=sample_status or "N/A",
+            persistence=persistence
         ))
     
-    # Sort by classification priority: status > ack > info > unchanged
+    # Sort by: classification priority, then confidence desc, then number of changes
     priority = {"status": 0, "ack": 1, "info": 2, "unchanged": 3}
-    frames_analysis.sort(key=lambda x: (priority.get(x.classification, 4), -len(x.bytes_diff)))
+    frames_analysis.sort(key=lambda x: (priority.get(x.classification, 4), -x.confidence, -len(x.bytes_diff)))
     
     return FamilyAnalysisResponse(
         family_name=f"ECU 0x{request.family_ids[0]}-0x{request.family_ids[-1]}" if len(request.family_ids) > 1 else f"ID 0x{request.family_ids[0]}",
@@ -3338,7 +3392,8 @@ async def analyze_family_diff(request: AnalyzeFamilyRequest) -> FamilyAnalysisRe
             "ack": ack_count,
             "info": info_count,
             "unchanged": unchanged_count
-        }
+        },
+        t0_timestamp=t0
     )
 
 

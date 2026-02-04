@@ -818,11 +818,15 @@ export interface ByteDiff {
 export interface FrameDiff {
   can_id: string
   count_before: number
-  count_after: number
+  count_ack: number
+  count_status: number
   bytes_diff: ByteDiff[]
   classification: "status" | "ack" | "info" | "unchanged"
+  confidence: number
   sample_before: string
-  sample_after: string
+  sample_ack: string
+  sample_status: string
+  persistence: "persistent" | "transient" | "none"
 }
 
 export interface FamilyAnalysisResponse {
@@ -836,16 +840,17 @@ export interface FamilyAnalysisResponse {
     info: number
     unchanged: number
   }
+  t0_timestamp: number
 }
 
 export interface AnalyzeFamilyRequest {
   mission_id: string
   log_id: string
   family_ids: string[]
-  before_start_ts: number
-  before_end_ts: number
-  after_start_ts: number
-  after_end_ts: number
+  t0_timestamp: number
+  before_offset_ms: [number, number]
+  ack_offset_ms: [number, number]
+  status_offset_ms: [number, number]
 }
 
 export async function analyzeFamilyDiff(request: AnalyzeFamilyRequest): Promise<FamilyAnalysisResponse> {
