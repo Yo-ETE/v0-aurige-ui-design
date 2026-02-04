@@ -42,7 +42,7 @@ import { Label } from "@/components/ui/label"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useIsolationStore, type IsolationLog } from "@/lib/isolation-store"
 import { useExportStore } from "@/lib/export-store"
-import { listMissionLogs, startReplay, stopReplay, getReplayStatus, splitLog, renameLog, deleteLog, getLogContent, getLogDownloadUrl, getLogFamilyDownloadUrl, analyzeCoOccurrence, type LogEntry, type CANInterface, type LogFrame, type CoOccurrenceResponse, type CoOccurrenceFrame, type EcuFamily } from "@/lib/api"
+import { listMissionLogs, startReplay, stopReplay, getReplayStatus, splitLog, renameLog, deleteLog, getLogContent, getLogDownloadUrl, getLogFamilyDownloadUrl, analyzeCoOccurrence, analyzeFamilyDiff, addDBCSignal, getMissionDBC, getDBCExportUrl, type LogEntry, type CANInterface, type LogFrame, type CoOccurrenceResponse, type CoOccurrenceFrame, type EcuFamily, type FamilyAnalysisResponse, type FrameDiff, type DBCSignal } from "@/lib/api"
 import { useRouter as useNavRouter } from "next/navigation"
 import { useMissionStore } from "@/lib/mission-store"
 
@@ -299,6 +299,18 @@ export default function Isolation() {
   const [originLogId, setOriginLogId] = useState<string | null>(null)
   const [availableLogsForAnalysis, setAvailableLogsForAnalysis] = useState<Array<{id: string, name: string, depth?: number}>>([])
   const [selectedCoOccurrenceIds, setSelectedCoOccurrenceIds] = useState<Set<string>>(new Set())
+  
+  // Family diff analysis state (for DBC workflow)
+  const [showFamilyDiff, setShowFamilyDiff] = useState(false)
+  const [familyDiffResult, setFamilyDiffResult] = useState<FamilyAnalysisResponse | null>(null)
+  const [isAnalyzingFamily, setIsAnalyzingFamily] = useState(false)
+  const [selectedFamilyIds, setSelectedFamilyIds] = useState<string[]>([])
+  const [diffViewMode, setDiffViewMode] = useState<"bytes" | "bits">("bytes")
+  const [selectedDiffFrame, setSelectedDiffFrame] = useState<FrameDiff | null>(null)
+  
+  // DBC Signal editor state
+  const [showSignalEditor, setShowSignalEditor] = useState(false)
+  const [editingSignal, setEditingSignal] = useState<Partial<DBCSignal> | null>(null)
   
   // Get mission ID from localStorage and sync with store
   useEffect(() => {
@@ -624,6 +636,71 @@ export default function Isolation() {
       setSelectedCoOccurrenceIds(new Set())
     } else {
       setSelectedCoOccurrenceIds(new Set(coOccurrenceResult.relatedFrames.map(f => f.canId)))
+    }
+  }
+  
+  // Open family diff analysis for qualifying frames
+  const handleQualifyFamily = (familyIds: string[]) => {
+    setSelectedFamilyIds(familyIds)
+    setShowFamilyDiff(true)
+    setFamilyDiffResult(null)
+    setSelectedDiffFrame(null)
+  }
+  
+  // Run the family diff analysis with AVANT/APRES windows
+  const runFamilyDiffAnalysis = async (beforeStart: number, beforeEnd: number, afterStart: number, afterEnd: number) => {
+    if (!missionId || !originLogId || selectedFamilyIds.length === 0) return
+    
+    setIsAnalyzingFamily(true)
+    try {
+      const result = await analyzeFamilyDiff({
+        mission_id: missionId,
+        log_id: originLogId,
+        family_ids: selectedFamilyIds,
+        before_start_ts: beforeStart,
+        before_end_ts: beforeEnd,
+        after_start_ts: afterStart,
+        after_end_ts: afterEnd,
+      })
+      setFamilyDiffResult(result)
+      if (result.frames_analysis.length > 0) {
+        setSelectedDiffFrame(result.frames_analysis[0])
+      }
+    } catch (error) {
+      console.error("[v0] Family diff analysis error:", error)
+    } finally {
+      setIsAnalyzingFamily(false)
+    }
+  }
+  
+  // Open signal editor for a specific byte/bit
+  const handleCreateSignal = (canId: string, byteIndex: number, bitIndex?: number) => {
+    setEditingSignal({
+      can_id: canId,
+      name: `SIG_${canId}_B${byteIndex}`,
+      start_bit: byteIndex * 8 + (bitIndex ?? 0),
+      length: bitIndex !== undefined ? 1 : 8,
+      byte_order: "little_endian",
+      is_signed: false,
+      scale: 1,
+      offset: 0,
+      min_val: 0,
+      max_val: bitIndex !== undefined ? 1 : 255,
+      unit: "",
+      comment: "",
+    })
+    setShowSignalEditor(true)
+  }
+  
+  // Save signal to mission DBC
+  const handleSaveSignal = async () => {
+    if (!missionId || !editingSignal) return
+    try {
+      await addDBCSignal(missionId, editingSignal)
+      setShowSignalEditor(false)
+      setEditingSignal(null)
+    } catch (error) {
+      console.error("[v0] Failed to save signal:", error)
     }
   }
   
@@ -1290,9 +1367,18 @@ export default function Isolation() {
                     </h4>
                     <div className="flex flex-wrap gap-2">
                       {coOccurrenceResult.ecuFamilies.map((family, idx) => (
-                        <Badge key={idx} variant="secondary" className="font-mono">
-                          {family.name} ({family.totalFrames} trames)
-                        </Badge>
+                        <div key={idx} className="flex items-center gap-1 bg-secondary rounded-lg px-2 py-1">
+                          <span className="font-mono text-xs">{family.name}</span>
+                          <span className="text-xs text-muted-foreground">({family.totalFrames})</span>
+                          <Button 
+                            size="sm" 
+                            variant="ghost" 
+                            className="h-6 px-2 text-xs text-primary hover:text-primary"
+                            onClick={() => handleQualifyFamily(family.frameIds)}
+                          >
+                            Qualifier
+                          </Button>
+                        </div>
                       ))}
                     </div>
                   </div>
@@ -1419,6 +1505,408 @@ export default function Isolation() {
               </div>
             )}
           </div>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Family Diff Analysis Dialog */}
+      <Dialog open={showFamilyDiff} onOpenChange={setShowFamilyDiff}>
+        <DialogContent className="w-[95vw] max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FlaskConical className="h-5 w-5 text-primary" />
+              Qualifier la famille - Diff AVANT/APRES
+            </DialogTitle>
+            <DialogDescription>
+              Comparez les payloads avant et apres l&apos;action pour classifier les trames (STATUS, ACK, INFO)
+            </DialogDescription>
+          </DialogHeader>
+          
+          {/* Time window selection */}
+          {!familyDiffResult && (
+            <div className="space-y-4 py-4">
+              <p className="text-sm text-muted-foreground">
+                Definissez deux fenetres temporelles dans le log pour comparer les trames AVANT et APRES l&apos;action.
+              </p>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2 p-4 rounded-lg border bg-secondary/30">
+                  <Label className="text-sm font-medium">AVANT (baseline)</Label>
+                  <p className="text-xs text-muted-foreground">Periode avant le declenchement de l&apos;action</p>
+                  <div className="flex items-center gap-2 mt-2">
+                    <span className="text-xs">Debut:</span>
+                    <Input id="before-start" type="number" step="0.1" defaultValue="0" className="w-24 h-8 text-xs" />
+                    <span className="text-xs">Fin:</span>
+                    <Input id="before-end" type="number" step="0.1" defaultValue="1" className="w-24 h-8 text-xs" />
+                    <span className="text-xs text-muted-foreground">sec</span>
+                  </div>
+                </div>
+                
+                <div className="space-y-2 p-4 rounded-lg border bg-primary/10 border-primary/30">
+                  <Label className="text-sm font-medium">APRES (action)</Label>
+                  <p className="text-xs text-muted-foreground">Periode juste apres l&apos;action</p>
+                  <div className="flex items-center gap-2 mt-2">
+                    <span className="text-xs">Debut:</span>
+                    <Input id="after-start" type="number" step="0.1" defaultValue="1" className="w-24 h-8 text-xs" />
+                    <span className="text-xs">Fin:</span>
+                    <Input id="after-end" type="number" step="0.1" defaultValue="2" className="w-24 h-8 text-xs" />
+                    <span className="text-xs text-muted-foreground">sec</span>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary" className="font-mono">{selectedFamilyIds.length} IDs</Badge>
+                <span className="text-xs text-muted-foreground">{selectedFamilyIds.join(", ")}</span>
+              </div>
+              
+              <Button 
+                onClick={() => {
+                  const beforeStart = parseFloat((document.getElementById("before-start") as HTMLInputElement)?.value || "0")
+                  const beforeEnd = parseFloat((document.getElementById("before-end") as HTMLInputElement)?.value || "1")
+                  const afterStart = parseFloat((document.getElementById("after-start") as HTMLInputElement)?.value || "1")
+                  const afterEnd = parseFloat((document.getElementById("after-end") as HTMLInputElement)?.value || "2")
+                  runFamilyDiffAnalysis(beforeStart, beforeEnd, afterStart, afterEnd)
+                }}
+                disabled={isAnalyzingFamily}
+                className="gap-2"
+              >
+                {isAnalyzingFamily ? <Loader2 className="h-4 w-4 animate-spin" /> : <FlaskConical className="h-4 w-4" />}
+                Analyser
+              </Button>
+            </div>
+          )}
+          
+          {/* Results */}
+          {familyDiffResult && (
+            <div className="flex-1 overflow-hidden flex flex-col gap-4">
+              {/* Summary */}
+              <div className="flex flex-wrap items-center gap-3 p-3 rounded-lg bg-secondary/50">
+                <span className="text-sm font-medium">{familyDiffResult.family_name}</span>
+                <Badge variant="default" className="bg-success text-success-foreground">
+                  {familyDiffResult.summary.status} STATUS
+                </Badge>
+                <Badge variant="default" className="bg-primary">
+                  {familyDiffResult.summary.ack} ACK
+                </Badge>
+                <Badge variant="secondary">
+                  {familyDiffResult.summary.info} INFO
+                </Badge>
+                <Badge variant="outline" className="bg-transparent">
+                  {familyDiffResult.summary.unchanged} inchange
+                </Badge>
+                
+                <div className="ml-auto flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Vue:</span>
+                  <Button 
+                    size="sm" 
+                    variant={diffViewMode === "bytes" ? "default" : "outline"} 
+                    className={`h-7 px-2 text-xs ${diffViewMode === "outline" ? "bg-transparent" : ""}`}
+                    onClick={() => setDiffViewMode("bytes")}
+                  >
+                    Octets
+                  </Button>
+                  <Button 
+                    size="sm" 
+                    variant={diffViewMode === "bits" ? "default" : "outline"} 
+                    className={`h-7 px-2 text-xs ${diffViewMode === "outline" ? "bg-transparent" : ""}`}
+                    onClick={() => setDiffViewMode("bits")}
+                  >
+                    Bits
+                  </Button>
+                </div>
+              </div>
+              
+              <div className="flex-1 overflow-hidden flex gap-4">
+                {/* Frame list */}
+                <div className="w-64 shrink-0 overflow-auto border rounded-lg">
+                  {familyDiffResult.frames_analysis.map((frame, idx) => (
+                    <div
+                      key={idx}
+                      className={`p-2 border-b cursor-pointer transition-colors ${selectedDiffFrame?.can_id === frame.can_id ? "bg-primary/20" : "hover:bg-secondary/50"}`}
+                      onClick={() => setSelectedDiffFrame(frame)}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-sm font-semibold">{frame.can_id}</span>
+                        <Badge 
+                          variant={frame.classification === "status" ? "default" : frame.classification === "ack" ? "default" : "secondary"}
+                          className={`text-[10px] ${frame.classification === "status" ? "bg-success text-success-foreground" : frame.classification === "ack" ? "bg-primary" : ""}`}
+                        >
+                          {frame.classification}
+                        </Badge>
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {frame.bytes_diff.length} octet(s) change(s)
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                
+                {/* Diff view */}
+                <div className="flex-1 overflow-auto border rounded-lg p-4">
+                  {selectedDiffFrame ? (
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-4">
+                        <h4 className="font-mono text-lg font-semibold">{selectedDiffFrame.can_id}</h4>
+                        <Badge className={`${selectedDiffFrame.classification === "status" ? "bg-success text-success-foreground" : selectedDiffFrame.classification === "ack" ? "bg-primary" : ""}`}>
+                          {selectedDiffFrame.classification}
+                        </Badge>
+                        <span className="text-xs text-muted-foreground">
+                          Avant: {selectedDiffFrame.count_before} trames | Apres: {selectedDiffFrame.count_after} trames
+                        </span>
+                      </div>
+                      
+                      {/* Byte-level diff like cansniffer */}
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <span className="w-20 text-xs text-muted-foreground">AVANT:</span>
+                          <div className="flex gap-1 font-mono text-sm">
+                            {selectedDiffFrame.sample_before.match(/.{1,2}/g)?.map((byte, i) => {
+                              const changed = selectedDiffFrame.bytes_diff.some(d => d.byte_index === i)
+                              return (
+                                <span 
+                                  key={i} 
+                                  className={`px-1 rounded ${changed ? "bg-destructive/30 text-destructive" : ""}`}
+                                >
+                                  {byte}
+                                </span>
+                              )
+                            })}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="w-20 text-xs text-muted-foreground">APRES:</span>
+                          <div className="flex gap-1 font-mono text-sm">
+                            {selectedDiffFrame.sample_after.match(/.{1,2}/g)?.map((byte, i) => {
+                              const changed = selectedDiffFrame.bytes_diff.some(d => d.byte_index === i)
+                              return (
+                                <span 
+                                  key={i} 
+                                  className={`px-1 rounded ${changed ? "bg-success/30 text-success" : ""}`}
+                                >
+                                  {byte}
+                                </span>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* Detailed byte/bit changes */}
+                      {selectedDiffFrame.bytes_diff.length > 0 && (
+                        <div className="mt-4 space-y-2">
+                          <h5 className="text-sm font-medium">Octets modifies - Cliquez pour creer un signal</h5>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {selectedDiffFrame.bytes_diff.map((diff, idx) => (
+                              <div 
+                                key={idx} 
+                                className="p-3 rounded-lg border bg-secondary/30 hover:bg-secondary/50 cursor-pointer transition-colors"
+                                onClick={() => handleCreateSignal(selectedDiffFrame.can_id, diff.byte_index)}
+                              >
+                                <div className="flex items-center justify-between mb-2">
+                                  <span className="text-xs font-medium">Octet {diff.byte_index}</span>
+                                  <Button size="sm" variant="ghost" className="h-6 px-2 text-xs text-primary">
+                                    + Signal
+                                  </Button>
+                                </div>
+                                <div className="flex items-center gap-2 text-sm font-mono">
+                                  <span className="text-destructive">{diff.value_before}</span>
+                                  <ChevronRight className="h-3 w-3" />
+                                  <span className="text-success">{diff.value_after}</span>
+                                </div>
+                                {diffViewMode === "bits" && diff.changed_bits.length > 0 && (
+                                  <div className="mt-2 flex gap-1">
+                                    {[7, 6, 5, 4, 3, 2, 1, 0].map(bit => {
+                                      const changed = diff.changed_bits.includes(bit)
+                                      return (
+                                        <span 
+                                          key={bit} 
+                                          className={`w-5 h-5 flex items-center justify-center text-[10px] rounded ${changed ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}
+                                          onClick={(e) => {
+                                            e.stopPropagation()
+                                            if (changed) handleCreateSignal(selectedDiffFrame.can_id, diff.byte_index, bit)
+                                          }}
+                                        >
+                                          {bit}
+                                        </span>
+                                      )
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {selectedDiffFrame.bytes_diff.length === 0 && (
+                        <p className="text-sm text-muted-foreground">Aucun changement detecte sur cette trame.</p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-muted-foreground">Selectionnez une trame pour voir le diff</p>
+                  )}
+                </div>
+              </div>
+              
+              {/* Actions */}
+              <div className="flex items-center gap-2 pt-2 border-t">
+                <Button variant="outline" className="bg-transparent" onClick={() => setFamilyDiffResult(null)}>
+                  Nouvelle analyse
+                </Button>
+                {missionId && (
+                  <Button variant="outline" className="bg-transparent gap-1" asChild>
+                    <a href={getDBCExportUrl(missionId)} download>
+                      <Download className="h-4 w-4" />
+                      Exporter DBC
+                    </a>
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+      
+      {/* Signal Editor Dialog */}
+      <Dialog open={showSignalEditor} onOpenChange={setShowSignalEditor}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Creer un signal DBC</DialogTitle>
+            <DialogDescription>
+              Definissez les proprietes du signal pour l&apos;export DBC
+            </DialogDescription>
+          </DialogHeader>
+          
+          {editingSignal && (
+            <div className="space-y-4 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>CAN ID</Label>
+                  <Input value={editingSignal.can_id} disabled className="font-mono" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Nom du signal</Label>
+                  <Input 
+                    value={editingSignal.name || ""} 
+                    onChange={(e) => setEditingSignal(prev => prev ? {...prev, name: e.target.value} : null)}
+                    placeholder="SIG_NAME"
+                  />
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label>Start bit</Label>
+                  <Input 
+                    type="number" 
+                    value={editingSignal.start_bit ?? 0} 
+                    onChange={(e) => setEditingSignal(prev => prev ? {...prev, start_bit: parseInt(e.target.value)} : null)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Longueur (bits)</Label>
+                  <Input 
+                    type="number" 
+                    value={editingSignal.length ?? 8} 
+                    onChange={(e) => setEditingSignal(prev => prev ? {...prev, length: parseInt(e.target.value)} : null)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Byte order</Label>
+                  <Select 
+                    value={editingSignal.byte_order || "little_endian"} 
+                    onValueChange={(v) => setEditingSignal(prev => prev ? {...prev, byte_order: v as "little_endian" | "big_endian"} : null)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="little_endian">Little Endian</SelectItem>
+                      <SelectItem value="big_endian">Big Endian</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-4 gap-4">
+                <div className="space-y-2">
+                  <Label>Scale</Label>
+                  <Input 
+                    type="number" 
+                    step="0.001"
+                    value={editingSignal.scale ?? 1} 
+                    onChange={(e) => setEditingSignal(prev => prev ? {...prev, scale: parseFloat(e.target.value)} : null)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Offset</Label>
+                  <Input 
+                    type="number" 
+                    value={editingSignal.offset ?? 0} 
+                    onChange={(e) => setEditingSignal(prev => prev ? {...prev, offset: parseFloat(e.target.value)} : null)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Min</Label>
+                  <Input 
+                    type="number" 
+                    value={editingSignal.min_val ?? 0} 
+                    onChange={(e) => setEditingSignal(prev => prev ? {...prev, min_val: parseFloat(e.target.value)} : null)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Max</Label>
+                  <Input 
+                    type="number" 
+                    value={editingSignal.max_val ?? 255} 
+                    onChange={(e) => setEditingSignal(prev => prev ? {...prev, max_val: parseFloat(e.target.value)} : null)}
+                  />
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Unite</Label>
+                  <Input 
+                    value={editingSignal.unit || ""} 
+                    onChange={(e) => setEditingSignal(prev => prev ? {...prev, unit: e.target.value} : null)}
+                    placeholder="km/h, %, etc."
+                  />
+                </div>
+                <div className="space-y-2 flex items-end gap-2">
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="checkbox" 
+                      id="is-signed"
+                      checked={editingSignal.is_signed || false}
+                      onChange={(e) => setEditingSignal(prev => prev ? {...prev, is_signed: e.target.checked} : null)}
+                      className="rounded"
+                    />
+                    <Label htmlFor="is-signed">Signe</Label>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="space-y-2">
+                <Label>Commentaire</Label>
+                <Input 
+                  value={editingSignal.comment || ""} 
+                  onChange={(e) => setEditingSignal(prev => prev ? {...prev, comment: e.target.value} : null)}
+                  placeholder="Description du signal..."
+                />
+              </div>
+              
+              <div className="flex justify-end gap-2 pt-4">
+                <Button variant="outline" className="bg-transparent" onClick={() => setShowSignalEditor(false)}>
+                  Annuler
+                </Button>
+                <Button onClick={handleSaveSignal}>
+                  <CheckCircle2 className="h-4 w-4 mr-2" />
+                  Enregistrer
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </AppShell>

@@ -3159,6 +3159,385 @@ async def restart_services():
         return {"status": "error", "message": str(e)}
 
 
+# =============================================================================
+# DBC Analysis - Diff AVANT/APRES et signaux
+# =============================================================================
+
+class ByteDiff(BaseModel):
+    byte_index: int
+    value_before: str
+    value_after: str
+    changed_bits: list[int]  # Liste des bits qui ont change (0-7)
+
+class FrameDiff(BaseModel):
+    can_id: str
+    count_before: int
+    count_after: int
+    bytes_diff: list[ByteDiff]
+    classification: str  # "status", "ack", "info", "unchanged"
+    sample_before: str
+    sample_after: str
+
+class FamilyAnalysisResponse(BaseModel):
+    family_name: str
+    frame_ids: list[str]
+    frames_analysis: list[FrameDiff]
+    summary: dict
+
+class AnalyzeFamilyRequest(BaseModel):
+    mission_id: str
+    log_id: str
+    family_ids: list[str]
+    before_start_ts: float
+    before_end_ts: float
+    after_start_ts: float
+    after_end_ts: float
+
+@app.post("/api/analysis/family-diff")
+async def analyze_family_diff(request: AnalyzeFamilyRequest) -> FamilyAnalysisResponse:
+    """
+    Analyse les differences AVANT/APRES pour une famille d'IDs.
+    Compare les payloads dans deux fenetres temporelles.
+    """
+    mission_dir = Path(MISSIONS_DIR) / request.mission_id / "logs"
+    if not mission_dir.exists():
+        raise HTTPException(status_code=404, detail="Mission non trouvee")
+    
+    # Find log file
+    log_file = None
+    for f in mission_dir.glob("*.log"):
+        if f.stem == request.log_id or f.name == request.log_id:
+            log_file = f
+            break
+    
+    if not log_file:
+        raise HTTPException(status_code=404, detail="Log non trouve")
+    
+    # Parse log and extract frames in windows
+    frames_before: dict[str, list[str]] = {id: [] for id in request.family_ids}
+    frames_after: dict[str, list[str]] = {id: [] for id in request.family_ids}
+    
+    with open(log_file, "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            
+            # Parse: (timestamp) interface canId#data
+            match = re.match(r"\((\d+\.\d+)\)\s+\w+\s+([0-9A-Fa-f]+)#([0-9A-Fa-f]*)", line)
+            if not match:
+                continue
+            
+            ts = float(match.group(1))
+            can_id = match.group(2).upper()
+            data = match.group(3).upper()
+            
+            if can_id not in request.family_ids:
+                continue
+            
+            # Classify into before/after windows
+            if request.before_start_ts <= ts <= request.before_end_ts:
+                frames_before[can_id].append(data)
+            elif request.after_start_ts <= ts <= request.after_end_ts:
+                frames_after[can_id].append(data)
+    
+    # Analyze differences for each ID
+    frames_analysis = []
+    status_count = 0
+    ack_count = 0
+    info_count = 0
+    unchanged_count = 0
+    
+    for can_id in request.family_ids:
+        before_data = frames_before.get(can_id, [])
+        after_data = frames_after.get(can_id, [])
+        
+        # Get most common payload in each window
+        def most_common(data_list: list[str]) -> str:
+            if not data_list:
+                return ""
+            from collections import Counter
+            return Counter(data_list).most_common(1)[0][0]
+        
+        sample_before = most_common(before_data) or "00000000"
+        sample_after = most_common(after_data) or "00000000"
+        
+        # Pad to same length
+        max_len = max(len(sample_before), len(sample_after), 16)
+        sample_before = sample_before.ljust(max_len, "0")
+        sample_after = sample_after.ljust(max_len, "0")
+        
+        # Calculate byte-level diff
+        bytes_diff = []
+        for i in range(0, min(len(sample_before), len(sample_after)), 2):
+            byte_before = sample_before[i:i+2]
+            byte_after = sample_after[i:i+2]
+            
+            if byte_before != byte_after:
+                # Find changed bits
+                try:
+                    val_before = int(byte_before, 16)
+                    val_after = int(byte_after, 16)
+                    xor = val_before ^ val_after
+                    changed_bits = [b for b in range(8) if xor & (1 << b)]
+                except ValueError:
+                    changed_bits = []
+                
+                bytes_diff.append(ByteDiff(
+                    byte_index=i // 2,
+                    value_before=byte_before,
+                    value_after=byte_after,
+                    changed_bits=changed_bits
+                ))
+        
+        # Classify frame
+        has_before = len(before_data) > 0
+        has_after = len(after_data) > 0
+        has_changes = len(bytes_diff) > 0
+        
+        if not has_changes:
+            classification = "unchanged"
+            unchanged_count += 1
+        elif has_before and has_after and has_changes:
+            # Present in both with changes = STATUS
+            classification = "status"
+            status_count += 1
+        elif not has_before and has_after:
+            # Only appears after = ACK
+            classification = "ack"
+            ack_count += 1
+        elif has_before and not has_after:
+            # Disappears after = transitoire
+            classification = "info"
+            info_count += 1
+        else:
+            classification = "info"
+            info_count += 1
+        
+        frames_analysis.append(FrameDiff(
+            can_id=can_id,
+            count_before=len(before_data),
+            count_after=len(after_data),
+            bytes_diff=bytes_diff,
+            classification=classification,
+            sample_before=sample_before,
+            sample_after=sample_after
+        ))
+    
+    # Sort by classification priority: status > ack > info > unchanged
+    priority = {"status": 0, "ack": 1, "info": 2, "unchanged": 3}
+    frames_analysis.sort(key=lambda x: (priority.get(x.classification, 4), -len(x.bytes_diff)))
+    
+    return FamilyAnalysisResponse(
+        family_name=f"ECU 0x{request.family_ids[0]}-0x{request.family_ids[-1]}" if len(request.family_ids) > 1 else f"ID 0x{request.family_ids[0]}",
+        frame_ids=request.family_ids,
+        frames_analysis=frames_analysis,
+        summary={
+            "total": len(request.family_ids),
+            "status": status_count,
+            "ack": ack_count,
+            "info": info_count,
+            "unchanged": unchanged_count
+        }
+    )
+
+
+# DBC Signal storage
+class DBCSignal(BaseModel):
+    id: str = ""
+    can_id: str
+    name: str
+    start_bit: int
+    length: int
+    byte_order: str = "little_endian"  # or big_endian
+    is_signed: bool = False
+    scale: float = 1.0
+    offset: float = 0.0
+    min_val: float = 0.0
+    max_val: float = 0.0
+    unit: str = ""
+    comment: str = ""
+
+class DBCMessage(BaseModel):
+    can_id: str
+    name: str
+    dlc: int = 8
+    signals: list[DBCSignal] = []
+    comment: str = ""
+
+class MissionDBC(BaseModel):
+    mission_id: str
+    messages: list[DBCMessage] = []
+    created_at: str = ""
+    updated_at: str = ""
+
+@app.get("/api/missions/{mission_id}/dbc")
+async def get_mission_dbc(mission_id: str) -> MissionDBC:
+    """Get DBC data for a mission"""
+    dbc_file = Path(MISSIONS_DIR) / mission_id / "dbc.json"
+    
+    if not dbc_file.exists():
+        return MissionDBC(mission_id=mission_id, messages=[], created_at="", updated_at="")
+    
+    with open(dbc_file, "r") as f:
+        data = json.load(f)
+    
+    return MissionDBC(**data)
+
+@app.post("/api/missions/{mission_id}/dbc/signal")
+async def add_dbc_signal(mission_id: str, signal: DBCSignal):
+    """Add or update a signal in the mission DBC"""
+    dbc_file = Path(MISSIONS_DIR) / mission_id / "dbc.json"
+    mission_dir = Path(MISSIONS_DIR) / mission_id
+    
+    if not mission_dir.exists():
+        raise HTTPException(status_code=404, detail="Mission non trouvee")
+    
+    # Load existing or create new
+    if dbc_file.exists():
+        with open(dbc_file, "r") as f:
+            data = json.load(f)
+    else:
+        data = {
+            "mission_id": mission_id,
+            "messages": [],
+            "created_at": datetime.now().isoformat(),
+            "updated_at": ""
+        }
+    
+    # Find or create message for this CAN ID
+    message = None
+    for msg in data["messages"]:
+        if msg["can_id"] == signal.can_id:
+            message = msg
+            break
+    
+    if not message:
+        message = {
+            "can_id": signal.can_id,
+            "name": f"MSG_{signal.can_id}",
+            "dlc": 8,
+            "signals": [],
+            "comment": ""
+        }
+        data["messages"].append(message)
+    
+    # Generate ID if not provided
+    if not signal.id:
+        signal.id = f"{signal.can_id}_{signal.name}_{signal.start_bit}"
+    
+    # Add or update signal
+    signal_dict = signal.model_dump()
+    existing_idx = None
+    for idx, s in enumerate(message["signals"]):
+        if s.get("id") == signal.id or (s["can_id"] == signal.can_id and s["start_bit"] == signal.start_bit):
+            existing_idx = idx
+            break
+    
+    if existing_idx is not None:
+        message["signals"][existing_idx] = signal_dict
+    else:
+        message["signals"].append(signal_dict)
+    
+    data["updated_at"] = datetime.now().isoformat()
+    
+    with open(dbc_file, "w") as f:
+        json.dump(data, f, indent=2)
+    
+    return {"status": "ok", "signal_id": signal.id}
+
+@app.delete("/api/missions/{mission_id}/dbc/signal/{signal_id}")
+async def delete_dbc_signal(mission_id: str, signal_id: str):
+    """Delete a signal from the mission DBC"""
+    dbc_file = Path(MISSIONS_DIR) / mission_id / "dbc.json"
+    
+    if not dbc_file.exists():
+        raise HTTPException(status_code=404, detail="DBC non trouve")
+    
+    with open(dbc_file, "r") as f:
+        data = json.load(f)
+    
+    # Find and remove signal
+    for msg in data["messages"]:
+        msg["signals"] = [s for s in msg["signals"] if s.get("id") != signal_id]
+    
+    # Remove empty messages
+    data["messages"] = [m for m in data["messages"] if m["signals"]]
+    data["updated_at"] = datetime.now().isoformat()
+    
+    with open(dbc_file, "w") as f:
+        json.dump(data, f, indent=2)
+    
+    return {"status": "ok"}
+
+@app.get("/api/missions/{mission_id}/dbc/export")
+async def export_dbc(mission_id: str):
+    """Export mission DBC to .dbc file format"""
+    dbc_file = Path(MISSIONS_DIR) / mission_id / "dbc.json"
+    
+    if not dbc_file.exists():
+        raise HTTPException(status_code=404, detail="DBC non trouve")
+    
+    with open(dbc_file, "r") as f:
+        data = json.load(f)
+    
+    # Generate DBC content
+    lines = []
+    lines.append('VERSION ""')
+    lines.append("")
+    lines.append("NS_ :")
+    lines.append("")
+    lines.append("BS_:")
+    lines.append("")
+    lines.append("BU_:")
+    lines.append("")
+    
+    # Messages and signals
+    for msg in data.get("messages", []):
+        can_id = int(msg["can_id"], 16)
+        dlc = msg.get("dlc", 8)
+        name = msg.get("name", f"MSG_{msg['can_id']}").replace(" ", "_")
+        
+        lines.append(f"BO_ {can_id} {name}: {dlc} Vector__XXX")
+        
+        for sig in msg.get("signals", []):
+            sig_name = sig["name"].replace(" ", "_")
+            start_bit = sig["start_bit"]
+            length = sig["length"]
+            byte_order = 1 if sig.get("byte_order") == "little_endian" else 0
+            sign = "-" if sig.get("is_signed") else "+"
+            scale = sig.get("scale", 1.0)
+            offset = sig.get("offset", 0.0)
+            min_val = sig.get("min_val", 0.0)
+            max_val = sig.get("max_val", 0.0)
+            unit = sig.get("unit", "")
+            
+            lines.append(f' SG_ {sig_name} : {start_bit}|{length}@{byte_order}{sign} ({scale},{offset}) [{min_val}|{max_val}] "{unit}" Vector__XXX')
+        
+        lines.append("")
+    
+    # Comments
+    lines.append("")
+    for msg in data.get("messages", []):
+        if msg.get("comment"):
+            can_id = int(msg["can_id"], 16)
+            lines.append(f'CM_ BO_ {can_id} "{msg["comment"]}";')
+        for sig in msg.get("signals", []):
+            if sig.get("comment"):
+                can_id = int(msg["can_id"], 16)
+                lines.append(f'CM_ SG_ {can_id} {sig["name"]} "{sig["comment"]}";')
+    
+    dbc_content = "\n".join(lines)
+    
+    return Response(
+        content=dbc_content,
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="mission_{mission_id}.dbc"'
+        }
+    )
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

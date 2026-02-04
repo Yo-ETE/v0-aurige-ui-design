@@ -803,3 +803,110 @@ export function createCandumpWebSocket(
 
 // Alias for backward compatibility
 export const createCANWebSocket = createCandumpWebSocket
+
+// =============================================================================
+// DBC Analysis - Diff AVANT/APRES
+// =============================================================================
+
+export interface ByteDiff {
+  byte_index: number
+  value_before: string
+  value_after: string
+  changed_bits: number[]
+}
+
+export interface FrameDiff {
+  can_id: string
+  count_before: number
+  count_after: number
+  bytes_diff: ByteDiff[]
+  classification: "status" | "ack" | "info" | "unchanged"
+  sample_before: string
+  sample_after: string
+}
+
+export interface FamilyAnalysisResponse {
+  family_name: string
+  frame_ids: string[]
+  frames_analysis: FrameDiff[]
+  summary: {
+    total: number
+    status: number
+    ack: number
+    info: number
+    unchanged: number
+  }
+}
+
+export interface AnalyzeFamilyRequest {
+  mission_id: string
+  log_id: string
+  family_ids: string[]
+  before_start_ts: number
+  before_end_ts: number
+  after_start_ts: number
+  after_end_ts: number
+}
+
+export async function analyzeFamilyDiff(request: AnalyzeFamilyRequest): Promise<FamilyAnalysisResponse> {
+  return fetchApi("/analysis/family-diff", {
+    method: "POST",
+    body: JSON.stringify(request),
+  })
+}
+
+// =============================================================================
+// DBC Signal Management
+// =============================================================================
+
+export interface DBCSignal {
+  id: string
+  can_id: string
+  name: string
+  start_bit: number
+  length: number
+  byte_order: "little_endian" | "big_endian"
+  is_signed: boolean
+  scale: number
+  offset: number
+  min_val: number
+  max_val: number
+  unit: string
+  comment: string
+}
+
+export interface DBCMessage {
+  can_id: string
+  name: string
+  dlc: number
+  signals: DBCSignal[]
+  comment: string
+}
+
+export interface MissionDBC {
+  mission_id: string
+  messages: DBCMessage[]
+  created_at: string
+  updated_at: string
+}
+
+export async function getMissionDBC(missionId: string): Promise<MissionDBC> {
+  return fetchApi(`/missions/${missionId}/dbc`)
+}
+
+export async function addDBCSignal(missionId: string, signal: Partial<DBCSignal>): Promise<{ status: string; signal_id: string }> {
+  return fetchApi(`/missions/${missionId}/dbc/signal`, {
+    method: "POST",
+    body: JSON.stringify(signal),
+  })
+}
+
+export async function deleteDBCSignal(missionId: string, signalId: string): Promise<{ status: string }> {
+  return fetchApi(`/missions/${missionId}/dbc/signal/${signalId}`, {
+    method: "DELETE",
+  })
+}
+
+export function getDBCExportUrl(missionId: string): string {
+  return `${getApiBaseUrl()}/api/missions/${missionId}/dbc/export`
+}
