@@ -1348,7 +1348,7 @@ export default function Isolation() {
 
       {/* Co-occurrence Analysis Dialog */}
       <Dialog open={analyzingLog !== null} onOpenChange={(open) => !open && closeCoOccurrenceDialog()}>
-        <DialogContent className="w-[95vw] max-w-4xl h-[85vh] max-h-[700px] overflow-hidden flex flex-col p-4 sm:p-6">
+        <DialogContent className="w-[98vw] max-w-6xl h-[90vh] max-h-[900px] overflow-hidden flex flex-col p-4 sm:p-6">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Network className="h-5 w-5" />
@@ -1418,8 +1418,8 @@ export default function Isolation() {
                 
                 {/* Related Frames Table */}
                 <div className="flex-1 min-h-0 border rounded-lg overflow-auto">
-                  <div className="min-w-[700px]">
-                    <table className="w-full text-xs">
+                  <div className="min-w-[800px]">
+                    <table className="w-full text-sm">
                       <thead className="sticky top-0 bg-secondary z-10">
                         <tr className="text-left text-muted-foreground">
                           <th className="p-2 w-8">
@@ -1480,7 +1480,7 @@ export default function Isolation() {
                               <td className="p-2 text-center">{frame.countBefore}</td>
                               <td className="p-2 text-center">{frame.countAfter}</td>
                               <td className="p-2 text-center text-[10px]">{frame.avgDelayMs > 0 ? "+" : ""}{frame.avgDelayMs.toFixed(1)}ms</td>
-                              <td className="p-2 font-mono text-muted-foreground text-[10px] truncate max-w-[150px]">
+                              <td className="p-2 font-mono text-muted-foreground text-xs truncate max-w-[200px]">
                                 {frame.sampleData[0] || "-"}
                               </td>
                             </tr>
@@ -1542,7 +1542,7 @@ export default function Isolation() {
       
       {/* Family Diff Analysis Dialog */}
       <Dialog open={showFamilyDiff} onOpenChange={setShowFamilyDiff}>
-        <DialogContent className="w-[95vw] max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
+        <DialogContent className="w-[98vw] max-w-7xl h-[92vh] max-h-[950px] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <FlaskConical className="h-5 w-5 text-primary" />
@@ -1732,9 +1732,9 @@ export default function Isolation() {
                 </div>
               </div>
               
-              <div className="flex-1 overflow-hidden flex gap-4">
+              <div className="flex-1 overflow-hidden flex gap-4 min-h-0">
                 {/* Frame list with confidence scores */}
-                <div className="w-72 shrink-0 overflow-auto border rounded-lg">
+                <div className="w-80 shrink-0 overflow-auto border rounded-lg">
                   {familyDiffResult.frames_analysis.map((frame, idx) => (
                     <div
                       key={idx}
