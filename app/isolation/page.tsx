@@ -584,7 +584,7 @@ export default function Isolation() {
 
       {/* Import Dialog */}
       <Dialog open={showImportDialog} onOpenChange={setShowImportDialog}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="max-w-[95vw] sm:max-w-lg overflow-hidden">
           <DialogHeader>
             <DialogTitle>Importer un log</DialogTitle>
             <DialogDescription>
@@ -756,7 +756,7 @@ export default function Isolation() {
                             <div className="border-t border-border bg-background/50">
                               {family.map((child, idx) => {
                                 const isChildImported = logs.some((l) => l.id === child.id)
-                                const depth = (child.id.match(/_[ab]/g) || []).length
+                                const depth = (child.id.match(/_[aAbB]/g) || []).length
                                 return (
                                   <div
                                     key={child.id}

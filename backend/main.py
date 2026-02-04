@@ -1259,16 +1259,20 @@ async def list_mission_logs(mission_id: str):
         parent_id = None
         is_origin = False
         
-        # Detect parent/child relationships based on naming convention
-        # Split logs end with _a, _b, _a_a, _a_b, etc.
-        if log_stem.endswith("_a") or log_stem.endswith("_b"):
-            # This is a child - find parent
-            potential_parent = log_stem[:-2]  # Remove _a or _b
+        # First check metadata for parent info (most reliable)
+        if meta.get("parentLog"):
+            parent_id = meta.get("parentLog")
+        elif meta.get("splitFrom"):
+            parent_id = meta.get("splitFrom")
+        # Fallback: detect by naming convention (_A, _B suffixes - uppercase)
+        elif log_stem.endswith("_A") or log_stem.endswith("_B"):
+            potential_parent = log_stem[:-2]  # Remove _A or _B
             if potential_parent in log_names:
                 parent_id = potential_parent
         
-        # Check if this log has children (is an origin)
-        if f"{log_stem}_a" in log_names or f"{log_stem}_b" in log_names:
+        # Check if this log has children (is an origin) - check both cases
+        if (f"{log_stem}_A" in log_names or f"{log_stem}_B" in log_names or
+            f"{log_stem}_a" in log_names or f"{log_stem}_b" in log_names):
             is_origin = True
         
         logs.append(LogEntry(
@@ -1321,9 +1325,9 @@ async def download_log_family(mission_id: str, log_id: str):
     if main_log.exists():
         family_files.append(main_log)
     
-    # Find all children recursively (log_a, log_b, log_a_a, log_a_b, etc.)
+    # Find all children recursively (log_A, log_B, log_A_A, log_A_B, etc.)
     def find_children(parent_stem: str):
-        for suffix in ["_a", "_b"]:
+        for suffix in ["_A", "_B", "_a", "_b"]:  # Check both cases
             child_stem = f"{parent_stem}{suffix}"
             child_file = logs_dir / f"{child_stem}.log"
             if child_file.exists():
