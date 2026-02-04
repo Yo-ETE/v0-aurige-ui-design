@@ -547,11 +547,12 @@ const handleDeleteLog = async (logId: string) => {
                       const hasFamily = family.length > 0
                       
                       return (
-                        <div key={originLog.id} className="rounded-lg border border-border overflow-hidden">
+                        <div key={originLog.id} className="rounded-lg border border-border">
                           {/* Origin log header */}
-                          <div className="flex flex-col sm:flex-row sm:items-center gap-2 p-3 bg-secondary/50">
-                            <div className="flex items-center gap-2 min-w-0 flex-1">
-                              {hasFamily && <FolderTree className="h-4 w-4 text-primary shrink-0" />}
+                          <div className="p-2 sm:p-3 bg-secondary/50">
+                            {/* Info section */}
+                            <div className="flex items-start gap-2 mb-2">
+                              {hasFamily && <FolderTree className="h-4 w-4 text-primary shrink-0 mt-0.5" />}
                               <div className="min-w-0 flex-1">
                                 {renamingLogId === originLog.id ? (
                                   <div className="flex items-center gap-2">
@@ -569,7 +570,7 @@ const handleDeleteLog = async (logId: string) => {
                                     <Button size="sm" variant="ghost" onClick={() => setRenamingLogId(null)}>X</Button>
                                   </div>
                                 ) : (
-                                  <p className="font-mono text-sm text-foreground break-all">
+                                  <p className="font-mono text-xs sm:text-sm text-foreground break-all">
                                     {originLog.filename}
                                   </p>
                                 )}
@@ -579,40 +580,47 @@ const handleDeleteLog = async (logId: string) => {
                                 </p>
                               </div>
                             </div>
-                            <div className="flex items-center gap-1 flex-wrap justify-end">
+                            {/* Buttons row - always visible */}
+                            <div className="flex items-center gap-1 flex-wrap">
                               {replayStatus.running && replayingLogId === originLog.id ? (
-                                <Button size="icon" variant="ghost" className="h-7 w-7 sm:h-8 sm:w-8 text-destructive" onClick={handleStopReplay}>
-                                  <Square className="h-3 w-3 sm:h-4 sm:w-4" />
+                                <Button size="sm" variant="ghost" className="h-7 px-2 text-destructive gap-1" onClick={handleStopReplay}>
+                                  <Square className="h-3 w-3" />
+                                  <span className="text-xs">Stop</span>
                                 </Button>
                               ) : (
-                                <Button size="icon" variant="ghost" className="h-7 w-7 sm:h-8 sm:w-8" onClick={() => handleReplay(originLog.id)} disabled={replayStatus.running || captureStatus.running} title="Rejouer">
-                                  <Play className="h-3 w-3 sm:h-4 sm:w-4" />
+                                <Button size="sm" variant="ghost" className="h-7 px-2 gap-1" onClick={() => handleReplay(originLog.id)} disabled={replayStatus.running || captureStatus.running} title="Rejouer">
+                                  <Play className="h-3 w-3" />
+                                  <span className="text-xs hidden sm:inline">Rejouer</span>
                                 </Button>
                               )}
-                              <Button size="icon" variant="ghost" className="h-7 w-7 sm:h-8 sm:w-8" title="Renommer" onClick={() => startRenaming(originLog)}>
-                                <Pencil className="h-3 w-3 sm:h-4 sm:w-4" />
+                              <Button size="sm" variant="ghost" className="h-7 px-2 gap-1" title="Renommer" onClick={() => startRenaming(originLog)}>
+                                <Pencil className="h-3 w-3" />
+                                <span className="text-xs hidden sm:inline">Renommer</span>
                               </Button>
-                              <Button size="icon" variant="ghost" className="h-7 w-7 sm:h-8 sm:w-8" title="Isolation" onClick={() => {
+                              <Button size="sm" variant="ghost" className="h-7 px-2 gap-1" title="Isolation" onClick={() => {
                                 importLogToIsolation({ id: originLog.id, name: originLog.filename, filename: originLog.filename, missionId, tags: ["original"], frameCount: originLog.framesCount })
                                 router.push("/isolation")
                               }}>
-                                <FlaskConical className="h-3 w-3 sm:h-4 sm:w-4" />
+                                <FlaskConical className="h-3 w-3" />
+                                <span className="text-xs hidden sm:inline">Isolation</span>
                               </Button>
                               {hasFamily ? (
-                                <Button size="icon" variant="ghost" className="h-7 w-7 sm:h-8 sm:w-8" title="Telecharger ZIP" asChild>
+                                <Button size="sm" variant="ghost" className="h-7 px-2 gap-1" title="Telecharger ZIP" asChild>
                                   <a href={getLogFamilyDownloadUrl(missionId, originLog.id)} download>
-                                    <Download className="h-3 w-3 sm:h-4 sm:w-4" />
+                                    <Download className="h-3 w-3" />
+                                    <span className="text-xs hidden sm:inline">ZIP</span>
                                   </a>
                                 </Button>
                               ) : (
-                                <Button size="icon" variant="ghost" className="h-7 w-7 sm:h-8 sm:w-8" title="Telecharger" asChild>
+                                <Button size="sm" variant="ghost" className="h-7 px-2 gap-1" title="Telecharger" asChild>
                                   <a href={getLogDownloadUrl(missionId, originLog.id)} download={originLog.filename}>
-                                    <Download className="h-3 w-3 sm:h-4 sm:w-4" />
+                                    <Download className="h-3 w-3" />
                                   </a>
                                 </Button>
                               )}
-                              <Button size="icon" variant="ghost" className="h-7 w-7 sm:h-8 sm:w-8 text-destructive hover:text-destructive" title="Supprimer" onClick={() => handleDeleteLog(originLog.id)}>
-                                <Trash2 className="h-3 w-3 sm:h-4 sm:w-4" />
+                              <Button size="sm" variant="ghost" className="h-7 px-2 gap-1 text-destructive hover:text-destructive" title="Supprimer" onClick={() => handleDeleteLog(originLog.id)}>
+                                <Trash2 className="h-3 w-3" />
+                                <span className="text-xs hidden sm:inline">Suppr.</span>
                               </Button>
                             </div>
                           </div>

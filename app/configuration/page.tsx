@@ -259,20 +259,53 @@ export default function ConfigurationPage() {
     }
   }
 
-  // Poll update output
+  // Poll update output with error handling and auto-reload
   useEffect(() => {
+    let errorCount = 0
+    let reloadScheduled = false
+    
     const pollUpdate = async () => {
       try {
         const output = await getUpdateOutput()
         setUpdateOutput(output)
+        errorCount = 0 // Reset on success
+        
+        // Check if update completed successfully
+        if (!output.running && output.lines.length > 0 && !reloadScheduled) {
+          const hasSuccess = output.lines.some(l => 
+            l.includes("[OK] Mise a jour terminee") || 
+            l.includes("Installation complete") ||
+            l.includes("AURIGE Installation Complete")
+          )
+          if (hasSuccess) {
+            reloadScheduled = true
+            // Wait 3 seconds then reload
+            setTimeout(() => {
+              window.location.reload()
+            }, 3000)
+          }
+        }
       } catch {
-        // Ignore
+        errorCount++
+        // If we get multiple errors in a row during an update, services are restarting
+        // Try to reload the page after a delay
+        if (errorCount >= 3 && updateOutput.running && !reloadScheduled) {
+          reloadScheduled = true
+          setUpdateOutput(prev => ({
+            ...prev,
+            lines: [...prev.lines, ">>> Services en cours de redemarrage...", ">>> Rechargement automatique dans 5 secondes..."],
+            running: false
+          }))
+          setTimeout(() => {
+            window.location.reload()
+          }, 5000)
+        }
       }
     }
 
-    const interval = setInterval(pollUpdate, 1000)
+    const interval = setInterval(pollUpdate, 1500)
     return () => clearInterval(interval)
-  }, [])
+  }, [updateOutput.running])
 
   // Handle backup
   const handleCreateBackup = async () => {
@@ -730,18 +763,19 @@ export default function ConfigurationPage() {
               <div className="space-y-2">
                 {/* Success/Error indicator */}
                 {!updateOutput.running && updateOutput.lines.length > 0 && (
-                  updateOutput.success || updateOutput.lines.some(l => l.includes("[OK]") || l.includes("Update complete")) ? (
+                  updateOutput.success || updateOutput.lines.some(l => l.includes("[OK]") || l.includes("Update complete") || l.includes("Installation Complete")) ? (
                     <Alert className="border-success/50 bg-success/10">
                       <CheckCircle2 className="h-4 w-4 text-success" />
-                      <AlertDescription className="text-success">
-                        Mise a jour terminee avec succes! Rechargez la page.
+                      <AlertDescription className="text-success flex items-center gap-2">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        Mise a jour terminee! Rechargement automatique...
                       </AlertDescription>
                     </Alert>
-                  ) : updateOutput.error || updateOutput.lines.some(l => l.includes("[ERROR]") || l.includes("error")) ? (
+                  ) : updateOutput.error || updateOutput.lines.some(l => l.includes("[ERROR]")) ? (
                     <Alert className="border-destructive/50 bg-destructive/10">
                       <AlertTriangle className="h-4 w-4 text-destructive" />
                       <AlertDescription className="text-destructive">
-                        Erreur lors de la mise a jour. Verifiez les logs.
+                        Erreur lors de la mise a jour. Verifiez les logs ci-dessous.
                       </AlertDescription>
                     </Alert>
                   ) : null

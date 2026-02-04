@@ -3031,17 +3031,10 @@ async def start_update():
     async def run_update():
         global update_output_store
         try:
-            # Step 1: Stop services
-            update_output_store["lines"].append(">>> Arret des services...")
-            stop_proc = await asyncio.create_subprocess_exec(
-                "sudo", "systemctl", "stop", "aurige-web", "aurige-api",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-            )
-            await stop_proc.wait()
-            update_output_store["lines"].append("[OK] Services arretes")
+            # Note: We do NOT stop services here - install_pi.sh handles that
+            # Stopping here would cause 502 errors for the frontend
             
-            # Step 2: Remove old /tmp/aurige if exists
+            # Step 1: Remove old /tmp/aurige if exists
             update_output_store["lines"].append(">>> Nettoyage du dossier temporaire...")
             rm_proc = await asyncio.create_subprocess_exec(
                 "sudo", "rm", "-rf", GIT_REPO_PATH,
@@ -3049,8 +3042,9 @@ async def start_update():
                 stderr=asyncio.subprocess.STDOUT,
             )
             await rm_proc.wait()
+            update_output_store["lines"].append("[OK] Dossier nettoye")
             
-            # Step 3: Fresh clone from GitHub
+            # Step 2: Fresh clone from GitHub
             update_output_store["lines"].append(f">>> Clonage depuis GitHub...")
             clone_proc = await asyncio.create_subprocess_exec(
                 "sudo", "git", "clone", GITHUB_REPO, GIT_REPO_PATH,
@@ -3061,7 +3055,9 @@ async def start_update():
                 line = await clone_proc.stdout.readline()
                 if not line:
                     break
-                update_output_store["lines"].append(line.decode().strip())
+                text = line.decode().strip()
+                if text:
+                    update_output_store["lines"].append(text)
             await clone_proc.wait()
             
             if clone_proc.returncode != 0:
@@ -3071,7 +3067,7 @@ async def start_update():
             
             update_output_store["lines"].append("[OK] Depot clone")
             
-            # Step 4: Checkout the target branch
+            # Step 3: Checkout the target branch
             update_output_store["lines"].append(f">>> Checkout de la branche {TARGET_BRANCH}...")
             checkout_proc = await asyncio.create_subprocess_exec(
                 "sudo", "git", "-C", GIT_REPO_PATH, "checkout", TARGET_BRANCH,
@@ -3082,12 +3078,13 @@ async def start_update():
                 line = await checkout_proc.stdout.readline()
                 if not line:
                     break
-                update_output_store["lines"].append(line.decode().strip())
+                text = line.decode().strip()
+                if text:
+                    update_output_store["lines"].append(text)
             await checkout_proc.wait()
             
             if checkout_proc.returncode != 0:
                 update_output_store["lines"].append(f">>> Branche {TARGET_BRANCH} non trouvee, utilisation de main")
-                # Fallback to main
                 fallback_proc = await asyncio.create_subprocess_exec(
                     "sudo", "git", "-C", GIT_REPO_PATH, "checkout", "main",
                     stdout=asyncio.subprocess.PIPE,
@@ -3097,8 +3094,9 @@ async def start_update():
             else:
                 update_output_store["lines"].append(f"[OK] Branche {TARGET_BRANCH}")
             
-            # Step 5: Run install script
+            # Step 4: Run install script (this will stop/restart services at the end)
             update_output_store["lines"].append(">>> Execution du script d'installation...")
+            update_output_store["lines"].append(">>> (Les services redemarreront automatiquement)")
             
             process = await asyncio.create_subprocess_exec(
                 "sudo", "bash", f"{GIT_REPO_PATH}/scripts/install_pi.sh",
