@@ -35,6 +35,8 @@ import {
   FolderTree,
   Search,
   Network,
+  Maximize2,
+  Minimize2,
 } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
@@ -317,11 +319,9 @@ export default function Isolation() {
   const [ackOffsetMs, setAckOffsetMs] = useState<[number, number]>([0, 100])
   const [statusOffsetMs, setStatusOffsetMs] = useState<[number, number]>([200, 1500])
   
-  // Time window inputs for family diff (in seconds)
-  const [diffBeforeStart, setDiffBeforeStart] = useState<string>("0")
-  const [diffBeforeEnd, setDiffBeforeEnd] = useState<string>("1")
-  const [diffAfterStart, setDiffAfterStart] = useState<string>("1")
-  const [diffAfterEnd, setDiffAfterEnd] = useState<string>("2")
+  // Fullscreen mode for dialogs
+  const [coOccFullscreen, setCoOccFullscreen] = useState(false)
+  const [familyDiffFullscreen, setFamilyDiffFullscreen] = useState(false)
   
   // Get mission ID from localStorage and sync with store
   useEffect(() => {
@@ -1348,12 +1348,17 @@ export default function Isolation() {
 
       {/* Co-occurrence Analysis Dialog */}
       <Dialog open={analyzingLog !== null} onOpenChange={(open) => !open && closeCoOccurrenceDialog()}>
-        <DialogContent className="w-[98vw] max-w-6xl h-[90vh] max-h-[900px] overflow-hidden flex flex-col p-4 sm:p-6">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Network className="h-5 w-5" />
-              Analyse Co-occurrence ECU
-            </DialogTitle>
+<DialogContent className={coOccFullscreen ? "w-screen h-screen max-w-none max-h-none rounded-none" : "w-[98vw] max-w-6xl h-[90vh] max-h-[900px]"} style={{ overflow: "hidden", display: "flex", flexDirection: "column" }}>
+          <DialogHeader className="shrink-0">
+            <div className="flex items-center justify-between">
+              <DialogTitle className="flex items-center gap-2">
+                <Network className="h-5 w-5 text-primary" />
+                Analyse Co-occurrence ECU
+              </DialogTitle>
+              <Button variant="ghost" size="icon" className="h-8 w-8 bg-transparent" onClick={() => setCoOccFullscreen(!coOccFullscreen)}>
+                {coOccFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+              </Button>
+            </div>
             <DialogDescription>
               Trames liees a la trame causale dans une fenetre de {analysisWindowMs}ms
             </DialogDescription>
@@ -1542,12 +1547,17 @@ export default function Isolation() {
       
       {/* Family Diff Analysis Dialog */}
       <Dialog open={showFamilyDiff} onOpenChange={setShowFamilyDiff}>
-        <DialogContent className="w-[98vw] max-w-7xl h-[92vh] max-h-[950px] overflow-hidden flex flex-col">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <FlaskConical className="h-5 w-5 text-primary" />
-              Qualifier la famille - Diff AVANT/APRES
-            </DialogTitle>
+        <DialogContent className={familyDiffFullscreen ? "w-screen h-screen max-w-none max-h-none rounded-none" : "w-[98vw] max-w-7xl h-[92vh] max-h-[950px]"} style={{ overflow: "hidden", display: "flex", flexDirection: "column" }}>
+          <DialogHeader className="shrink-0">
+            <div className="flex items-center justify-between">
+              <DialogTitle className="flex items-center gap-2">
+                <FlaskConical className="h-5 w-5 text-primary" />
+                Qualifier la famille - Diff AVANT/APRES
+              </DialogTitle>
+              <Button variant="ghost" size="icon" className="h-8 w-8 bg-transparent" onClick={() => setFamilyDiffFullscreen(!familyDiffFullscreen)}>
+                {familyDiffFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+              </Button>
+            </div>
             <DialogDescription>
               Comparez les payloads avant et apres l&apos;action pour classifier les trames (STATUS, ACK, INFO)
             </DialogDescription>
