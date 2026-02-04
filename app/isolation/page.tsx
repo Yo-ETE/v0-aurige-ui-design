@@ -158,7 +158,7 @@ function LogTreeItem({
             <Button
               size="icon"
               variant="ghost"
-              className="h-7 w-7 text-success hover:text-success"
+              className="h-7 w-7"
               onClick={() => onTagChange(item.id, "success")}
               title="Marquer comme succes"
             >
@@ -484,10 +484,10 @@ export default function Isolation() {
       // Group logs by parent/child hierarchy
       const logIds = new Set(allMissionLogs.map(l => l.id))
       const rootLogs = allMissionLogs.filter(l => !l.parentId || !logIds.has(l.parentId))
-      const childrenMap = new Map<string, typeof allMissionLogs>()
+      const childrenMap = new Map<string, LogEntry[]>()
       
       allMissionLogs.forEach(l => {
-        if (l.parentId && logIds.has(l.parentId)) {
+        if (l.parentId) {
           const children = childrenMap.get(l.parentId) || []
           children.push(l)
           childrenMap.set(l.parentId, children)
@@ -1300,7 +1300,7 @@ export default function Isolation() {
                 )}
                 
                 {/* Related Frames Table */}
-                <ScrollArea className="flex-1 min-h-0 border rounded-lg">
+                <div className="flex-1 min-h-0 border rounded-lg overflow-auto">
                   <div className="min-w-[700px]">
                     <table className="w-full text-xs">
                       <thead className="sticky top-0 bg-secondary z-10">
@@ -1372,7 +1372,7 @@ export default function Isolation() {
                       </tbody>
                     </table>
                   </div>
-                </ScrollArea>
+                </div>
                 
                 {/* Actions */}
                 <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-border">

@@ -2999,90 +2999,96 @@ async def restore_backup(filename: str):
 
 @app.post("/api/system/update")
 async def start_update():
-    """Start git pull and run install script"""
+    """Start update by fresh clone and install script"""
     global update_output_store
     if update_output_store["running"]:
         return {"status": "error", "message": "Une mise à jour est déjà en cours"}
     
-    # Check if git repo exists
-    if not Path(GIT_REPO_PATH).exists() or not Path(f"{GIT_REPO_PATH}/.git").exists():
-        return {"status": "error", "message": "Depot git non trouve dans /tmp/aurige. Clonez d'abord le repo."}
-    
     update_output_store = {"lines": [], "running": True, "command": "update"}
+    
+    # GitHub repo URL and target branch
+    GITHUB_REPO = "https://github.com/Yo-ETE/v0-aurige-ui-design.git"
+    TARGET_BRANCH = "v0/main-37135798"
+    
+    # Check for saved branch preference
+    saved_branch_file = Path("/opt/aurige/branch.txt")
+    if saved_branch_file.exists():
+        saved = saved_branch_file.read_text().strip()
+        if saved:
+            TARGET_BRANCH = saved
     
     async def run_update():
         global update_output_store
         try:
-            # First, add safe.directory to avoid "dubious ownership" error
-            update_output_store["lines"].append(">>> Configuration git safe.directory...")
-            safe_dir_proc = await asyncio.create_subprocess_exec(
-                "sudo", "git", "config", "--global", "--add", "safe.directory", GIT_REPO_PATH,
+            # Step 1: Stop services
+            update_output_store["lines"].append(">>> Arret des services...")
+            stop_proc = await asyncio.create_subprocess_exec(
+                "sudo", "systemctl", "stop", "aurige-web", "aurige-api",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
             )
-            await safe_dir_proc.wait()
+            await stop_proc.wait()
+            update_output_store["lines"].append("[OK] Services arretes")
             
-            update_output_store["lines"].append(">>> Recuperation des derniers commits...")
-            
-            # Git fetch to get latest
-            fetch_proc = await asyncio.create_subprocess_exec(
-                "sudo", "git", "-C", GIT_REPO_PATH, "fetch", "origin",
+            # Step 2: Remove old /tmp/aurige if exists
+            update_output_store["lines"].append(">>> Nettoyage du dossier temporaire...")
+            rm_proc = await asyncio.create_subprocess_exec(
+                "sudo", "rm", "-rf", GIT_REPO_PATH,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
             )
-            while True:
-                line = await fetch_proc.stdout.readline()
-                if not line:
-                    break
-                update_output_store["lines"].append(line.decode().strip())
-            await fetch_proc.wait()
+            await rm_proc.wait()
             
-            # Get current branch to find the correct remote
-            branch_proc = await asyncio.create_subprocess_exec(
-                "git", "-C", GIT_REPO_PATH, "branch", "--show-current",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-            )
-            branch_out, _ = await branch_proc.communicate()
-            current_branch = branch_out.decode().strip() or "main"
-            
-            # v0 pushes to origin/{current_branch} (e.g. origin/v0/main-xxx)
-            # Try that first, fallback to origin/main
-            remote_branch = f"origin/{current_branch}"
-            
-            # Check if remote branch exists
-            check_proc = await asyncio.create_subprocess_exec(
-                "git", "-C", GIT_REPO_PATH, "rev-parse", "--verify", remote_branch,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-            )
-            await check_proc.wait()
-            
-            if check_proc.returncode != 0:
-                remote_branch = "origin/main"
-                update_output_store["lines"].append(f">>> Branche {current_branch} non trouvee sur origin, utilisation de main")
-            
-            update_output_store["lines"].append(f">>> Reset vers {remote_branch}...")
-            process = await asyncio.create_subprocess_exec(
-                "sudo", "git", "-C", GIT_REPO_PATH, "reset", "--hard", remote_branch,
+            # Step 3: Fresh clone from GitHub
+            update_output_store["lines"].append(f">>> Clonage depuis GitHub...")
+            clone_proc = await asyncio.create_subprocess_exec(
+                "sudo", "git", "clone", GITHUB_REPO, GIT_REPO_PATH,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
             )
             while True:
-                line = await process.stdout.readline()
+                line = await clone_proc.stdout.readline()
                 if not line:
                     break
                 update_output_store["lines"].append(line.decode().strip())
-            await process.wait()
+            await clone_proc.wait()
             
-            if process.returncode != 0:
-                update_output_store["lines"].append(f">>> Erreur git reset (code: {process.returncode})")
+            if clone_proc.returncode != 0:
+                update_output_store["lines"].append(f"[ERROR] Erreur de clonage (code: {clone_proc.returncode})")
                 update_output_store["running"] = False
                 return
             
+            update_output_store["lines"].append("[OK] Depot clone")
+            
+            # Step 4: Checkout the target branch
+            update_output_store["lines"].append(f">>> Checkout de la branche {TARGET_BRANCH}...")
+            checkout_proc = await asyncio.create_subprocess_exec(
+                "sudo", "git", "-C", GIT_REPO_PATH, "checkout", TARGET_BRANCH,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            while True:
+                line = await checkout_proc.stdout.readline()
+                if not line:
+                    break
+                update_output_store["lines"].append(line.decode().strip())
+            await checkout_proc.wait()
+            
+            if checkout_proc.returncode != 0:
+                update_output_store["lines"].append(f">>> Branche {TARGET_BRANCH} non trouvee, utilisation de main")
+                # Fallback to main
+                fallback_proc = await asyncio.create_subprocess_exec(
+                    "sudo", "git", "-C", GIT_REPO_PATH, "checkout", "main",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
+                )
+                await fallback_proc.wait()
+            else:
+                update_output_store["lines"].append(f"[OK] Branche {TARGET_BRANCH}")
+            
+            # Step 5: Run install script
             update_output_store["lines"].append(">>> Execution du script d'installation...")
             
-            # Run install script (this copies files to /opt/aurige and restarts services)
             process = await asyncio.create_subprocess_exec(
                 "sudo", "bash", f"{GIT_REPO_PATH}/scripts/install_pi.sh",
                 stdout=asyncio.subprocess.PIPE,
@@ -3093,16 +3099,18 @@ async def start_update():
                 line = await process.stdout.readline()
                 if not line:
                     break
-                update_output_store["lines"].append(line.decode().strip())
+                decoded = line.decode().strip()
+                if decoded:
+                    update_output_store["lines"].append(decoded)
             await process.wait()
             
             if process.returncode != 0:
-                update_output_store["lines"].append(f">>> Erreur install_pi.sh (code: {process.returncode})")
+                update_output_store["lines"].append(f"[ERROR] Erreur install_pi.sh (code: {process.returncode})")
             else:
-                update_output_store["lines"].append(">>> Mise a jour terminee! Rechargez la page.")
+                update_output_store["lines"].append("[OK] Mise a jour terminee! Rechargez la page.")
             
         except Exception as e:
-            update_output_store["lines"].append(f"Erreur: {str(e)}")
+            update_output_store["lines"].append(f"[ERROR] {str(e)}")
         finally:
             update_output_store["running"] = False
     
@@ -3113,9 +3121,16 @@ async def start_update():
 @app.get("/api/system/update/output")
 async def get_update_output():
     """Get update command output"""
+    lines = update_output_store["lines"]
+    # Determine success/error status
+    success = any("[OK] Mise a jour terminee" in line for line in lines)
+    error = any("[ERROR]" in line for line in lines)
+    
     return {
         "running": update_output_store["running"],
-        "lines": update_output_store["lines"],
+        "lines": lines,
+        "success": success and not error,
+        "error": "Erreur lors de la mise a jour" if error else None,
     }
 
 
