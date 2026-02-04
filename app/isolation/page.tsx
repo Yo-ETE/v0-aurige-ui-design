@@ -295,6 +295,8 @@ export default function Isolation() {
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [analysisWindowMs, setAnalysisWindowMs] = useState(200)
   const [analysisDirection, setAnalysisDirection] = useState<"before" | "after" | "both">("both")
+  const [selectedFrame, setSelectedFrame] = useState<LogFrame | null>(null)
+  const [originLogId, setOriginLogId] = useState<string | null>(null)
   
   // Get mission ID from localStorage and sync with store
   useEffect(() => {
@@ -469,46 +471,47 @@ export default function Isolation() {
   }
   
   // Co-occurrence analysis handlers
+  // Step 1: Open the log viewer to select a frame
   const handleAnalyzeCoOccurrence = async (log: IsolationLog) => {
-    setAnalyzingLog(log)
+    // Find the origin log (root parent) for analysis
+    let rootLogId = log.id
+    let currentLog: IsolationLog | undefined = log
+    while (currentLog?.parentId) {
+      const parent = findLog(currentLog.parentId)
+      if (parent) {
+        rootLogId = parent.id
+        currentLog = parent
+      } else {
+        break
+      }
+    }
+    setOriginLogId(rootLogId)
+    setSelectedFrame(null)
     setCoOccurrenceResult(null)
+    
+    // Open the success log to select the causal frame
+    handleViewLog(log)
   }
   
+  // Step 2: User selects a frame in the viewer
+  const handleSelectFrameForAnalysis = (frame: LogFrame) => {
+    setSelectedFrame(frame)
+  }
+  
+  // Step 3: Run analysis with selected frame on origin log
   const runCoOccurrenceAnalysis = async () => {
-    if (!analyzingLog || !missionId) return
+    if (!selectedFrame || !originLogId || !missionId) return
+    if (!selectedFrame.canId || !selectedFrame.timestamp) return
     
+    setAnalyzingLog(viewingLog)
+    closeLogViewer()
     setIsAnalyzing(true)
+    
     try {
-      // First, we need to get the log content to find a representative frame
-      // We'll use the first frame as the target (the user should select from viewer)
-      const response = await getLogContent(missionId, analyzingLog.id, 0, 10)
-      if (!response.frames.length) {
-        throw new Error("Aucune trame dans le log")
-      }
-      
-      // Get the first frame with valid canId and timestamp
-      const targetFrame = response.frames.find(f => f.canId && f.timestamp)
-      if (!targetFrame || !targetFrame.canId || !targetFrame.timestamp) {
-        throw new Error("Aucune trame valide trouvee")
-      }
-      
-      // Find the origin log to analyze (parent chain up to root)
-      let originLogId = analyzingLog.id
-      let currentLog: IsolationLog | undefined = analyzingLog
-      while (currentLog?.parentId) {
-        const parent = findLog(currentLog.parentId)
-        if (parent) {
-          originLogId = parent.id
-          currentLog = parent
-        } else {
-          break
-        }
-      }
-      
       const result = await analyzeCoOccurrence(missionId, originLogId, {
         logId: originLogId,
-        targetCanId: targetFrame.canId,
-        targetTimestamp: parseFloat(targetFrame.timestamp),
+        targetCanId: selectedFrame.canId,
+        targetTimestamp: parseFloat(selectedFrame.timestamp),
         windowMs: analysisWindowMs,
         direction: analysisDirection,
       })
@@ -524,6 +527,8 @@ export default function Isolation() {
   const closeCoOccurrenceDialog = () => {
     setAnalyzingLog(null)
     setCoOccurrenceResult(null)
+    setSelectedFrame(null)
+    setOriginLogId(null)
   }
   
   const [isSplitting, setIsSplitting] = useState<string | null>(null)
@@ -953,7 +958,13 @@ export default function Isolation() {
       </Dialog>
 
       {/* Log Viewer Dialog */}
-      <Dialog open={viewingLog !== null} onOpenChange={(open) => !open && closeLogViewer()}>
+      <Dialog open={viewingLog !== null} onOpenChange={(open) => {
+        if (!open) {
+          closeLogViewer()
+          setSelectedFrame(null)
+          if (!analyzingLog) setOriginLogId(null)
+        }
+      }}>
         <DialogContent className="sm:max-w-4xl max-h-[80vh]">
           <DialogHeader>
             <div className="flex items-center justify-between">
@@ -965,25 +976,88 @@ export default function Isolation() {
                 <DialogDescription>
                   {totalFrames} trames au total
                   {logFrames.length < totalFrames && ` (affichage des ${logFrames.length} premieres)`}
+                  {originLogId && (
+                    <span className="ml-2 text-primary">
+                      - Selectionnez la trame causale pour l&apos;analyse
+                    </span>
+                  )}
                 </DialogDescription>
               </div>
-              <Button
-                onClick={handleExportToReplay}
-                disabled={logFrames.length === 0}
-                className="gap-2"
-              >
-                <Send className="h-4 w-4" />
-                Exporter vers Replay
-              </Button>
+              <div className="flex items-center gap-2">
+                {originLogId && selectedFrame && (
+                  <Button
+                    onClick={runCoOccurrenceAnalysis}
+                    className="gap-2"
+                    variant="default"
+                  >
+                    <Network className="h-4 w-4" />
+                    Analyser co-occurrence
+                  </Button>
+                )}
+                <Button
+                  onClick={handleExportToReplay}
+                  disabled={logFrames.length === 0}
+                  variant="outline"
+                  className="gap-2 bg-transparent"
+                >
+                  <Send className="h-4 w-4" />
+                  Exporter vers Replay
+                </Button>
+              </div>
             </div>
           </DialogHeader>
-          <div className="mt-4">
+          
+          {/* Analysis parameters and selected frame */}
+          {originLogId && (
+            <div className="flex flex-wrap items-center gap-4 p-3 rounded-lg border border-primary/30 bg-primary/5">
+              <div className="flex items-center gap-2">
+                <Label className="text-sm whitespace-nowrap">Fenetre:</Label>
+                <Select value={analysisWindowMs.toString()} onValueChange={(v) => setAnalysisWindowMs(parseInt(v))}>
+                  <SelectTrigger className="w-24 h-8">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="100">100 ms</SelectItem>
+                    <SelectItem value="200">200 ms</SelectItem>
+                    <SelectItem value="500">500 ms</SelectItem>
+                    <SelectItem value="1000">1 sec</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center gap-2">
+                <Label className="text-sm whitespace-nowrap">Direction:</Label>
+                <Select value={analysisDirection} onValueChange={(v) => setAnalysisDirection(v as "before" | "after" | "both")}>
+                  <SelectTrigger className="w-28 h-8">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="before">Avant</SelectItem>
+                    <SelectItem value="after">Apres</SelectItem>
+                    <SelectItem value="both">Les deux</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">Log origine:</span>
+                <Badge variant="secondary" className="font-mono text-xs">{originLogId}</Badge>
+              </div>
+              {selectedFrame && (
+                <div className="flex items-center gap-2 ml-auto">
+                  <span className="text-sm text-muted-foreground">Trame:</span>
+                  <Badge className="font-mono">{selectedFrame.canId}</Badge>
+                  <span className="font-mono text-xs text-muted-foreground truncate max-w-32">{selectedFrame.data}</span>
+                </div>
+              )}
+            </div>
+          )}
+          
+          <div className="mt-2">
             {isLoadingFrames ? (
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
               </div>
             ) : (
-              <ScrollArea className="h-[400px] rounded-md border border-border">
+              <ScrollArea className="h-[350px] rounded-md border border-border">
                 <div className="p-2">
                   <table className="w-full text-xs font-mono">
                     <thead className="sticky top-0 bg-secondary">
@@ -995,14 +1069,27 @@ export default function Isolation() {
                       </tr>
                     </thead>
                     <tbody>
-                      {logFrames.map((frame, index) => (
-                        <tr key={index} className="border-t border-border/50 hover:bg-secondary/50">
-                          <td className="p-2 text-muted-foreground">{frame.timestamp || "-"}</td>
-                          <td className="p-2">{frame.interface || "-"}</td>
-                          <td className="p-2 text-primary font-semibold">{frame.canId || "-"}</td>
-                          <td className="p-2">{frame.data || frame.raw}</td>
-                        </tr>
-                      ))}
+                      {logFrames.map((frame, index) => {
+                        const isSelected = selectedFrame && 
+                          selectedFrame.timestamp === frame.timestamp && 
+                          selectedFrame.canId === frame.canId
+                        return (
+                          <tr 
+                            key={index} 
+                            className={`border-t border-border/50 cursor-pointer transition-colors ${
+                              isSelected 
+                                ? "bg-primary/20 hover:bg-primary/25" 
+                                : "hover:bg-secondary/50"
+                            }`}
+                            onClick={() => originLogId && handleSelectFrameForAnalysis(frame)}
+                          >
+                            <td className="p-2 text-muted-foreground">{frame.timestamp || "-"}</td>
+                            <td className="p-2">{frame.interface || "-"}</td>
+                            <td className="p-2 text-primary font-semibold">{frame.canId || "-"}</td>
+                            <td className="p-2">{frame.data || frame.raw}</td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -1021,44 +1108,31 @@ export default function Isolation() {
               Analyse Co-occurrence ECU
             </DialogTitle>
             <DialogDescription>
-              Identifiez les trames liees a la trame causale validee
+              Trames liees a la trame causale dans une fenetre de {analysisWindowMs}ms
             </DialogDescription>
           </DialogHeader>
           
-          {/* Parameters */}
-          <div className="flex flex-wrap items-center gap-4 py-4 border-b border-border">
-            <div className="flex items-center gap-2">
-              <Label className="text-sm whitespace-nowrap">Fenetre:</Label>
-              <Select value={analysisWindowMs.toString()} onValueChange={(v) => setAnalysisWindowMs(parseInt(v))}>
-                <SelectTrigger className="w-28">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="100">100 ms</SelectItem>
-                  <SelectItem value="200">200 ms</SelectItem>
-                  <SelectItem value="500">500 ms</SelectItem>
-                  <SelectItem value="1000">1000 ms</SelectItem>
-                </SelectContent>
-              </Select>
+          {/* Target frame info */}
+          {coOccurrenceResult && (
+            <div className="flex flex-wrap items-center gap-4 py-3 px-4 rounded-lg border border-primary/30 bg-primary/5">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">Trame cible:</span>
+                <Badge className="font-mono">{coOccurrenceResult.targetFrame.canId}</Badge>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">Log analyse:</span>
+                <Badge variant="secondary" className="font-mono">{originLogId}.log</Badge>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">IDs trouves:</span>
+                <span className="font-semibold">{coOccurrenceResult.uniqueIdsFound}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">Trames:</span>
+                <span className="font-semibold">{coOccurrenceResult.totalFramesAnalyzed}</span>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <Label className="text-sm whitespace-nowrap">Direction:</Label>
-              <Select value={analysisDirection} onValueChange={(v) => setAnalysisDirection(v as "before" | "after" | "both")}>
-                <SelectTrigger className="w-32">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="before">Avant</SelectItem>
-                  <SelectItem value="after">Apres</SelectItem>
-                  <SelectItem value="both">Avant + Apres</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <Button onClick={runCoOccurrenceAnalysis} disabled={isAnalyzing} className="ml-auto">
-              {isAnalyzing ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Search className="h-4 w-4 mr-2" />}
-              Analyser
-            </Button>
-          </div>
+          )}
           
           {/* Results */}
           <div className="flex-1 overflow-hidden">
@@ -1069,22 +1143,6 @@ export default function Isolation() {
               </div>
             ) : coOccurrenceResult ? (
               <div className="h-full flex flex-col gap-4">
-                {/* Summary */}
-                <div className="flex items-center gap-6 text-sm">
-                  <div className="flex items-center gap-2">
-                    <span className="text-muted-foreground">Trame cible:</span>
-                    <Badge variant="outline" className="font-mono">{coOccurrenceResult.targetFrame.canId}</Badge>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-muted-foreground">IDs trouves:</span>
-                    <span className="font-semibold">{coOccurrenceResult.uniqueIdsFound}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-muted-foreground">Trames analysees:</span>
-                    <span className="font-semibold">{coOccurrenceResult.totalFramesAnalyzed}</span>
-                  </div>
-                </div>
-                
                 {/* ECU Families */}
                 {coOccurrenceResult.ecuFamilies.length > 0 && (
                   <div className="rounded-lg border border-primary/30 bg-primary/5 p-3">
