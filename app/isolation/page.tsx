@@ -236,7 +236,7 @@ function LogTreeItem({
 export default function Isolation() {
   const router = useRouter()
   const navRouter = useNavRouter()
-  const { logs, importLog, addChildLog, removeLog, updateLogTags, updateLogName, clearLogs, setMission } = useIsolationStore()
+  const { logs, importLog, addChildLog, removeLog, updateLogTags, updateLogName, clearLogs, setMission, findLog } = useIsolationStore()
   const { addFrames } = useExportStore()
   
   // Mission context
@@ -299,15 +299,53 @@ export default function Isolation() {
     await loadMissionLogs(newMissionId)
   }
   
-  const handleImportLog = (log: LogEntry) => {
-    importLog({
+  const handleImportLog = (log: LogEntry, closeDialog = true) => {
+    const newLog: IsolationLog = {
       id: log.id,
       name: log.filename,
       filename: log.filename,
       missionId: importMissionId,
-      tags: ["original"],
+      tags: log.parentId ? [] : ["original"],  // Only mark as original if no parent
       frameCount: log.framesCount,
+    }
+    
+    // Check if parent is already imported
+    if (log.parentId) {
+      const parentLog = findLog(log.parentId)
+      if (parentLog) {
+        // Add as child of existing parent
+        addChildLog(log.parentId, newLog)
+        if (closeDialog) setShowImportDialog(false)
+        return
+      }
+    }
+    
+    // Import as root log
+    importLog(newLog)
+    if (closeDialog) setShowImportDialog(false)
+  }
+  
+  // Import a family of logs (parent + all children)
+  const handleImportFamily = (originLog: LogEntry, family: LogEntry[]) => {
+    // First import the origin if not already imported
+    if (!logs.some(l => l.id === originLog.id)) {
+      handleImportLog(originLog, false)
+    }
+    
+    // Sort family by depth (shallow first) so parents are imported before children
+    const sortedFamily = [...family].sort((a, b) => {
+      const depthA = (a.id.match(/_[aAbB]/g) || []).length
+      const depthB = (b.id.match(/_[aAbB]/g) || []).length
+      return depthA - depthB
     })
+    
+    // Import each child
+    sortedFamily.forEach(child => {
+      if (!logs.some(l => l.id === child.id) && !findLog(child.id)) {
+        handleImportLog(child, false)
+      }
+    })
+    
     setShowImportDialog(false)
   }
   
@@ -689,15 +727,7 @@ export default function Isolation() {
                                     size="sm"
                                     variant="ghost"
                                     className="h-8 px-2"
-                                    onClick={() => {
-                                      // Import entire family
-                                      if (!isOriginImported) handleImportLog(originLog)
-                                      family.forEach(f => {
-                                        if (!logs.some(l => l.id === f.id)) {
-                                          handleImportLog(f)
-                                        }
-                                      })
-                                    }}
+                                    onClick={() => handleImportFamily(originLog, family)}
                                     disabled={isOriginImported && allFamilyImported}
                                     title="Importer tout le dossier"
                                   >

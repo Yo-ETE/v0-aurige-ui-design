@@ -10,15 +10,17 @@ import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { 
   Video, FolderOpen, Play, Trash2, Download, Circle, Square, FileText, 
-  AlertCircle, Loader2, CheckCircle2, ArrowLeft, FlaskConical, Pencil
+  AlertCircle, Loader2, CheckCircle2, ArrowLeft, FlaskConical, Pencil,
+  ChevronRight, FolderTree
 } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { 
   startCapture, stopCapture, getCaptureStatus, type CANInterface, 
-  listMissionLogs, deleteLog, renameLog, getLogDownloadUrl,
+  listMissionLogs, deleteLog, renameLog, getLogDownloadUrl, getLogFamilyDownloadUrl,
   startReplay, stopReplay, getReplayStatus,
   type LogEntry, type CaptureStatus, type ProcessStatus
 } from "@/lib/api"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { useMissionStore } from "@/lib/mission-store"
 import { useIsolationStore } from "@/lib/isolation-store"
 
@@ -401,117 +403,231 @@ const handleDeleteLog = async (logId: string) => {
                 </p>
               </div>
             ) : (
-              <div className="space-y-3 max-h-80 overflow-y-auto">
-                {logs.map((log) => (
-                  <div
-                    key={log.id}
-                    className="flex items-center justify-between rounded-lg border border-border bg-secondary/50 p-3"
-                  >
-                    <div className="min-w-0 flex-1">
-                      {renamingLogId === log.id ? (
-                        <div className="flex items-center gap-2">
-                          <Input
-                            value={newLogName}
-                            onChange={(e) => setNewLogName(e.target.value)}
-                            className="h-7 text-sm font-mono"
-                            autoFocus
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") handleRenameLog(log.id)
-                              if (e.key === "Escape") setRenamingLogId(null)
-                            }}
-                          />
-                          <Button size="sm" variant="ghost" onClick={() => handleRenameLog(log.id)}>OK</Button>
-                          <Button size="sm" variant="ghost" onClick={() => setRenamingLogId(null)}>Annuler</Button>
+              <ScrollArea className="h-80">
+                <div className="space-y-2 pr-4">
+                  {(() => {
+                    // Group logs by family (origin logs with their children)
+                    const originLogs = logs.filter(l => !l.parentId)
+                    const childrenMap = new Map<string, LogEntry[]>()
+                    
+                    logs.forEach(l => {
+                      if (l.parentId) {
+                        const children = childrenMap.get(l.parentId) || []
+                        children.push(l)
+                        childrenMap.set(l.parentId, children)
+                      }
+                    })
+                    
+                    // Recursively get all descendants
+                    const getAllDescendants = (logId: string): LogEntry[] => {
+                      const directChildren = childrenMap.get(logId) || []
+                      const allDescendants: LogEntry[] = [...directChildren]
+                      directChildren.forEach(child => {
+                        allDescendants.push(...getAllDescendants(child.id))
+                      })
+                      return allDescendants
+                    }
+
+                    // Render a single log item
+                    const renderLogItem = (log: LogEntry, isChild = false, depth = 0) => (
+                      <div
+                        key={log.id}
+                        className={`flex items-center justify-between rounded-lg border border-border p-2 ${
+                          isChild ? "bg-background/50 ml-4" : "bg-secondary/50"
+                        }`}
+                        style={isChild ? { marginLeft: `${depth * 16}px` } : undefined}
+                      >
+                        <div className="min-w-0 flex-1">
+                          {renamingLogId === log.id ? (
+                            <div className="flex items-center gap-2">
+                              <Input
+                                value={newLogName}
+                                onChange={(e) => setNewLogName(e.target.value)}
+                                className="h-7 text-sm font-mono"
+                                autoFocus
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") handleRenameLog(log.id)
+                                  if (e.key === "Escape") setRenamingLogId(null)
+                                }}
+                              />
+                              <Button size="sm" variant="ghost" onClick={() => handleRenameLog(log.id)}>OK</Button>
+                              <Button size="sm" variant="ghost" onClick={() => setRenamingLogId(null)}>X</Button>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              {isChild && <ChevronRight className="h-3 w-3 text-muted-foreground shrink-0" />}
+                              <p className="truncate font-mono text-sm text-foreground">
+                                {log.filename}
+                              </p>
+                            </div>
+                          )}
+                          <p className="text-xs text-muted-foreground">
+                            {log.framesCount.toLocaleString()} trames • {formatFileSize(log.size)}
+                            {log.durationSeconds && ` • ${formatTime(log.durationSeconds)}`}
+                          </p>
                         </div>
-                      ) : (
-                        <p className="truncate font-mono text-sm text-foreground">
-                          {log.filename}
-                        </p>
-                      )}
-                      <p className="text-xs text-muted-foreground">
-                        {new Date(log.createdAt).toLocaleString("fr-FR")} • {formatFileSize(log.size)} • {log.framesCount.toLocaleString()} trames
-                        {log.durationSeconds && ` • ${formatTime(log.durationSeconds)}`}
-                      </p>
-                      {log.description && (
-                        <p className="text-xs text-primary mt-1">{log.description}</p>
-                      )}
-                    </div>
-                    <div className="ml-4 flex items-center gap-1">
-                      {replayStatus.running && replayingLogId === log.id ? (
-                        <Button 
-                          size="icon" 
-                          variant="ghost" 
-                          className="h-8 w-8 text-destructive"
-                          onClick={handleStopReplay}
-                        >
-                          <Square className="h-4 w-4" />
-                        </Button>
-                      ) : (
-                        <Button 
-                          size="icon" 
-                          variant="ghost" 
-                          className="h-8 w-8"
-                          onClick={() => handleReplay(log.id)}
-                          disabled={replayStatus.running || captureStatus.running}
-                        >
-                          <Play className="h-4 w-4" />
-                        </Button>
-                      )}
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-8 w-8"
-                        title="Renommer"
-                        onClick={() => startRenaming(log)}
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-8 w-8"
-                        title="Isolation"
-                        onClick={() => {
-                          importLogToIsolation({
-                            id: log.id,
-                            name: log.filename,
-                            filename: log.filename,
-                            missionId: missionId,
-                            tags: ["original"],
-                            frameCount: log.frameCount,
-                          })
-                          router.push("/isolation")
-                        }}
-                      >
-                        <FlaskConical className="h-4 w-4" />
-                      </Button>
-                      <Button 
-                        size="icon" 
-                        variant="ghost" 
-                        className="h-8 w-8"
-                        title="Telecharger"
-                        asChild
-                      >
-                        <a 
-                          href={getLogDownloadUrl(missionId, log.id)} 
-                          download={log.filename}
-                        >
-                          <Download className="h-4 w-4" />
-                        </a>
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-8 w-8 text-destructive hover:text-destructive"
-                        title="Supprimer"
-                        onClick={() => handleDeleteLog(log.id)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                        <div className="ml-2 flex items-center gap-1 shrink-0">
+                          {replayStatus.running && replayingLogId === log.id ? (
+                            <Button 
+                              size="icon" 
+                              variant="ghost" 
+                              className="h-7 w-7 text-destructive"
+                              onClick={handleStopReplay}
+                            >
+                              <Square className="h-3 w-3" />
+                            </Button>
+                          ) : (
+                            <Button 
+                              size="icon" 
+                              variant="ghost" 
+                              className="h-7 w-7"
+                              onClick={() => handleReplay(log.id)}
+                              disabled={replayStatus.running || captureStatus.running}
+                              title="Rejouer"
+                            >
+                              <Play className="h-3 w-3" />
+                            </Button>
+                          )}
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7"
+                            title="Renommer"
+                            onClick={() => startRenaming(log)}
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7"
+                            title="Isolation"
+                            onClick={() => {
+                              importLogToIsolation({
+                                id: log.id,
+                                name: log.filename,
+                                filename: log.filename,
+                                missionId: missionId,
+                                tags: ["original"],
+                                frameCount: log.framesCount,
+                              })
+                              router.push("/isolation")
+                            }}
+                          >
+                            <FlaskConical className="h-3 w-3" />
+                          </Button>
+                          <Button 
+                            size="icon" 
+                            variant="ghost" 
+                            className="h-7 w-7"
+                            title="Telecharger"
+                            asChild
+                          >
+                            <a href={getLogDownloadUrl(missionId, log.id)} download={log.filename}>
+                              <Download className="h-3 w-3" />
+                            </a>
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7 text-destructive hover:text-destructive"
+                            title="Supprimer"
+                            onClick={() => handleDeleteLog(log.id)}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+                    )
+                    
+                    return originLogs.map((originLog) => {
+                      const family = getAllDescendants(originLog.id)
+                      const hasFamily = family.length > 0
+                      
+                      return (
+                        <div key={originLog.id} className="rounded-lg border border-border overflow-hidden">
+                          {/* Origin log header */}
+                          <div className="flex items-center gap-2 p-3 bg-secondary/50">
+                            {hasFamily && <FolderTree className="h-4 w-4 text-primary shrink-0" />}
+                            <div className="min-w-0 flex-1">
+                              {renamingLogId === originLog.id ? (
+                                <div className="flex items-center gap-2">
+                                  <Input
+                                    value={newLogName}
+                                    onChange={(e) => setNewLogName(e.target.value)}
+                                    className="h-7 text-sm font-mono"
+                                    autoFocus
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") handleRenameLog(originLog.id)
+                                      if (e.key === "Escape") setRenamingLogId(null)
+                                    }}
+                                  />
+                                  <Button size="sm" variant="ghost" onClick={() => handleRenameLog(originLog.id)}>OK</Button>
+                                  <Button size="sm" variant="ghost" onClick={() => setRenamingLogId(null)}>X</Button>
+                                </div>
+                              ) : (
+                                <p className="font-mono text-sm text-foreground break-all">
+                                  {originLog.filename}
+                                </p>
+                              )}
+                              <p className="text-xs text-muted-foreground">
+                                {new Date(originLog.createdAt).toLocaleString("fr-FR")} • {originLog.framesCount.toLocaleString()} trames
+                                {hasFamily && ` • ${family.length} division(s)`}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              {replayStatus.running && replayingLogId === originLog.id ? (
+                                <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" onClick={handleStopReplay}>
+                                  <Square className="h-4 w-4" />
+                                </Button>
+                              ) : (
+                                <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => handleReplay(originLog.id)} disabled={replayStatus.running || captureStatus.running} title="Rejouer">
+                                  <Play className="h-4 w-4" />
+                                </Button>
+                              )}
+                              <Button size="icon" variant="ghost" className="h-8 w-8" title="Renommer" onClick={() => startRenaming(originLog)}>
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button size="icon" variant="ghost" className="h-8 w-8" title="Isolation" onClick={() => {
+                                importLogToIsolation({ id: originLog.id, name: originLog.filename, filename: originLog.filename, missionId, tags: ["original"], frameCount: originLog.framesCount })
+                                router.push("/isolation")
+                              }}>
+                                <FlaskConical className="h-4 w-4" />
+                              </Button>
+                              {hasFamily ? (
+                                <Button size="icon" variant="ghost" className="h-8 w-8" title="Telecharger famille (ZIP)" asChild>
+                                  <a href={getLogFamilyDownloadUrl(missionId, originLog.id)} download>
+                                    <Download className="h-4 w-4" />
+                                  </a>
+                                </Button>
+                              ) : (
+                                <Button size="icon" variant="ghost" className="h-8 w-8" title="Telecharger" asChild>
+                                  <a href={getLogDownloadUrl(missionId, originLog.id)} download={originLog.filename}>
+                                    <Download className="h-4 w-4" />
+                                  </a>
+                                </Button>
+                              )}
+                              <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive hover:text-destructive" title="Supprimer" onClick={() => handleDeleteLog(originLog.id)}>
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+                          
+                          {/* Children (splits) */}
+                          {hasFamily && (
+                            <div className="border-t border-border bg-background/50 p-2 space-y-1">
+                              {family.map((child) => {
+                                const depth = (child.id.match(/_[aAbB]/g) || []).length
+                                return renderLogItem(child, true, depth)
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })
+                  })()}
+                </div>
+              </ScrollArea>
             )}
           </CardContent>
         </Card>
