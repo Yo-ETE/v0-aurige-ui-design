@@ -16,6 +16,8 @@ NC='\033[0m'
 AURIGE_DIR="/opt/aurige"
 GITHUB_REPO="https://github.com/Yo-ETE/v0-aurige-ui-design.git"
 TEMP_DIR="/tmp/aurige-update"
+# Branch to use - change this if needed
+TARGET_BRANCH="v0/main-37135798"
 
 log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 log_success() { echo -e "${GREEN}[OK]${NC} $1"; }
@@ -45,19 +47,29 @@ log_info "Cloning latest from GitHub..."
 git clone "$GITHUB_REPO" "$TEMP_DIR"
 cd "$TEMP_DIR"
 
-# Get current branch from existing installation or use main
-if [ -f "$AURIGE_DIR/repo/.git/HEAD" ]; then
-    CURRENT_BRANCH=$(cat "$AURIGE_DIR/repo/.git/HEAD" | sed 's/ref: refs\/heads\///')
-    log_info "Detected branch: $CURRENT_BRANCH"
-    
-    # Check if this branch exists on origin
-    if git rev-parse --verify "origin/$CURRENT_BRANCH" >/dev/null 2>&1; then
-        git checkout "$CURRENT_BRANCH"
-    else
-        log_warn "Branch $CURRENT_BRANCH not found, using main"
-        git checkout main
-    fi
+# Try to get branch from saved config, otherwise use TARGET_BRANCH
+SAVED_BRANCH=""
+if [ -f "$AURIGE_DIR/branch.txt" ]; then
+    SAVED_BRANCH=$(cat "$AURIGE_DIR/branch.txt")
 fi
+
+BRANCH_TO_USE="${SAVED_BRANCH:-$TARGET_BRANCH}"
+log_info "Using branch: $BRANCH_TO_USE"
+
+# Fetch all branches
+git fetch origin
+
+# Checkout the target branch
+if git rev-parse --verify "origin/$BRANCH_TO_USE" >/dev/null 2>&1; then
+    git checkout "$BRANCH_TO_USE"
+    log_success "Checked out branch: $BRANCH_TO_USE"
+else
+    log_warn "Branch $BRANCH_TO_USE not found, trying main..."
+    git checkout main
+fi
+
+# Save the branch for next time
+echo "$BRANCH_TO_USE" > "$AURIGE_DIR/branch.txt" 2>/dev/null || true
 
 log_success "Git cloned: $(git rev-parse --short HEAD)"
 

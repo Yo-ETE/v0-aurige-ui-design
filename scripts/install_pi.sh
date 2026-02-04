@@ -340,6 +340,11 @@ setup_git_repo() {
         fi
         
         log_success "Git repository set up at $AURIGE_DIR/repo"
+        
+        # Save current branch for future updates
+        CURRENT_BRANCH=$(cd "$PROJECT_ROOT" && git branch --show-current 2>/dev/null || echo "main")
+        echo "$CURRENT_BRANCH" > "$AURIGE_DIR/branch.txt"
+        log_info "Saved branch for updates: $CURRENT_BRANCH"
     else
         log_warn "No git repository found, version tracking will be unavailable"
     fi

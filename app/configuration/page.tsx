@@ -727,11 +727,31 @@ export default function ConfigurationPage() {
             )}
 
             {updateOutput.lines.length > 0 && (
-              <ScrollArea className="h-32 rounded-md border border-border bg-secondary/30 p-3">
-                <pre className="text-xs font-mono text-muted-foreground whitespace-pre-wrap">
-                  {updateOutput.lines.join("\n")}
-                </pre>
-              </ScrollArea>
+              <div className="space-y-2">
+                {/* Success/Error indicator */}
+                {!updateOutput.running && updateOutput.lines.length > 0 && (
+                  updateOutput.success || updateOutput.lines.some(l => l.includes("[OK]") || l.includes("Update complete")) ? (
+                    <Alert className="border-success/50 bg-success/10">
+                      <CheckCircle2 className="h-4 w-4 text-success" />
+                      <AlertDescription className="text-success">
+                        Mise a jour terminee avec succes! Rechargez la page.
+                      </AlertDescription>
+                    </Alert>
+                  ) : updateOutput.error || updateOutput.lines.some(l => l.includes("[ERROR]") || l.includes("error")) ? (
+                    <Alert className="border-destructive/50 bg-destructive/10">
+                      <AlertTriangle className="h-4 w-4 text-destructive" />
+                      <AlertDescription className="text-destructive">
+                        Erreur lors de la mise a jour. Verifiez les logs.
+                      </AlertDescription>
+                    </Alert>
+                  ) : null
+                )}
+                <ScrollArea className="h-32 rounded-md border border-border bg-secondary/30 p-3">
+                  <pre className="text-xs font-mono text-muted-foreground whitespace-pre-wrap">
+                    {updateOutput.lines.join("\n")}
+                  </pre>
+                </ScrollArea>
+              </div>
             )}
           </CardContent>
         </Card>
@@ -775,7 +795,7 @@ export default function ConfigurationPage() {
                 onClick={handleRestartServices}
                 disabled={isRestarting}
                 variant="outline"
-                className="w-full gap-2 border-warning text-warning hover:bg-warning/10"
+                className="w-full gap-2 border-warning text-warning hover:bg-warning/10 bg-transparent"
               >
                 {isRestarting ? (
                   <Loader2 className="h-4 w-4 animate-spin" />

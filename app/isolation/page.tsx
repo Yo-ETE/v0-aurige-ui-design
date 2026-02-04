@@ -297,7 +297,8 @@ export default function Isolation() {
   const [analysisDirection, setAnalysisDirection] = useState<"before" | "after" | "both">("both")
   const [selectedFrame, setSelectedFrame] = useState<LogFrame | null>(null)
   const [originLogId, setOriginLogId] = useState<string | null>(null)
-  const [availableLogsForAnalysis, setAvailableLogsForAnalysis] = useState<Array<{id: string, name: string}>>([])
+  const [availableLogsForAnalysis, setAvailableLogsForAnalysis] = useState<Array<{id: string, name: string, depth?: number}>>([])
+  const [selectedCoOccurrenceIds, setSelectedCoOccurrenceIds] = useState<Set<string>>(new Set())
   
   // Get mission ID from localStorage and sync with store
   useEffect(() => {
@@ -479,7 +480,32 @@ export default function Isolation() {
     // Load ALL logs from the mission (not just the isolation tree)
     try {
       const allMissionLogs = await listMissionLogs(missionId)
-      const logsForSelection = allMissionLogs.map(l => ({ id: l.id, name: l.filename }))
+      
+      // Group logs by parent/child hierarchy
+      const logIds = new Set(allMissionLogs.map(l => l.id))
+      const rootLogs = allMissionLogs.filter(l => !l.parentId || !logIds.has(l.parentId))
+      const childrenMap = new Map<string, typeof allMissionLogs>()
+      
+      allMissionLogs.forEach(l => {
+        if (l.parentId && logIds.has(l.parentId)) {
+          const children = childrenMap.get(l.parentId) || []
+          children.push(l)
+          childrenMap.set(l.parentId, children)
+        }
+      })
+      
+      // Build flat list with hierarchy indication
+      const logsForSelection: Array<{id: string, name: string, depth: number}> = []
+      const addLogWithChildren = (log: typeof allMissionLogs[0], depth: number) => {
+        logsForSelection.push({ id: log.id, name: log.filename, depth })
+        const children = childrenMap.get(log.id) || []
+        children.sort((a, b) => a.filename.localeCompare(b.filename))
+        children.forEach(child => addLogWithChildren(child, depth + 1))
+      }
+      
+      rootLogs.sort((a, b) => a.filename.localeCompare(b.filename))
+      rootLogs.forEach(log => addLogWithChildren(log, 0))
+      
       setAvailableLogsForAnalysis(logsForSelection)
       
       // Find the root log in the isolation tree for default selection
@@ -499,15 +525,14 @@ export default function Isolation() {
       setOriginLogId(rootLogId)
     } catch (error) {
       // Fallback: use isolation tree only
-      const collectAllLogs = (items: IsolationLog[]): Array<{id: string, name: string}> => {
-        const result: Array<{id: string, name: string}> = []
-        const traverse = (list: IsolationLog[]) => {
-          for (const item of list) {
-            result.push({ id: item.id, name: item.name })
-            if (item.children?.length) traverse(item.children)
+      const collectAllLogs = (items: IsolationLog[], depth = 0): Array<{id: string, name: string, depth: number}> => {
+        const result: Array<{id: string, name: string, depth: number}> = []
+        for (const item of items) {
+          result.push({ id: item.id, name: item.name, depth })
+          if (item.children?.length) {
+            result.push(...collectAllLogs(item.children, depth + 1))
           }
         }
-        traverse(items)
         return result
       }
       setAvailableLogsForAnalysis(collectAllLogs(logs))
@@ -558,6 +583,48 @@ export default function Isolation() {
     setSelectedFrame(null)
     setOriginLogId(null)
     setAvailableLogsForAnalysis([])
+    setSelectedCoOccurrenceIds(new Set())
+  }
+  
+  // Send selected co-occurrence frames to Replay Rapide
+  const handleSendToReplayRapide = () => {
+    if (!coOccurrenceResult || selectedCoOccurrenceIds.size === 0) return
+    
+    const framesToSend = coOccurrenceResult.relatedFrames
+      .filter(f => selectedCoOccurrenceIds.has(f.canId))
+      .map(f => ({
+        canId: f.canId,
+        data: f.sampleData[0] || "00",
+        timestamp: "0",
+        source: `co-occurrence-${originLogId}`,
+      }))
+    
+    addFrames(framesToSend)
+    closeCoOccurrenceDialog()
+    navRouter.push("/replay-rapide")
+  }
+  
+  // Toggle selection of a co-occurrence frame
+  const toggleCoOccurrenceSelection = (canId: string) => {
+    setSelectedCoOccurrenceIds(prev => {
+      const next = new Set(prev)
+      if (next.has(canId)) {
+        next.delete(canId)
+      } else {
+        next.add(canId)
+      }
+      return next
+    })
+  }
+  
+  // Select/deselect all co-occurrence frames
+  const toggleAllCoOccurrenceSelection = () => {
+    if (!coOccurrenceResult) return
+    if (selectedCoOccurrenceIds.size === coOccurrenceResult.relatedFrames.length) {
+      setSelectedCoOccurrenceIds(new Set())
+    } else {
+      setSelectedCoOccurrenceIds(new Set(coOccurrenceResult.relatedFrames.map(f => f.canId)))
+    }
   }
   
   const [isSplitting, setIsSplitting] = useState<string | null>(null)
@@ -911,6 +978,23 @@ export default function Isolation() {
                                   <span className="hidden sm:inline">Importer</span>
                                 </Button>
                               )}
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-8 px-2 text-destructive hover:text-destructive"
+                                title="Supprimer"
+                                onClick={async () => {
+                                  if (!confirm(`Supprimer ${originLog.filename} et ses divisions ?`)) return
+                                  try {
+                                    await deleteLog(importMissionId, originLog.id)
+                                    // Refresh the logs list
+                                    const updatedLogs = await listMissionLogs(importMissionId)
+                                    setMissionLogs(updatedLogs)
+                                  } catch {}
+                                }}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
                             </div>
                           </div>
                           
@@ -964,6 +1048,22 @@ export default function Isolation() {
                                           <Import className="h-3 w-3" />
                                         </Button>
                                       )}
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        className="h-6 w-6 p-0 text-destructive hover:text-destructive"
+                                        title="Supprimer"
+                                        onClick={async () => {
+                                          if (!confirm(`Supprimer ${child.filename} ?`)) return
+                                          try {
+                                            await deleteLog(importMissionId, child.id)
+                                            const updatedLogs = await listMissionLogs(importMissionId)
+                                            setMissionLogs(updatedLogs)
+                                          } catch {}
+                                        }}
+                                      >
+                                        <Trash2 className="h-3 w-3" />
+                                      </Button>
                                     </div>
                                   </div>
                                 )
@@ -1065,13 +1165,16 @@ export default function Isolation() {
               <div className="flex items-center gap-2">
                 <Label className="text-sm whitespace-nowrap">Analyser sur:</Label>
                 <Select value={originLogId || ""} onValueChange={(v) => setOriginLogId(v)}>
-                  <SelectTrigger className="w-48 h-8 font-mono text-xs">
+                  <SelectTrigger className="w-56 h-8 font-mono text-xs">
                     <SelectValue placeholder="Choisir un log" />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="max-h-60">
                     {availableLogsForAnalysis.map((log) => (
                       <SelectItem key={log.id} value={log.id} className="font-mono text-xs">
-                        {log.name}
+                        <span style={{ paddingLeft: `${(log.depth || 0) * 12}px` }} className="flex items-center gap-1">
+                          {(log.depth || 0) > 0 && <ChevronRight className="h-3 w-3 text-muted-foreground" />}
+                          {log.name}
+                        </span>
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -1137,7 +1240,7 @@ export default function Isolation() {
 
       {/* Co-occurrence Analysis Dialog */}
       <Dialog open={analyzingLog !== null} onOpenChange={(open) => !open && closeCoOccurrenceDialog()}>
-        <DialogContent className="max-w-[95vw] sm:max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
+        <DialogContent className="w-[95vw] max-w-4xl h-[85vh] max-h-[700px] overflow-hidden flex flex-col p-4 sm:p-6">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Network className="h-5 w-5" />
@@ -1197,75 +1300,111 @@ export default function Isolation() {
                 )}
                 
                 {/* Related Frames Table */}
-                <ScrollArea className="flex-1 border rounded-lg" orientation="both">
-                  <div className="min-w-[600px]">
+                <ScrollArea className="flex-1 min-h-0 border rounded-lg">
+                  <div className="min-w-[700px]">
                     <table className="w-full text-xs">
-                      <thead className="sticky top-0 bg-secondary">
+                      <thead className="sticky top-0 bg-secondary z-10">
                         <tr className="text-left text-muted-foreground">
+                          <th className="p-2 w-8">
+                            <input 
+                              type="checkbox" 
+                              checked={selectedCoOccurrenceIds.size === coOccurrenceResult.relatedFrames.length && coOccurrenceResult.relatedFrames.length > 0}
+                              onChange={toggleAllCoOccurrenceSelection}
+                              className="rounded"
+                            />
+                          </th>
                           <th className="p-2 w-20">CAN ID</th>
                           <th className="p-2 w-16">Score</th>
-                          <th className="p-2 w-20">Type</th>
-                          <th className="p-2 w-16">Count</th>
-                          <th className="p-2 w-20">Avant</th>
-                          <th className="p-2 w-20">Apres</th>
-                          <th className="p-2 w-24">Delai moy.</th>
-                          <th className="p-2">Exemples de data</th>
+                          <th className="p-2 w-16">Type</th>
+                          <th className="p-2 w-12">Nb</th>
+                          <th className="p-2 w-16">Avant</th>
+                          <th className="p-2 w-16">Apres</th>
+                          <th className="p-2 w-20">Delai</th>
+                          <th className="p-2">Data</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {coOccurrenceResult.relatedFrames.map((frame, idx) => (
-                          <tr key={idx} className="border-t border-border/50 hover:bg-secondary/50">
-                            <td className="p-2 font-mono font-semibold text-primary">{frame.canId}</td>
-                            <td className="p-2">
-                              <div className="flex items-center gap-1">
-                                <div 
-                                  className="h-2 rounded-full bg-primary" 
-                                  style={{ width: `${frame.score * 40}px` }}
+                        {coOccurrenceResult.relatedFrames.map((frame, idx) => {
+                          const isSelected = selectedCoOccurrenceIds.has(frame.canId)
+                          return (
+                            <tr 
+                              key={idx} 
+                              className={`border-t border-border/50 cursor-pointer transition-colors ${isSelected ? "bg-primary/10" : "hover:bg-secondary/50"}`}
+                              onClick={() => toggleCoOccurrenceSelection(frame.canId)}
+                            >
+                              <td className="p-2">
+                                <input 
+                                  type="checkbox" 
+                                  checked={isSelected}
+                                  onChange={() => toggleCoOccurrenceSelection(frame.canId)}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="rounded"
                                 />
-                                <span className="text-muted-foreground">{(frame.score * 100).toFixed(0)}%</span>
-                              </div>
-                            </td>
-                            <td className="p-2">
-                              <Badge 
-                                variant={frame.frameType === "ack" ? "default" : frame.frameType === "command" ? "secondary" : "outline"}
-                                className={frame.frameType === "ack" ? "bg-success text-success-foreground" : ""}
-                              >
-                                {frame.frameType}
-                              </Badge>
-                            </td>
-                            <td className="p-2 text-center">{frame.count}</td>
-                            <td className="p-2 text-center">{frame.countBefore}</td>
-                            <td className="p-2 text-center">{frame.countAfter}</td>
-                            <td className="p-2 text-center">{frame.avgDelayMs > 0 ? "+" : ""}{frame.avgDelayMs.toFixed(1)} ms</td>
-                            <td className="p-2 font-mono text-muted-foreground truncate max-w-[200px]">
-                              {frame.sampleData.slice(0, 2).join(", ")}
-                              {frame.dataVariations > 2 && ` (+${frame.dataVariations - 2})`}
-                            </td>
-                          </tr>
-                        ))}
+                              </td>
+                              <td className="p-2 font-mono font-semibold text-primary">{frame.canId}</td>
+                              <td className="p-2">
+                                <div className="flex items-center gap-1">
+                                  <div 
+                                    className="h-2 rounded-full bg-primary" 
+                                    style={{ width: `${frame.score * 30}px` }}
+                                  />
+                                  <span className="text-muted-foreground">{(frame.score * 100).toFixed(0)}%</span>
+                                </div>
+                              </td>
+                              <td className="p-2">
+                                <Badge 
+                                  variant={frame.frameType === "ack" ? "default" : frame.frameType === "command" ? "secondary" : "outline"}
+                                  className={`text-[10px] ${frame.frameType === "ack" ? "bg-success text-success-foreground" : ""}`}
+                                >
+                                  {frame.frameType}
+                                </Badge>
+                              </td>
+                              <td className="p-2 text-center">{frame.count}</td>
+                              <td className="p-2 text-center">{frame.countBefore}</td>
+                              <td className="p-2 text-center">{frame.countAfter}</td>
+                              <td className="p-2 text-center text-[10px]">{frame.avgDelayMs > 0 ? "+" : ""}{frame.avgDelayMs.toFixed(1)}ms</td>
+                              <td className="p-2 font-mono text-muted-foreground text-[10px] truncate max-w-[150px]">
+                                {frame.sampleData[0] || "-"}
+                              </td>
+                            </tr>
+                          )
+                        })}
                       </tbody>
                     </table>
                   </div>
                 </ScrollArea>
                 
                 {/* Actions */}
-                <div className="flex items-center gap-2 pt-2 border-t border-border">
-                  <Button variant="outline" size="sm" onClick={() => {
-                    // Export ECU family IDs to filter
-                    if (coOccurrenceResult.ecuFamilies.length > 0) {
-                      const allIds = coOccurrenceResult.ecuFamilies.flatMap(f => f.frameIds)
-                      navigator.clipboard.writeText(allIds.join(","))
-                    }
-                  }}>
-                    Copier IDs ECU
+                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-border">
+                  <span className="text-xs text-muted-foreground">
+                    {selectedCoOccurrenceIds.size} selectionnee(s)
+                  </span>
+                  <Button 
+                    size="sm" 
+                    onClick={handleSendToReplayRapide}
+                    disabled={selectedCoOccurrenceIds.size === 0}
+                    className="gap-1"
+                  >
+                    <Send className="h-3 w-3" />
+                    Replay Rapide
                   </Button>
-                  <Button variant="outline" size="sm" onClick={() => {
-                    // Export all related frame IDs
-                    const ids = coOccurrenceResult.relatedFrames.map(f => f.canId)
+                  <Button variant="outline" size="sm" className="bg-transparent" onClick={() => {
+                    // Export selected IDs or all if none selected
+                    const ids = selectedCoOccurrenceIds.size > 0 
+                      ? Array.from(selectedCoOccurrenceIds)
+                      : coOccurrenceResult.relatedFrames.map(f => f.canId)
                     navigator.clipboard.writeText(ids.join(","))
                   }}>
-                    Copier tous les IDs
+                    Copier IDs
                   </Button>
+                  {coOccurrenceResult.ecuFamilies.length > 0 && (
+                    <Button variant="outline" size="sm" className="bg-transparent" onClick={() => {
+                      const allIds = coOccurrenceResult.ecuFamilies.flatMap(f => f.frameIds)
+                      navigator.clipboard.writeText(allIds.join(","))
+                    }}>
+                      Copier IDs ECU
+                    </Button>
+                  )}
                 </div>
               </div>
             ) : (

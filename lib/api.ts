@@ -695,6 +695,8 @@ export interface BackupInfo {
 export interface UpdateOutput {
   running: boolean
   lines: string[]
+  success?: boolean
+  error?: string
 }
 
 export async function getVersionInfo(): Promise<VersionInfo> {
