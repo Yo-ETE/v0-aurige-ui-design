@@ -24,6 +24,11 @@ AURIGE_DIR="/opt/aurige"
 REPO_URL="${AURIGE_REPO_URL:-https://github.com/YOUR_REPO/aurige.git}"
 BRANCH="${AURIGE_BRANCH:-main}"
 
+# IMPORTANT: Calculate source directory ONCE at the start, before any cd/rm operations
+# This avoids issues when running from a directory that gets deleted
+SCRIPT_SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INSTALL_SOURCE_DIR="$(dirname "$SCRIPT_SOURCE_DIR")"
+
 # Helper functions
 log_info() {
     echo -e "${BLUE}[INFO]${NC} $1"
@@ -312,27 +317,36 @@ setup_directories() {
 setup_git_repo() {
     log_info "Setting up git repository for version tracking..."
     
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+    # Use the globally calculated source directory (calculated at script start)
+    PROJECT_ROOT="$INSTALL_SOURCE_DIR"
     
     # If running from a git repo, copy the entire repo
     if [ -d "$PROJECT_ROOT/.git" ]; then
         log_info "Copying git repository from $PROJECT_ROOT..."
         
-        # IMPORTANT: Change to a safe directory before removing repo
-        # This avoids "getcwd(): No such file or directory" error
-        cd /tmp
+        # Check if we're running from the target directory itself
+        REAL_PROJECT=$(realpath "$PROJECT_ROOT")
+        REAL_TARGET=$(realpath "$AURIGE_DIR/repo" 2>/dev/null || echo "$AURIGE_DIR/repo")
         
-        # Remove old repo and create fresh one
-        rm -rf "$AURIGE_DIR/repo"
-        mkdir -p "$AURIGE_DIR/repo"
-        
-        # Copy entire directory including .git from source
-        rsync -a --exclude='node_modules' --exclude='venv' --exclude='.next' \
-            "$PROJECT_ROOT/" "$AURIGE_DIR/repo/"
-        
-        cd "$AURIGE_DIR/repo"
-        git config --global --add safe.directory "$AURIGE_DIR/repo"
+        if [ "$REAL_PROJECT" = "$REAL_TARGET" ]; then
+            log_info "Running from target directory, updating .git in place..."
+            cd "$AURIGE_DIR/repo"
+            git config --global --add safe.directory "$AURIGE_DIR/repo"
+            git fetch origin 2>/dev/null || true
+        else
+            # Running from a different location (e.g., /tmp/aurige)
+            # Safe to delete and recreate target
+            cd /tmp
+            rm -rf "$AURIGE_DIR/repo"
+            mkdir -p "$AURIGE_DIR/repo"
+            
+            # Copy entire directory including .git from source
+            rsync -a --exclude='node_modules' --exclude='venv' --exclude='.next' \
+                "$PROJECT_ROOT/" "$AURIGE_DIR/repo/"
+            
+            cd "$AURIGE_DIR/repo"
+            git config --global --add safe.directory "$AURIGE_DIR/repo"
+        fi
         
         # Get current commit info
         CURRENT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
@@ -351,9 +365,8 @@ setup_git_repo() {
 copy_project_files() {
     log_info "Copying project files..."
     
-    # Determine source directory
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+    # Use the globally calculated source directory (calculated at script start)
+    PROJECT_ROOT="$INSTALL_SOURCE_DIR"
     
     # Check if we're running from a cloned repo
     if [ -d "$PROJECT_ROOT/app" ] && [ -d "$PROJECT_ROOT/backend" ]; then
