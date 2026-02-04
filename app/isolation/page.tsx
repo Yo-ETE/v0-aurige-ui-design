@@ -474,38 +474,46 @@ export default function Isolation() {
   // Co-occurrence analysis handlers
   // Step 1: Open the log viewer to select a frame
   const handleAnalyzeCoOccurrence = async (log: IsolationLog) => {
-    // Collect all logs in the family tree (for selection)
-    const collectAllLogs = (logs: IsolationLog[]): Array<{id: string, name: string}> => {
-      const result: Array<{id: string, name: string}> = []
-      const traverse = (items: IsolationLog[]) => {
-        for (const item of items) {
-          result.push({ id: item.id, name: item.name })
-          if (item.children && item.children.length > 0) {
-            traverse(item.children)
-          }
+    if (!missionId) return
+    
+    // Load ALL logs from the mission (not just the isolation tree)
+    try {
+      const allMissionLogs = await listMissionLogs(missionId)
+      const logsForSelection = allMissionLogs.map(l => ({ id: l.id, name: l.filename }))
+      setAvailableLogsForAnalysis(logsForSelection)
+      
+      // Find the root log in the isolation tree for default selection
+      let rootLogId = log.id
+      let currentLog: IsolationLog | undefined = log
+      while (currentLog?.parentId) {
+        const parent = findLog(currentLog.parentId)
+        if (parent) {
+          rootLogId = parent.id
+          currentLog = parent
+        } else {
+          break
         }
       }
-      traverse(logs)
-      return result
-    }
-    
-    // Find the origin log (root parent) and collect all family logs
-    let rootLog: IsolationLog = log
-    let currentLog: IsolationLog | undefined = log
-    while (currentLog?.parentId) {
-      const parent = findLog(currentLog.parentId)
-      if (parent) {
-        rootLog = parent
-        currentLog = parent
-      } else {
-        break
+      
+      // Default to root log, user can change to any mission log
+      setOriginLogId(rootLogId)
+    } catch (error) {
+      // Fallback: use isolation tree only
+      const collectAllLogs = (items: IsolationLog[]): Array<{id: string, name: string}> => {
+        const result: Array<{id: string, name: string}> = []
+        const traverse = (list: IsolationLog[]) => {
+          for (const item of list) {
+            result.push({ id: item.id, name: item.name })
+            if (item.children?.length) traverse(item.children)
+          }
+        }
+        traverse(items)
+        return result
       }
+      setAvailableLogsForAnalysis(collectAllLogs(logs))
+      setOriginLogId(log.id)
     }
     
-    // Collect all logs from root
-    const allLogs = collectAllLogs([rootLog])
-    setAvailableLogsForAnalysis(allLogs)
-    setOriginLogId(rootLog.id) // Default to root, user can change
     setSelectedFrame(null)
     setCoOccurrenceResult(null)
     
@@ -591,21 +599,13 @@ export default function Isolation() {
   }
 
   const handleDeleteLog = async (logId: string) => {
-    // Find the log recursively to get its mission ID
-    const foundLog = findLog(logId)
-    const log = foundLog || logs.find(l => l.id === logId)
+    if (!missionId) return
     
-    if (log) {
-      try {
-        // Delete from server first
-        await deleteLog(log.missionId, logId)
-        console.log("[v0] Deleted log from server:", logId)
-      } catch (error) {
-        // If server delete fails (file may not exist), continue with store removal
-        console.log("[v0] Server delete failed (may not exist):", logId, error)
-      }
-    } else {
-      console.log("[v0] Log not found for deletion:", logId)
+    try {
+      // Delete from server first using the current mission ID
+      await deleteLog(missionId, logId)
+    } catch {
+      // If server delete fails (file may not exist), continue with store removal
     }
     
     // Remove from local store
