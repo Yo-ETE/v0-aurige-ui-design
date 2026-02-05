@@ -62,6 +62,7 @@ import {
   AlertCircle,
   Search,
   FileText,
+  Copy,
 } from "lucide-react"
 
 export default function DBCPage() {

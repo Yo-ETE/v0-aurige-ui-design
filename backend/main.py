@@ -3672,45 +3672,50 @@ async def export_mission(mission_id: str):
     """Export all mission data as a ZIP archive"""
     import zipfile
     import io
+    import re
     from datetime import datetime
     
-    mission_dir = MISSIONS_DIR / mission_id
-    if not mission_dir.exists():
-        raise HTTPException(status_code=404, detail="Mission not found")
-    
-    # Load mission metadata
-    metadata_file = mission_dir / "mission.json"
-    mission_name = mission_id
-    if metadata_file.exists():
-        with open(metadata_file, "r") as f:
-            meta = json.load(f)
-            mission_name = meta.get("name", mission_id)
+    try:
+        mission_dir = MISSIONS_DIR / mission_id
+        if not mission_dir.exists():
+            raise HTTPException(status_code=404, detail="Mission not found")
+        
+        # Load mission metadata
+        metadata_file = mission_dir / "mission.json"
+        mission_name = mission_id
+        if metadata_file.exists():
+            with open(metadata_file, "r") as f:
+                meta = json.load(f)
+                mission_name = meta.get("name", mission_id)
+        
+        # Sanitize mission name for filesystem
+        safe_name = re.sub(r'[^\w\-_]', '_', mission_name)
     
     # Create ZIP in memory
     buffer = io.BytesIO()
     
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-        # Add mission metadata
-        if metadata_file.exists():
-            zf.write(metadata_file, f"{mission_name}/mission.json")
-        
-        # Add all .log files (CAN captures)
-        logs_dir = mission_dir / "logs"
-        if logs_dir.exists():
-            for log_file in logs_dir.glob("*.log"):
-                zf.write(log_file, f"{mission_name}/logs/{log_file.name}")
-        
-        # Add isolation logs
-        isolation_dir = mission_dir / "isolation"
-        if isolation_dir.exists():
-            for log_file in isolation_dir.rglob("*.log"):
-                rel_path = log_file.relative_to(isolation_dir)
-                zf.write(log_file, f"{mission_name}/isolation/{rel_path}")
-        
-        # Add DBC file if exists
-        dbc_file = mission_dir / "signals.json"
-        if dbc_file.exists():
-            zf.write(dbc_file, f"{mission_name}/signals.json")
+            # Add mission metadata
+            if metadata_file.exists():
+                zf.write(metadata_file, f"{safe_name}/mission.json")
+            
+            # Add all .log files (CAN captures)
+            logs_dir = mission_dir / "logs"
+            if logs_dir.exists():
+                for log_file in logs_dir.glob("*.log"):
+                    zf.write(log_file, f"{safe_name}/logs/{log_file.name}")
+            
+            # Add isolation logs
+            isolation_dir = mission_dir / "isolation"
+            if isolation_dir.exists():
+                for log_file in isolation_dir.rglob("*.log"):
+                    rel_path = log_file.relative_to(isolation_dir)
+                    zf.write(log_file, f"{safe_name}/isolation/{rel_path}")
+            
+            # Add DBC file if exists
+            dbc_file = mission_dir / "signals.json"
+            if dbc_file.exists():
+                zf.write(dbc_file, f"{safe_name}/signals.json")
             
             # Also generate and include the actual DBC file
             try:
@@ -3770,12 +3775,12 @@ async def export_mission(mission_id: str):
                             dbc_lines.append(f'CM_ SG_ {can_id_int} {name} "{comment}";')
                 
                 dbc_content = "\n".join(dbc_lines)
-                zf.writestr(f"{mission_name}/{mission_name}.dbc", dbc_content)
-            except Exception as e:
-                print(f"[WARNING] Could not generate DBC: {e}")
-        
-        # Add a README
-        readme = f"""# Mission Export: {mission_name}
+                    zf.writestr(f"{safe_name}/{safe_name}.dbc", dbc_content)
+                except Exception as e:
+                    print(f"[WARNING] Could not generate DBC: {e}")
+            
+            # Add a README
+            readme = f"""# Mission Export: {mission_name}
 Exported: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 
 ## Contents:
@@ -3783,27 +3788,34 @@ Exported: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 - logs/: CAN bus capture files (.log)
 - isolation/: Isolated log files from analysis
 - signals.json: DBC signals data
-- {mission_name}.dbc: Generated DBC file
+- {safe_name}.dbc: Generated DBC file
 
 ## Usage:
 - Import .log files into any CAN analysis tool
 - Use the .dbc file with CANalyzer, SavvyCAN, or similar tools
 """
-        zf.writestr(f"{mission_name}/README.txt", readme)
-    
-    buffer.seek(0)
-    
-    # Generate filename
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"{mission_name}_{timestamp}.zip"
-    
-    return Response(
-        content=buffer.getvalue(),
-        media_type="application/zip",
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"'
-        }
-    )
+            zf.writestr(f"{safe_name}/README.txt", readme)
+        
+        buffer.seek(0)
+        
+        # Generate filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{safe_name}_{timestamp}.zip"
+        
+        return Response(
+            content=buffer.getvalue(),
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"'
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] Export mission failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
 
 
 if __name__ == "__main__":
