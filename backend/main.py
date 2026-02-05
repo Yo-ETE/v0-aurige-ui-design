@@ -3428,6 +3428,10 @@ class DBCSignal(BaseModel):
     max_val: float = 0.0
     unit: str = ""
     comment: str = ""
+    # Sample payload data for replay
+    sample_before: str = ""   # Full payload AVANT t0
+    sample_ack: str = ""      # Full payload ACK
+    sample_status: str = ""   # Full payload STATUS
 
 class DBCMessage(BaseModel):
     can_id: str
@@ -3713,14 +3717,14 @@ async def export_mission(mission_id: str):
                     zf.write(log_file, f"{safe_name}/isolation/{rel_path}")
             
             # Add DBC file if exists
-            dbc_file = mission_dir / "signals.json"
+            dbc_file = mission_dir / "dbc.json"
             if dbc_file.exists():
-                zf.write(dbc_file, f"{safe_name}/signals.json")
+                zf.write(dbc_file, f"{safe_name}/dbc.json")
                 
                 # Also generate and include the actual DBC file
                 try:
                     with open(dbc_file, "r") as f:
-                        signals_data = json.load(f)
+                        dbc_data = json.load(f)
                     
                     # Generate DBC content
                     dbc_lines = [
@@ -3734,13 +3738,14 @@ async def export_mission(mission_id: str):
                         '',
                     ]
                     
-                    # Group signals by CAN ID
+                    # Get messages with signals from the dbc.json structure
+                    messages = dbc_data.get("messages", [])
                     signals_by_id = {}
-                    for sig in signals_data.get("signals", []):
-                        can_id = sig.get("can_id", "000")
+                    for msg in messages:
+                        can_id = msg.get("can_id", "000")
                         if can_id not in signals_by_id:
                             signals_by_id[can_id] = []
-                        signals_by_id[can_id].append(sig)
+                        signals_by_id[can_id].extend(msg.get("signals", []))
                     
                     # Generate BO_ (message) and SG_ (signal) entries
                     for can_id, sigs in signals_by_id.items():
@@ -3787,8 +3792,8 @@ Exported: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 - mission.json: Mission metadata
 - logs/: CAN bus capture files (.log)
 - isolation/: Isolated log files from analysis
-- signals.json: DBC signals data
-- {safe_name}.dbc: Generated DBC file
+- dbc.json: DBC signals data (JSON format)
+- {safe_name}.dbc: Generated DBC file (standard format)
 
 ## Usage:
 - Import .log files into any CAN analysis tool
