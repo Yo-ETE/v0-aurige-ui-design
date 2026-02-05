@@ -273,6 +273,9 @@ export default function Isolation() {
   // Analyze param from Replay Rapide (frame to analyze with source context)
   const analyzeParam = searchParams.get("analyze")
   
+  // Pending frame to analyze after log import
+  const [pendingAnalyzeFrame, setPendingAnalyzeFrame] = useState<{canId: string, data: string, source: string} | null>(null)
+  
   // Mission context
   const currentMissionId = useMissionStore((state) => state.currentMissionId)
   const missions = useMissionStore((state) => state.missions)
@@ -342,16 +345,16 @@ export default function Isolation() {
   
   // Handle analyze param from Replay Rapide
   useEffect(() => {
-    if (analyzeParam && logs.length > 0) {
+    if (analyzeParam) {
       try {
         const params = new URLSearchParams(analyzeParam)
         const canId = params.get("canId")
         const data = params.get("data")
         const source = params.get("source")
         
-        if (canId && source) {
+        if (canId) {
           // Parse source to get log info (format: "log-name" or "qualified-logname" or "co-occurrence-logname")
-          const logName = source.replace("qualified-", "").replace("co-occurrence-", "").replace(".log", "")
+          const logName = source ? source.replace("qualified-", "").replace("co-occurrence-", "").replace(".log", "") : ""
           
           // Find the log in isolation store
           const foundLog = logs.find(l => 
@@ -361,7 +364,7 @@ export default function Isolation() {
           )
           
           if (foundLog) {
-            // Set the selected frame for analysis
+            // Log found - set selected frame and open co-occurrence dialog
             setSelectedFrame({
               timestamp: 0,
               canId,
@@ -370,22 +373,27 @@ export default function Isolation() {
               raw: data || "",
             } as LogFrame)
             
-            // Set origin log ID and open the dialog
             setOriginLogId(foundLog.id.replace(".log", ""))
             setAnalyzingLog(foundLog)
             setCoOccStep("select")
-            
-            // Clear the URL param
-            router.replace("/isolation", { scroll: false })
           } else {
-            console.log("[v0] Log not found for source:", logName, "Available logs:", logs.map(l => l.name))
+            // Log not found in Isolation - save pending frame and open import dialog
+            setPendingAnalyzeFrame({ canId, data: data || "", source: source || "" })
+            setShowImportDialog(true)
+            // Pre-load mission logs
+            if (missionId) {
+              loadMissionLogs(missionId)
+            }
           }
+          
+          // Clear the URL param
+          router.replace("/isolation", { scroll: false })
         }
       } catch (e) {
-        console.log("[v0] Error parsing analyze param:", e)
+        // Invalid param, ignore
       }
     }
-  }, [analyzeParam, router, logs])
+  }, [analyzeParam, router, logs, missionId])
   
   // Load mission logs when dialog opens
   const handleOpenImport = async () => {
@@ -439,6 +447,23 @@ export default function Isolation() {
     // Import as root log
     importLog(newLog)
     if (closeDialog) setShowImportDialog(false)
+    
+    // If there's a pending analyze frame, open co-occurrence dialog
+    if (pendingAnalyzeFrame && closeDialog) {
+      setTimeout(() => {
+        setSelectedFrame({
+          timestamp: 0,
+          canId: pendingAnalyzeFrame.canId,
+          data: pendingAnalyzeFrame.data,
+          interface: "can0",
+          raw: pendingAnalyzeFrame.data,
+        } as LogFrame)
+        setOriginLogId(newLog.id.replace(".log", ""))
+        setAnalyzingLog(newLog)
+        setCoOccStep("select")
+        setPendingAnalyzeFrame(null)
+      }, 100)
+    }
   }
   
   // Import a family of logs (parent + all children)
@@ -1013,13 +1038,26 @@ export default function Isolation() {
       {/* Import Dialog */}
       <Dialog open={showImportDialog} onOpenChange={setShowImportDialog}>
         <DialogContent className="max-w-[95vw] sm:max-w-lg overflow-hidden">
-          <DialogHeader>
-            <DialogTitle>Importer un log</DialogTitle>
-            <DialogDescription>
-              Selectionnez un log a importer pour l&apos;isolation
-            </DialogDescription>
-          </DialogHeader>
-          <div className="mt-4 space-y-4">
+<DialogHeader>
+  <DialogTitle>Importer un log</DialogTitle>
+  <DialogDescription>
+  {pendingAnalyzeFrame ? (
+    <>Importez le log contenant la trame <span className="font-mono text-primary">{pendingAnalyzeFrame.canId}</span> pour lancer l&apos;analyse co-occurrence</>
+  ) : (
+    <>Selectionnez un log a importer pour l&apos;isolation</>
+  )}
+  </DialogDescription>
+  </DialogHeader>
+  {pendingAnalyzeFrame && (
+    <div className="p-2 rounded bg-primary/10 border border-primary/30 text-xs">
+      <span className="text-muted-foreground">Trame a analyser:</span>{" "}
+      <span className="font-mono font-semibold">{pendingAnalyzeFrame.canId}#{pendingAnalyzeFrame.data}</span>
+      {pendingAnalyzeFrame.source && (
+        <span className="text-muted-foreground ml-2">depuis {pendingAnalyzeFrame.source}</span>
+      )}
+    </div>
+  )}
+  <div className="mt-4 space-y-4">
             {/* Mission Selector */}
             <div className="space-y-2">
               <Label htmlFor="import-mission">Mission source</Label>
