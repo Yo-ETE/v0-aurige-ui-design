@@ -555,6 +555,9 @@ export default function Isolation() {
   }
   
   // Handle analyze param from Replay Rapide
+  // Store pending canId to find in selected log
+  const [pendingCanIdToFind, setPendingCanIdToFind] = useState<{canId: string, data: string} | null>(null)
+  
   useEffect(() => {
     if (analyzeParam && missionId) {
       const handleAnalyzeParam = async () => {
@@ -569,14 +572,8 @@ export default function Isolation() {
             const logsForSelection = await loadAvailableLogsForAnalysis()
             setAvailableLogsForAnalysis(logsForSelection)
             
-            // Set the frame to analyze
-            setSelectedFrame({
-              timestamp: 0,
-              canId,
-              data: data || "",
-              interface: "can0",
-              raw: data || "",
-            } as LogFrame)
+            // Store the canId to find when user selects a log
+            setPendingCanIdToFind({ canId, data: data || "" })
             
             // Try to find the source log in the list
             const logName = source ? source.replace("qualified-", "").replace("co-occurrence-", "").replace(".log", "") : ""
@@ -1716,11 +1713,28 @@ export default function Isolation() {
                       variant={originLogId === log.id ? "default" : "ghost"}
                       className={`justify-start gap-2 h-auto py-2 ${originLogId === log.id ? "" : "hover:bg-secondary"}`}
                       style={{ paddingLeft: `${(log.depth || 0) * 16 + 8}px` }}
-                      onClick={() => {
-                        setOriginLogId(log.id)
-                        const foundLog = findLog(log.id)
-                        if (foundLog) setAnalyzingLog(foundLog)
-                      }}
+onClick={async () => {
+                            setOriginLogId(log.id)
+                            const foundLog = findLog(log.id)
+                            if (foundLog) setAnalyzingLog(foundLog)
+                            
+                            // If we have a pending canId to find, search for it in the selected log
+                            if (pendingCanIdToFind && missionId) {
+                              try {
+                                const frames = await getLogFrames(missionId, log.id)
+                                const matchingFrame = frames.find(f => 
+                                  f.canId === pendingCanIdToFind.canId ||
+                                  f.canId?.toUpperCase() === pendingCanIdToFind.canId?.toUpperCase()
+                                )
+                                if (matchingFrame) {
+                                  setSelectedFrame(matchingFrame)
+                                  setPendingCanIdToFind(null)
+                                }
+                              } catch {
+                                // Ignore errors
+                              }
+                            }
+                          }}
                     >
                       {(log.depth || 0) > 0 && <ChevronRight className="h-3 w-3 text-muted-foreground" />}
                       <FileText className="h-4 w-4 shrink-0" />
@@ -1730,6 +1744,13 @@ export default function Isolation() {
                     <p className="text-sm text-muted-foreground p-4 text-center">Aucun log disponible. Importez d&apos;abord un log.</p>
                   )}
                 </div>
+                {pendingCanIdToFind && !selectedFrame && (
+                  <div className="p-2 rounded bg-amber-500/10 border border-amber-500/30 text-xs mb-2">
+                    <span className="text-amber-500">Recherche automatique de la trame </span>
+                    <span className="font-mono font-semibold text-amber-400">{pendingCanIdToFind.canId}</span>
+                    <span className="text-amber-500"> dans le log selectionne</span>
+                  </div>
+                )}
                 {originLogId && (
                   <div className="flex flex-col gap-3 pt-4 border-t">
                     <div className="flex items-center gap-4">
