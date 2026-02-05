@@ -38,9 +38,12 @@ import { useToast } from "@/hooks/use-toast"
 export default function ComparaisonPage() {
   const router = useRouter()
   const { toast } = useToast()
-  const currentMission = useMissionStore((state) => state.currentMission)
-  const missionId = currentMission?.id
+  const currentMissionId = useMissionStore((state) => state.currentMissionId)
+  const missions = useMissionStore((state) => state.missions)
   const { addFrames } = useExportStore()
+  
+  // Mission ID from store or localStorage
+  const [missionId, setMissionId] = useState<string>("")
 
   // Log selection
   const [missionLogs, setMissionLogs] = useState<LogEntry[]>([])
@@ -56,6 +59,15 @@ export default function ComparaisonPage() {
   // Actions
   const [sendingFrame, setSendingFrame] = useState<string | null>(null)
   const [canInterface, setCanInterface] = useState<CANInterface>("can0")
+  
+  // Get mission ID from store or localStorage
+  useEffect(() => {
+    const localId = localStorage.getItem("activeMissionId")
+    const effectiveMissionId = localId || currentMissionId
+    if (effectiveMissionId) {
+      setMissionId(effectiveMissionId)
+    }
+  }, [currentMissionId])
 
   // Load mission logs
   useEffect(() => {
@@ -230,10 +242,12 @@ export default function ComparaisonPage() {
     )
   }
 
+  const currentMission = missions.find((m) => m.id === missionId)
+  
   return (
     <AppShell
       title="Comparaison de Logs"
-      description="Comparez deux logs pour identifier les trames differentielles (ex: ouverture vs fermeture)"
+      description={currentMission ? `Mission: ${currentMission.name}` : "Comparez deux logs pour identifier les trames differentielles"}
     >
       <div className="space-y-6">
         {/* Log Selection */}
