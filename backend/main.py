@@ -3117,7 +3117,30 @@ async def start_update():
             if process.returncode != 0:
                 update_output_store["lines"].append(f"[ERROR] Erreur install_pi.sh (code: {process.returncode})")
             else:
-                update_output_store["lines"].append("[OK] Mise a jour terminee! Rechargez la page.")
+                update_output_store["lines"].append("[OK] Mise a jour terminee!")
+                update_output_store["lines"].append(">>> Redemarrage des services dans 3 secondes...")
+                
+                # Force restart services after successful update
+                restart_script = """#!/bin/bash
+sleep 3
+systemctl restart aurige-web.service
+sleep 1
+systemctl restart aurige-api.service
+"""
+                script_path = "/tmp/aurige_restart_after_update.sh"
+                with open(script_path, "w") as f:
+                    f.write(restart_script)
+                os.chmod(script_path, 0o755)
+                
+                # Run restart in background (detached)
+                import subprocess
+                subprocess.Popen(
+                    ["sudo", "bash", script_path],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True
+                )
+                update_output_store["lines"].append("[OK] Services vont redemarrer automatiquement. Rechargez la page dans quelques secondes.")
             
         except Exception as e:
             update_output_store["lines"].append(f"[ERROR] {str(e)}")

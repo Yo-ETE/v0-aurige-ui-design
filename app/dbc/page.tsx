@@ -183,18 +183,57 @@ export default function DBCPage() {
     }
   }
 
-  // Send signals to Replay Rapide
+  // Send signals to Replay Rapide - sends all 3 frame states (AVANT, ACK, STATUS)
   const handleSendToReplay = (signals: DBCSignal[]) => {
-    const frames = signals.map(s => {
-      // Use sample_status first (most likely the desired state), then sample_ack, then sample_before
-      const payload = s.sample_status || s.sample_ack || s.sample_before || "00".repeat(8)
-      return {
-        canId: s.can_id,
-        data: payload.replace(/\s/g, ""), // Remove any spaces
-        timestamp: "0",
-        source: `dbc-${s.name}`,
+    const frames: Array<{canId: string, data: string, timestamp: string, source: string}> = []
+    
+    signals.forEach(s => {
+      // Helper to clean payload (remove spaces, check for empty/undefined)
+      const cleanPayload = (p: string | undefined) => p && p.trim() ? p.replace(/\s/g, "") : null
+      
+      const avant = cleanPayload(s.sample_before)
+      const ack = cleanPayload(s.sample_ack)
+      const status = cleanPayload(s.sample_status)
+      
+      // Add AVANT frame
+      if (avant) {
+        frames.push({
+          canId: s.can_id,
+          data: avant,
+          timestamp: "0",
+          source: `${s.name}-AVANT`,
+        })
+      }
+      // Add ACK frame if different from AVANT
+      if (ack && ack !== avant) {
+        frames.push({
+          canId: s.can_id,
+          data: ack,
+          timestamp: "0",
+          source: `${s.name}-ACK`,
+        })
+      }
+      // Add STATUS frame if different from AVANT and ACK
+      if (status && status !== avant && status !== ack) {
+        frames.push({
+          canId: s.can_id,
+          data: status,
+          timestamp: "0",
+          source: `${s.name}-STATUS`,
+        })
+      }
+      
+      // If no samples, add a default frame
+      if (!avant && !ack && !status) {
+        frames.push({
+          canId: s.can_id,
+          data: "00".repeat(8),
+          timestamp: "0",
+          source: `${s.name}`,
+        })
       }
     })
+    
     addFrames(frames)
     router.push("/replay-rapide")
   }

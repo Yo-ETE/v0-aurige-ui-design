@@ -2048,19 +2048,52 @@ export default function Isolation() {
                   variant="default" 
                   className="gap-1"
                   onClick={() => {
-                    // Send qualified frames to Replay Rapide using addFrames like co-occurrence
+                    // Send all 3 frame states (AVANT, ACK, STATUS) to Replay Rapide
                     const qualifiedFrames = familyDiffResult.frames_analysis
                       .filter(f => f.classification === "status" || f.classification === "ack")
                     if (qualifiedFrames.length > 0) {
-                      const framesToSend = qualifiedFrames.map(f => ({
-                        canId: f.can_id,
-                        data: f.sample_status !== "N/A" ? f.sample_status : (f.sample_ack !== "N/A" ? f.sample_ack : f.sample_before),
-                        timestamp: "0",
-                        source: `qualified-${originLogId}`,
-                      }))
-                      addFrames(framesToSend)
-                      setShowFamilyDiff(false)
-                      navRouter.push("/replay-rapide")
+                      const framesToSend: Array<{canId: string, data: string, timestamp: string, source: string}> = []
+                      qualifiedFrames.forEach(f => {
+                        // Helper to clean payload (remove spaces, handle N/A)
+                        const cleanPayload = (p: string) => p && p !== "N/A" ? p.replace(/\s/g, "") : null
+                        
+                        const avant = cleanPayload(f.sample_before)
+                        const ack = cleanPayload(f.sample_ack)
+                        const status = cleanPayload(f.sample_status)
+                        
+                        // Add AVANT frame
+                        if (avant) {
+                          framesToSend.push({
+                            canId: f.can_id,
+                            data: avant,
+                            timestamp: "0",
+                            source: `${f.can_id}-AVANT`,
+                          })
+                        }
+                        // Add ACK frame if different from AVANT
+                        if (ack && ack !== avant) {
+                          framesToSend.push({
+                            canId: f.can_id,
+                            data: ack,
+                            timestamp: "0",
+                            source: `${f.can_id}-ACK`,
+                          })
+                        }
+                        // Add STATUS frame if different from AVANT and ACK
+                        if (status && status !== avant && status !== ack) {
+                          framesToSend.push({
+                            canId: f.can_id,
+                            data: status,
+                            timestamp: "0",
+                            source: `${f.can_id}-STATUS`,
+                          })
+                        }
+                      })
+                      if (framesToSend.length > 0) {
+                        addFrames(framesToSend)
+                        setShowFamilyDiff(false)
+                        navRouter.push("/replay-rapide")
+                      }
                     }
                   }}
                   disabled={!familyDiffResult.frames_analysis.some(f => f.classification === "status" || f.classification === "ack")}
