@@ -1718,33 +1718,29 @@ onClick={async () => {
                             const foundLog = findLog(log.id)
                             if (foundLog) setAnalyzingLog(foundLog)
                             
-                            // If we have a pending canId to find, search for it in the selected log
+// If we have a pending canId to find, search for it in the selected log
                             if (pendingCanIdToFind && missionId) {
                               try {
-                                const frames = await getLogFrames(missionId, log.id)
+                                const response = await getLogContent(missionId, log.id, 1000)
+                                const frames = response.frames
                                 // Normalize canId for comparison (remove 0x prefix, uppercase)
                                 const normalizeCanId = (id: string | undefined) => {
                                   if (!id) return ""
                                   return id.replace(/^0x/i, "").toUpperCase()
                                 }
                                 const targetCanId = normalizeCanId(pendingCanIdToFind.canId)
-                                console.log("[v0] Searching for canId:", targetCanId, "in", frames.length, "frames")
                                 
                                 const matchingFrame = frames.find(f => {
                                   const frameCanId = normalizeCanId(f.canId)
                                   return frameCanId === targetCanId
                                 })
                                 
-                                console.log("[v0] Matching frame found:", matchingFrame)
                                 if (matchingFrame) {
                                   setSelectedFrame(matchingFrame)
                                   setPendingCanIdToFind(null)
-                                } else {
-                                  // Show sample of canIds for debugging
-                                  console.log("[v0] Sample canIds in log:", frames.slice(0, 10).map(f => f.canId))
                                 }
-                              } catch (err) {
-                                console.log("[v0] Error searching frames:", err)
+                              } catch {
+                                // Ignore errors
                               }
                             }
                           }}
