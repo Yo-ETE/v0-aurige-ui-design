@@ -60,6 +60,11 @@ export default function CaptureReplay() {
   
   // Timer for capture duration display
   const [displayDuration, setDisplayDuration] = useState(0)
+  
+  // Countdown before capture
+  const [countdownSeconds, setCountdownSeconds] = useState(3) // Default 3 seconds
+  const [isCountingDown, setIsCountingDown] = useState(false)
+  const [currentCountdown, setCurrentCountdown] = useState(0)
 
   // Fetch statuses
   const fetchStatuses = useCallback(async () => {
@@ -114,18 +119,33 @@ export default function CaptureReplay() {
     return () => clearInterval(interval)
   }, [captureStatus.running])
 
-  const handleStartCapture = async () => {
+  const startCaptureWithCountdown = async () => {
     if (!missionId) {
-      setError("Aucune mission sélectionnée. Sélectionnez une mission depuis le tableau de bord.")
+      setError("Aucune mission selectionnee. Selectionnez une mission depuis le tableau de bord.")
       return
     }
     
     setError(null)
     setSuccess(null)
     
+    // Start countdown
+    if (countdownSeconds > 0) {
+      setIsCountingDown(true)
+      setCurrentCountdown(countdownSeconds)
+      
+      for (let i = countdownSeconds; i > 0; i--) {
+        setCurrentCountdown(i)
+        await new Promise(resolve => setTimeout(resolve, 1000))
+      }
+      
+      setIsCountingDown(false)
+      setCurrentCountdown(0)
+    }
+    
+    // Actually start capture
     try {
       const result = await startCapture(missionId, canInterface, undefined, captureDescription || undefined)
-      setSuccess(`Capture démarrée: ${result.filename}`)
+      setSuccess(`Capture demarree: ${result.filename}`)
       setDisplayDuration(0)
       setCaptureDescription("")
       await fetchStatuses()
@@ -336,26 +356,49 @@ const handleDeleteLog = async (logId: string) => {
                   {formatTime(displayDuration)}
                 </span>
               </div>
+            ) : isCountingDown ? (
+              <div className="flex flex-col items-center justify-center py-6">
+                <p className="text-sm text-muted-foreground mb-2">Demarrage dans...</p>
+                <span className="text-6xl font-mono font-bold text-primary animate-pulse">
+                  {currentCountdown}
+                </span>
+              </div>
             ) : (
-              <div className="space-y-2">
-                <Label htmlFor="description">Description (optionnel)</Label>
-                <Input
-                  id="description"
-                  placeholder="Ex: Ouverture porte conducteur"
-                  value={captureDescription}
-                  onChange={(e) => setCaptureDescription(e.target.value)}
-                />
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <Label htmlFor="description">Description (optionnel)</Label>
+                  <Input
+                    id="description"
+                    placeholder="Ex: Ouverture porte conducteur"
+                    value={captureDescription}
+                    onChange={(e) => setCaptureDescription(e.target.value)}
+                  />
+                </div>
+                <div className="flex items-center gap-3">
+                  <Label htmlFor="countdown" className="whitespace-nowrap text-sm">Decompte:</Label>
+                  <Select value={String(countdownSeconds)} onValueChange={(v) => setCountdownSeconds(Number(v))}>
+                    <SelectTrigger id="countdown" className="w-24">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="0">Aucun</SelectItem>
+                      <SelectItem value="3">3 sec</SelectItem>
+                      <SelectItem value="5">5 sec</SelectItem>
+                      <SelectItem value="10">10 sec</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             )}
 
             <div className="flex gap-3">
               <Button
-                onClick={handleStartCapture}
-                disabled={captureStatus.running || !missionId}
+                onClick={startCaptureWithCountdown}
+                disabled={captureStatus.running || !missionId || isCountingDown}
                 className="flex-1 gap-2"
               >
                 <Circle className="h-4 w-4" />
-                Démarrer capture
+                {isCountingDown ? "Preparation..." : "Demarrer capture"}
               </Button>
               <Button
                 variant="destructive"
@@ -364,7 +407,7 @@ const handleDeleteLog = async (logId: string) => {
                 className="flex-1 gap-2"
               >
                 <Square className="h-4 w-4" />
-                Arrêter
+                Arreter
               </Button>
             </div>
 

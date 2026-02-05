@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dialog"
 import {
   GitCompare,
-  ArrowRight,
+  ArrowLeftRight,
   Loader2,
   Play,
   Send,
@@ -27,6 +27,63 @@ import {
   PlusCircle,
 } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+
+// Tree node type for hierarchical logs
+interface LogTreeNode extends LogEntry {
+  children: LogTreeNode[]
+}
+
+// Build tree structure from flat log list
+function buildLogTree(logs: LogEntry[]): LogTreeNode[] {
+  const logMap = new Map<string, LogTreeNode>()
+  const roots: LogTreeNode[] = []
+  
+  // Create nodes
+  logs.forEach(log => {
+    logMap.set(log.id, { ...log, children: [] })
+  })
+  
+  // Build hierarchy
+  logs.forEach(log => {
+    const node = logMap.get(log.id)!
+    if (log.parentId && logMap.has(log.parentId)) {
+      logMap.get(log.parentId)!.children.push(node)
+    } else {
+      roots.push(node)
+    }
+  })
+  
+  // Sort by filename
+  const sortNodes = (nodes: LogTreeNode[]) => {
+    nodes.sort((a, b) => a.filename.localeCompare(b.filename))
+    nodes.forEach(n => sortNodes(n.children))
+  }
+  sortNodes(roots)
+  
+  return roots
+}
+
+// Recursive component for select items with indentation
+function LogSelectItem({ log, depth, disabledId }: { log: LogTreeNode, depth: number, disabledId: string }) {
+  return (
+    <>
+      <SelectItem 
+        key={log.id} 
+        value={log.id} 
+        disabled={log.id === disabledId}
+        className="pl-2"
+      >
+        <span style={{ paddingLeft: `${depth * 16}px` }} className="flex items-center gap-1">
+          {depth > 0 && <span className="text-muted-foreground">└</span>}
+          {log.filename}
+        </span>
+      </SelectItem>
+      {log.children.map(child => (
+        <LogSelectItem key={child.id} log={child} depth={depth + 1} disabledId={disabledId} />
+      ))}
+    </>
+  )
+}
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Label } from "@/components/ui/label"
 import { compareLogs, listMissionLogs, sendCANFrame, addDBCSignal, type CompareLogsResponse, type CompareFrameDiff, type LogEntry, type CANInterface } from "@/lib/api"
@@ -60,6 +117,9 @@ export default function ComparaisonPage() {
   // Actions
   const [sendingFrame, setSendingFrame] = useState<string | null>(null)
   const [canInterface, setCanInterface] = useState<CANInterface>("can0")
+  
+  // Build log tree for hierarchical display
+  const logTree = buildLogTree(missionLogs)
   
   // Get mission ID from store or localStorage
   useEffect(() => {
@@ -270,38 +330,34 @@ export default function ComparaisonPage() {
   </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5 items-end">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5 items-start">
               <div className="space-y-2 lg:col-span-2">
-                <Label htmlFor="log-a">Log A (etat initial)</Label>
+                <Label htmlFor="log-a">Log A (ex: ouverture)</Label>
                 <Select value={logAId} onValueChange={setLogAId} disabled={isLoadingLogs}>
                   <SelectTrigger id="log-a">
                     <SelectValue placeholder="Selectionner log A..." />
                   </SelectTrigger>
                   <SelectContent>
-                    {missionLogs.map((log) => (
-                      <SelectItem key={log.id} value={log.id} disabled={log.id === logBId}>
-                        {log.filename}
-                      </SelectItem>
+                    {logTree.map((log) => (
+                      <LogSelectItem key={log.id} log={log} depth={0} disabledId={logBId} />
                     ))}
                   </SelectContent>
                 </Select>
               </div>
 
-              <div className="hidden lg:flex items-center justify-center">
-                <ArrowRight className="h-6 w-6 text-muted-foreground" />
+              <div className="hidden lg:flex items-center justify-center pt-8">
+                <ArrowLeftRight className="h-6 w-6 text-muted-foreground" />
               </div>
 
               <div className="space-y-2 lg:col-span-2">
-                <Label htmlFor="log-b">Log B (etat cible)</Label>
+                <Label htmlFor="log-b">Log B (ex: fermeture)</Label>
                 <Select value={logBId} onValueChange={setLogBId} disabled={isLoadingLogs}>
                   <SelectTrigger id="log-b">
                     <SelectValue placeholder="Selectionner log B..." />
                   </SelectTrigger>
                   <SelectContent>
-                    {missionLogs.map((log) => (
-                      <SelectItem key={log.id} value={log.id} disabled={log.id === logAId}>
-                        {log.filename}
-                      </SelectItem>
+                    {logTree.map((log) => (
+                      <LogSelectItem key={log.id} log={log} depth={0} disabledId={logAId} />
                     ))}
                   </SelectContent>
                 </Select>
