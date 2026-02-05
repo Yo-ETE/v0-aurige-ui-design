@@ -86,7 +86,7 @@ function LogSelectItem({ log, depth, disabledId }: { log: LogTreeNode, depth: nu
 }
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Label } from "@/components/ui/label"
-import { compareLogs, listMissionLogs, sendCANFrame, addDBCSignal, type CompareLogsResponse, type CompareFrameDiff, type LogEntry, type CANInterface } from "@/lib/api"
+import { compareLogs, listMissionLogs, sendCANFrame, addDBCSignal, type CompareLogsResponse, type CompareFrameDiff, type LogEntry } from "@/lib/api"
 import { useMissionStore } from "@/lib/mission-store"
 import { useExportStore } from "@/lib/export-store"
 import { useRouter } from "next/navigation"
@@ -116,7 +116,6 @@ export default function ComparaisonPage() {
 
   // Actions
   const [sendingFrame, setSendingFrame] = useState<string | null>(null)
-  const [canInterface, setCanInterface] = useState<CANInterface>("can0")
   
   // Build log tree for hierarchical display
   const logTree = buildLogTree(missionLogs)
@@ -168,7 +167,7 @@ export default function ComparaisonPage() {
     setSendingFrame(frame.can_id)
     try {
       const payload = usePayloadA ? frame.payload_a : frame.payload_b
-      await sendCANFrame(canInterface, frame.can_id, payload)
+      await sendCANFrame("can0", frame.can_id, payload)
       toast({ title: "Envoyee", description: `Trame ${frame.can_id} envoyee` })
     } catch {
       toast({ title: "Erreur", description: "Echec de l'envoi", variant: "destructive" })
@@ -364,7 +363,7 @@ export default function ComparaisonPage() {
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-4 pt-2">
+            <div className="pt-2">
               <Button
                 onClick={handleCompare}
                 disabled={!logAId || !logBId || isComparing}
@@ -377,20 +376,6 @@ export default function ComparaisonPage() {
                 )}
                 {isComparing ? "Analyse en cours..." : "Comparer les logs"}
               </Button>
-
-              <div className="flex items-center gap-2">
-                <Label htmlFor="can-interface" className="text-sm whitespace-nowrap">Interface:</Label>
-                <Select value={canInterface} onValueChange={(v) => setCanInterface(v as CANInterface)}>
-                  <SelectTrigger id="can-interface" className="w-28">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="can0">can0</SelectItem>
-                    <SelectItem value="can1">can1</SelectItem>
-                    <SelectItem value="vcan0">vcan0</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
             </div>
           </CardContent>
         </Card>

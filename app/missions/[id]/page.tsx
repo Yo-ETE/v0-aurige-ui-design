@@ -40,12 +40,14 @@ import {
   Video,
   Zap,
   GitBranch,
+  GitCompare,
   Activity,
   Flame,
   Cpu,
   Settings,
   ArrowRight,
   Info,
+  FileCode,
 } from "lucide-react"
 import Link from "next/link"
 
@@ -80,6 +82,18 @@ const moduleLinks: ModuleLink[] = [
     href: "/isolation",
     icon: GitBranch,
     description: "Isoler les trames par fonction",
+  },
+  {
+    name: "Comparaison",
+    href: "/comparaison",
+    icon: GitCompare,
+    description: "Comparer deux logs",
+  },
+  {
+    name: "DBC",
+    href: "/dbc",
+    icon: FileCode,
+    description: "Gestion des signaux DBC",
   },
   {
     name: "OBD-II",
