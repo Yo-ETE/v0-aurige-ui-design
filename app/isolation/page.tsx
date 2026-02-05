@@ -1328,9 +1328,9 @@ export default function Isolation() {
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
               </div>
             ) : (
-              <ScrollArea className="h-[350px] rounded-md border border-border">
-                <div className="p-2">
-                  <table className="w-full text-xs font-mono">
+<ScrollArea className="h-[350px] rounded-md border border-border">
+                  <div className="p-2 overflow-x-auto">
+                    <table className="w-full text-xs font-mono min-w-[700px]">
                     <thead className="sticky top-0 bg-secondary">
                       <tr className="text-left text-muted-foreground">
                         <th className="p-2 w-32">Timestamp</th>
@@ -2108,7 +2108,7 @@ export default function Isolation() {
                 </div>
               )}
               
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>CAN ID</Label>
                   <Input value={editingSignal.can_id} disabled className="font-mono" />
@@ -2123,7 +2123,7 @@ export default function Isolation() {
                 </div>
               </div>
               
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="space-y-2">
                   <Label>Start bit</Label>
                   <Input 
@@ -2157,7 +2157,7 @@ export default function Isolation() {
                 </div>
               </div>
               
-              <div className="grid grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 <div className="space-y-2">
                   <Label>Scale</Label>
                   <Input 
@@ -2193,7 +2193,7 @@ export default function Isolation() {
                 </div>
               </div>
               
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Unite</Label>
                   <Input 

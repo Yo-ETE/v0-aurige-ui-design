@@ -8,12 +8,14 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Zap, Keyboard, Send, AlertTriangle, Loader2, Import, Trash2, Play } from "lucide-react"
+import { Zap, Keyboard, Send, AlertTriangle, Loader2, Import, Trash2, Play, FileCode } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { sendCANFrame, type CANInterface } from "@/lib/api"
+import { sendCANFrame, addDBCSignal, type CANInterface } from "@/lib/api"
 import { SentFramesHistory, useSentFramesHistory } from "@/components/sent-frames-history"
 import { useExportStore } from "@/lib/export-store"
+import { useMissionStore } from "@/lib/mission-store"
+import { useToast } from "@/hooks/use-toast"
 
 interface QuickSlot {
   key: string
@@ -46,6 +48,40 @@ export default function ReplayRapide() {
   // Exported frames from isolation
   const { frames: exportedFrames, clearFrames: clearExported, removeFrame: removeExportedFrame } = useExportStore()
   const [isReplayingExported, setIsReplayingExported] = useState(false)
+  
+  // DBC save
+  const currentMission = useMissionStore((state) => state.currentMission)
+  const { toast } = useToast()
+  
+  // Save frame to DBC
+  const handleSaveToDBC = async (canId: string, data: string, source?: string) => {
+    if (!currentMission?.id) {
+      toast({ title: "Erreur", description: "Aucune mission selectionnee", variant: "destructive" })
+      return
+    }
+    
+    try {
+      const signal = {
+        can_id: canId,
+        name: `SIG_${canId}_REPLAY`,
+        start_bit: 0,
+        length: data.length * 4, // bits
+        byte_order: "little_endian" as const,
+        is_signed: false,
+        scale: 1,
+        offset: 0,
+        min_val: 0,
+        max_val: 255,
+        unit: "",
+        comment: source ? `Trame rejouee: ${source}` : "Trame rejouee depuis Replay Rapide",
+        sample_status: data,
+      }
+      await addDBCSignal(currentMission.id, signal)
+      toast({ title: "Enregistre", description: `Signal ${canId} ajoute au DBC` })
+    } catch (err) {
+      toast({ title: "Erreur", description: "Echec de l'enregistrement DBC", variant: "destructive" })
+    }
+  }
 
   const handleSlotChange = (index: number, field: "id" | "data", value: string) => {
     const newSlots = [...slots]
@@ -437,8 +473,8 @@ export default function ReplayRapide() {
             </CardHeader>
             <CardContent>
               <ScrollArea className="h-48 rounded-md border border-border">
-                <div className="p-2">
-                  <table className="w-full text-xs font-mono">
+                <div className="p-2 overflow-x-auto">
+                  <table className="w-full text-xs font-mono min-w-[500px]">
                     <thead className="sticky top-0 bg-secondary">
                       <tr className="text-left text-muted-foreground">
                         <th className="p-2 w-20">CAN ID</th>
@@ -460,14 +496,25 @@ export default function ReplayRapide() {
                                 variant="ghost"
                                 className="h-6 w-6"
                                 onClick={() => handleSendExportedFrame(index)}
+                                title="Envoyer"
                               >
                                 <Send className="h-3 w-3" />
                               </Button>
                               <Button
                                 size="icon"
                                 variant="ghost"
+                                className="h-6 w-6 text-primary"
+                                onClick={() => handleSaveToDBC(frame.canId, frame.data, frame.source)}
+                                title="Enregistrer dans DBC"
+                              >
+                                <FileCode className="h-3 w-3" />
+                              </Button>
+                              <Button
+                                size="icon"
+                                variant="ghost"
                                 className="h-6 w-6 text-destructive"
                                 onClick={() => removeExportedFrame(index)}
+                                title="Supprimer"
                               >
                                 <Trash2 className="h-3 w-3" />
                               </Button>
