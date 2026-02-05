@@ -31,12 +31,11 @@ export default function CaptureReplay() {
   const missions = useMissionStore((state) => state.missions)
   const importLogToIsolation = useIsolationStore((state) => state.importLog)
   
-  // Use localStorage as primary source (persists across page reloads)
+  // Use sessionStorage as primary source (cleared on browser close)
   const [missionId, setMissionId] = useState<string>("")
   
   useEffect(() => {
-    // Read from localStorage first (most reliable)
-    const localId = localStorage.getItem("activeMissionId")
+    const localId = sessionStorage.getItem("activeMissionId")
     if (localId) {
       setMissionId(localId)
     } else if (storeMissionId) {

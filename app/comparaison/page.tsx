@@ -140,7 +140,7 @@ export default function ComparaisonPage() {
   const logTree = buildLogTree(missionLogs)
 
   useEffect(() => {
-    const localId = localStorage.getItem("activeMissionId")
+    const localId = sessionStorage.getItem("activeMissionId")
     const effectiveMissionId = localId || currentMissionId
     if (effectiveMissionId) {
       setMissionId(effectiveMissionId)

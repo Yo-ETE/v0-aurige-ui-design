@@ -147,8 +147,10 @@ export default function MissionPage() {
   // Set active mission ID immediately when entering this page
   useEffect(() => {
     if (id) {
-      // Store in localStorage for persistence across page reloads
-      localStorage.setItem("activeMissionId", id)
+      // Store in sessionStorage for persistence across page navigation (cleared on browser close)
+      sessionStorage.setItem("activeMissionId", id)
+      // Clean up any old localStorage key
+      localStorage.removeItem("activeMissionId")
       // Also update zustand store
       setCurrentMission(id)
     }
@@ -211,6 +213,7 @@ export default function MissionPage() {
   const handleDelete = () => {
     deleteMission(mission.id)
     setCurrentMission(null)
+    sessionStorage.removeItem("activeMissionId")
     router.push("/")
   }
 
@@ -292,6 +295,7 @@ export default function MissionPage() {
                   size="sm"
                   onClick={() => {
                     setCurrentMission(null)
+                    sessionStorage.removeItem("activeMissionId")
                     router.push("/")
                   }}
                   className="gap-2"

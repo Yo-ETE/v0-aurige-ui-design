@@ -328,9 +328,9 @@ export default function Isolation() {
   // State for co-occurrence dialog navigation
   const [coOccStep, setCoOccStep] = useState<"select" | "results">("select")
   
-  // Get mission ID from localStorage and sync with store
+  // Get mission ID from sessionStorage and sync with store
   useEffect(() => {
-    const localId = localStorage.getItem("activeMissionId")
+    const localId = sessionStorage.getItem("activeMissionId")
     const effectiveMissionId = localId || currentMissionId
     
     if (effectiveMissionId) {
