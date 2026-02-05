@@ -318,9 +318,18 @@ class CANInterfaceStatus(BaseModel):
 # Helper Functions - Filesystem
 # =============================================================================
 
+def sanitize_id(value: str) -> str:
+    """Sanitize any ID to prevent path traversal"""
+    # Remove any path separators or dangerous characters
+    safe = re.sub(r'[^a-zA-Z0-9_\-]', '', value)
+    if not safe or safe.startswith('.'):
+        raise HTTPException(status_code=400, detail=f"ID invalide: {value}")
+    return safe
+
 def get_mission_dir(mission_id: str) -> Path:
-    """Get mission directory path"""
-    return MISSIONS_DIR / mission_id
+    """Get mission directory from filesystem"""
+    safe_id = sanitize_id(mission_id)
+    return MISSIONS_DIR / safe_id
 
 
 def get_mission_file(mission_id: str) -> Path:
@@ -530,6 +539,12 @@ def can_send_frame(interface: str, can_id: str, data: str) -> tuple[bool, str]:
     # Clean up data - remove spaces
     data_clean = data.replace(" ", "").upper()
     can_id_clean = can_id.replace("0x", "").upper()
+    
+    # Validate hex format to prevent injection
+    if not re.match(r'^[0-9A-F]{1,8}$', can_id_clean):
+        return False, f"CAN ID invalide: {can_id_clean}"
+    if data_clean and not re.match(r'^[0-9A-F]{0,16}$', data_clean):
+        return False, f"Data invalide: {data_clean}"
     
     frame = f"{can_id_clean}#{data_clean}"
     try:
@@ -1285,6 +1300,20 @@ async def start_fuzzing(request: FuzzingRequest):
         raise HTTPException(status_code=409, detail="Fuzzing already running")
     
     # Create a temporary script for fuzzing
+    # Validate all inputs before writing to script to prevent injection
+    if not re.match(r'^[0-9A-Fa-f]{1,8}$', request.id_start):
+        raise HTTPException(status_code=400, detail=f"ID start invalide: {request.id_start}")
+    if not re.match(r'^[0-9A-Fa-f]{1,8}$', request.id_end):
+        raise HTTPException(status_code=400, detail=f"ID end invalide: {request.id_end}")
+    if not re.match(r'^[0-9A-Fa-f]*$', request.data_template):
+        raise HTTPException(status_code=400, detail=f"Data template invalide: {request.data_template}")
+    if request.interface not in ["can0", "can1", "vcan0"]:
+        raise HTTPException(status_code=400, detail="Invalid interface")
+    if not (1 <= request.iterations <= 100000):
+        raise HTTPException(status_code=400, detail="Iterations must be between 1 and 100000")
+    if not (0.1 <= request.delay_ms <= 10000):
+        raise HTTPException(status_code=400, detail="Delay must be between 0.1ms and 10000ms")
+    
     script_content = f'''#!/bin/bash
 start_id=$((16#{request.id_start}))
 end_id=$((16#{request.id_end}))
@@ -3841,12 +3870,12 @@ async def compare_logs(mission_id: str, request: CompareLogsRequest):
     """Compare two logs to identify differential frames between states (e.g., open vs closed)"""
     from collections import Counter, defaultdict
     
-    mission_dir = Path(MISSIONS_DIR) / mission_id
+    mission_dir = Path(MISSIONS_DIR) / sanitize_id(mission_id)
     if not mission_dir.exists():
         raise HTTPException(status_code=404, detail="Mission non trouvee")
     
-    log_a_file = mission_dir / "logs" / f"{request.log_a_id}.log"
-    log_b_file = mission_dir / "logs" / f"{request.log_b_id}.log"
+    log_a_file = mission_dir / "logs" / f"{sanitize_id(request.log_a_id)}.log"
+    log_b_file = mission_dir / "logs" / f"{sanitize_id(request.log_b_id)}.log"
     
     if not log_a_file.exists():
         raise HTTPException(status_code=404, detail=f"Log A non trouve: {request.log_a_id}")
@@ -3968,7 +3997,7 @@ class ImportLogResponse(BaseModel):
 @app.post("/api/missions/{mission_id}/import-log", response_model=ImportLogResponse)
 async def import_log(mission_id: str, file: UploadFile = File(...)):
     """Import an external log file into a mission"""
-    mission_dir = Path(MISSIONS_DIR) / mission_id
+    mission_dir = Path(MISSIONS_DIR) / sanitize_id(mission_id)
     if not mission_dir.exists():
         raise HTTPException(status_code=404, detail="Mission non trouvee")
     
@@ -3990,8 +4019,10 @@ async def import_log(mission_id: str, file: UploadFile = File(...)):
     log_filename = f"{log_id}.log"
     log_path = logs_dir / log_filename
     
-    # Read and validate content
+    # Read and validate content (max 100MB)
     content = await file.read()
+    if len(content) > 100 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Fichier trop volumineux (max 100 Mo)")
     try:
         text_content = content.decode("utf-8")
     except UnicodeDecodeError:
@@ -4048,7 +4079,7 @@ class SavedComparison(BaseModel):
     result: dict
 
 def get_comparisons_file(mission_id: str) -> Path:
-    return Path(MISSIONS_DIR) / mission_id / "comparisons.json"
+    return Path(MISSIONS_DIR) / sanitize_id(mission_id) / "comparisons.json"
 
 def load_comparisons(mission_id: str) -> list[dict]:
     f = get_comparisons_file(mission_id)
