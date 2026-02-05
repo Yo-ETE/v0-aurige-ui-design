@@ -203,6 +203,31 @@ export async function stopCAN(iface: CANInterface): Promise<{ status: string }> 
   })
 }
 
+export interface BitrateScanResult {
+  bitrate: number
+  bitrate_label: string
+  frames_received: number
+  errors: number
+  unique_ids: number
+  score: number
+}
+
+export interface BitrateScanResponse {
+  interface: string
+  results: BitrateScanResult[]
+  best_bitrate: number | null
+  best_score: number
+  scan_duration_ms: number
+}
+
+export async function scanBitrate(iface: "can0" | "can1", timeout?: number): Promise<BitrateScanResponse> {
+  const params = new URLSearchParams({ interface: iface })
+  if (timeout) params.set("timeout", timeout.toString())
+  return fetchApi(`/can/scan-bitrate?${params}`, {
+    method: "POST",
+  })
+}
+
 export async function sendCANFrame(frame: CANFrame): Promise<{ status: string }> {
   return fetchApi("/can/send", {
     method: "POST",

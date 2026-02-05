@@ -837,6 +837,168 @@ async def initialize_can(request: CANInitRequest):
     }
 
 
+class BitrateScanResult(BaseModel):
+    bitrate: int
+    bitrate_label: str
+    frames_received: int
+    errors: int
+    unique_ids: int
+    score: float  # 0-100
+    
+class BitrateScanResponse(BaseModel):
+    interface: str
+    results: list[BitrateScanResult]
+    best_bitrate: Optional[int] = None
+    best_score: float = 0.0
+    scan_duration_ms: int
+
+@app.post("/api/can/scan-bitrate")
+async def scan_bitrate(interface: str = Query(default="can0"), timeout: float = Query(default=1.5)):
+    """
+    Auto-detect CAN bus bitrate by trying each common bitrate and scoring results.
+    
+    Algorithm:
+    1. For each candidate bitrate: bring interface up, listen for frames
+    2. Score based on: valid frames received, unique CAN IDs, error count
+    3. Return all results sorted by score, with best bitrate highlighted
+    """
+    if interface not in ["can0", "can1"]:
+        raise HTTPException(status_code=400, detail="Scan bitrate uniquement sur interfaces physiques (can0, can1)")
+    
+    candidate_bitrates = [
+        (20000, "20 kbit/s"),
+        (50000, "50 kbit/s"),
+        (100000, "100 kbit/s"),
+        (125000, "125 kbit/s"),
+        (250000, "250 kbit/s"),
+        (500000, "500 kbit/s"),
+        (800000, "800 kbit/s"),
+        (1000000, "1 Mbit/s"),
+    ]
+    
+    results = []
+    start_time = time.time()
+    
+    for bitrate, label in candidate_bitrates:
+        # Bring interface down first
+        run_command(["ip", "link", "set", interface, "down"], check=False)
+        await asyncio.sleep(0.1)
+        
+        try:
+            # Set bitrate and bring up
+            run_command(["ip", "link", "set", interface, "type", "can", "bitrate", str(bitrate)])
+            run_command(["ip", "link", "set", interface, "up"])
+            await asyncio.sleep(0.1)
+            
+            # Listen with candump for timeout seconds
+            proc = await asyncio.create_subprocess_exec(
+                "candump", interface, "-t", "a",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            
+            frames = []
+            try:
+                # Read frames with timeout
+                end_time = asyncio.get_event_loop().time() + timeout
+                while asyncio.get_event_loop().time() < end_time:
+                    try:
+                        line = await asyncio.wait_for(
+                            proc.stdout.readline(),
+                            timeout=max(0.1, end_time - asyncio.get_event_loop().time())
+                        )
+                        if line:
+                            decoded = line.decode("utf-8", errors="ignore").strip()
+                            if decoded:
+                                frames.append(decoded)
+                    except asyncio.TimeoutError:
+                        break
+            finally:
+                proc.terminate()
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    proc.kill()
+            
+            # Parse frames and count unique IDs
+            unique_ids = set()
+            valid_frames = 0
+            for frame in frames:
+                match = re.search(r"([0-9A-Fa-f]+)#([0-9A-Fa-f]*)", frame)
+                if match:
+                    valid_frames += 1
+                    unique_ids.add(match.group(1).upper())
+            
+            # Get error count from interface stats
+            err_count = 0
+            try:
+                stat_result = run_command(["ip", "-details", "-json", "link", "show", interface], check=False)
+                if stat_result.returncode == 0:
+                    stat_data = json.loads(stat_result.stdout)
+                    if stat_data:
+                        stats = stat_data[0].get("stats64", {})
+                        err_count = stats.get("rx", {}).get("errors", 0) + stats.get("tx", {}).get("errors", 0)
+            except Exception:
+                pass
+            
+            # Score calculation
+            score = 0.0
+            if valid_frames > 0:
+                # Base score: did we receive frames?
+                score += min(40.0, valid_frames * 4.0)
+                # Unique IDs bonus: more variety = more confident
+                score += min(30.0, len(unique_ids) * 5.0)
+                # Low errors bonus
+                if err_count == 0:
+                    score += 20.0
+                elif err_count < 5:
+                    score += 10.0
+                # Consistency bonus: high frame count relative to time
+                frames_per_sec = valid_frames / timeout
+                if frames_per_sec > 10:
+                    score += 10.0
+                elif frames_per_sec > 5:
+                    score += 5.0
+            
+            score = min(100.0, score)
+            
+            results.append(BitrateScanResult(
+                bitrate=bitrate,
+                bitrate_label=label,
+                frames_received=valid_frames,
+                errors=err_count,
+                unique_ids=len(unique_ids),
+                score=round(score, 1),
+            ))
+            
+        except Exception:
+            results.append(BitrateScanResult(
+                bitrate=bitrate,
+                bitrate_label=label,
+                frames_received=0,
+                errors=0,
+                unique_ids=0,
+                score=0.0,
+            ))
+        
+        # Bring down after test
+        run_command(["ip", "link", "set", interface, "down"], check=False)
+    
+    # Sort by score descending
+    results.sort(key=lambda r: -r.score)
+    
+    best = results[0] if results and results[0].score > 0 else None
+    scan_ms = int((time.time() - start_time) * 1000)
+    
+    return BitrateScanResponse(
+        interface=interface,
+        results=results,
+        best_bitrate=best.bitrate if best else None,
+        best_score=best.score if best else 0.0,
+        scan_duration_ms=scan_ms,
+    )
+
+
 @app.post("/api/can/stop")
 async def stop_can(interface: str = Query(default="can0")):
     """Stop a CAN interface"""
