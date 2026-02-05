@@ -3118,29 +3118,31 @@ async def start_update():
                 update_output_store["lines"].append(f"[ERROR] Erreur install_pi.sh (code: {process.returncode})")
             else:
                 update_output_store["lines"].append("[OK] Mise a jour terminee!")
-                update_output_store["lines"].append(">>> Redemarrage des services dans 3 secondes...")
+                update_output_store["lines"].append(">>> Redemarrage automatique des services...")
                 
-                # Force restart services after successful update
-                restart_script = """#!/bin/bash
-sleep 3
-systemctl restart aurige-web.service
-sleep 1
-systemctl restart aurige-api.service
-"""
-                script_path = "/tmp/aurige_restart_after_update.sh"
-                with open(script_path, "w") as f:
-                    f.write(restart_script)
-                os.chmod(script_path, 0o755)
-                
-                # Run restart in background (detached)
-                import subprocess
-                subprocess.Popen(
-                    ["sudo", "bash", script_path],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    start_new_session=True
+                # Use nohup + disown pattern to survive process termination
+                # The script runs as root via systemd, so sudo should work
+                restart_cmd = (
+                    "nohup bash -c '"
+                    "sleep 2 && "
+                    "systemctl restart aurige-web.service && "
+                    "sleep 1 && "
+                    "systemctl restart aurige-api.service"
+                    "' > /tmp/aurige_restart.log 2>&1 &"
                 )
-                update_output_store["lines"].append("[OK] Services vont redemarrer automatiquement. Rechargez la page dans quelques secondes.")
+                
+                import subprocess
+                # Run via shell to properly handle nohup/background
+                result = subprocess.run(
+                    ["bash", "-c", restart_cmd],
+                    capture_output=True,
+                    text=True
+                )
+                
+                if result.returncode == 0:
+                    update_output_store["lines"].append("[OK] Services vont redemarrer dans 2 secondes. Rechargez la page.")
+                else:
+                    update_output_store["lines"].append(f"[WARNING] Redemarrage auto echoue: {result.stderr}. Utilisez le bouton manuel.")
             
         except Exception as e:
             update_output_store["lines"].append(f"[ERROR] {str(e)}")
