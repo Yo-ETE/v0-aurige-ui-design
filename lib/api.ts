@@ -704,6 +704,59 @@ export async function restartServices(): Promise<{ success: boolean; message: st
 }
 
 // =============================================================================
+// Tailscale VPN
+// =============================================================================
+
+export interface TailscalePeer {
+  id: string
+  hostname: string
+  dnsName: string
+  os: string
+  online: boolean
+  ip: string
+  isExitNode: boolean
+  exitNodeOption: boolean
+  lastSeen: string
+  rxBytes: number
+  txBytes: number
+}
+
+export interface TailscaleStatus {
+  installed: boolean
+  running: boolean
+  backendState?: string
+  hostname: string
+  tailscaleIp: string
+  magicDns: string
+  online: boolean
+  exitNode: boolean
+  os: string
+  version: string
+  peers: TailscalePeer[]
+  authUrl: string
+}
+
+export async function getTailscaleStatus(): Promise<TailscaleStatus> {
+  return fetchApi("/tailscale/status")
+}
+
+export async function tailscaleUp(): Promise<{ status: string; message: string; authUrl?: string }> {
+  return fetchApi("/tailscale/up", { method: "POST" })
+}
+
+export async function tailscaleDown(): Promise<{ status: string; message: string }> {
+  return fetchApi("/tailscale/down", { method: "POST" })
+}
+
+export async function tailscaleLogout(): Promise<{ status: string; message: string }> {
+  return fetchApi("/tailscale/logout", { method: "POST" })
+}
+
+export async function tailscaleSetExitNode(peerIp: string): Promise<{ status: string; message: string }> {
+  return fetchApi(`/tailscale/set-exit-node?peer_ip=${encodeURIComponent(peerIp)}`, { method: "POST" })
+}
+
+// =============================================================================
 // Update and Backup
 // =============================================================================
 

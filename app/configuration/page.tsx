@@ -36,7 +36,18 @@ import {
   Eye,
   EyeOff,
   Star,
+  Shield,
+  ShieldCheck,
+  ShieldOff,
+  ExternalLink,
+  Monitor,
+  Smartphone,
+  Laptop,
+  Server,
+  Copy,
+  LogOut,
 } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
 import {
   scanWifiNetworks,
   getWifiStatus,
@@ -56,8 +67,15 @@ import {
   startUpdate,
   getUpdateOutput,
   restartServices,
+  getTailscaleStatus,
+  tailscaleUp,
+  tailscaleDown,
+  tailscaleLogout,
+  tailscaleSetExitNode,
   type WifiNetwork,
   type WifiStatus,
+  type TailscaleStatus,
+  type TailscalePeer,
   type EthernetStatus,
   type AptOutput,
   type VersionInfo,
@@ -96,6 +114,12 @@ export default function ConfigurationPage() {
   const [backupMessage, setBackupMessage] = useState<string | null>(null)
   const [needsRestart, setNeedsRestart] = useState(false)
   const [isRestarting, setIsRestarting] = useState(false)
+  
+  // Tailscale VPN
+  const [tsStatus, setTsStatus] = useState<TailscaleStatus | null>(null)
+  const [tsLoading, setTsLoading] = useState(false)
+  const [tsAction, setTsAction] = useState<string | null>(null)
+  const [tsMessage, setTsMessage] = useState<{ type: "success" | "error" | "auth"; text: string; url?: string } | null>(null)
 
   // Fetch connection status (wifi + ethernet)
   const fetchConnectionStatus = useCallback(async () => {
@@ -370,13 +394,105 @@ export default function ConfigurationPage() {
     }
   }
 
+  // Tailscale handlers
+  const fetchTailscale = useCallback(async () => {
+    setTsLoading(true)
+    try {
+      const status = await getTailscaleStatus()
+      setTsStatus(status)
+    } catch {
+      setTsStatus(null)
+    } finally {
+      setTsLoading(false)
+    }
+  }, [])
+  
+  const handleTsUp = async () => {
+    setTsAction("up")
+    setTsMessage(null)
+    try {
+      const result = await tailscaleUp()
+      if (result.status === "auth_needed") {
+        setTsMessage({ type: "auth", text: "Authentification requise", url: result.authUrl })
+      } else if (result.status === "success") {
+        setTsMessage({ type: "success", text: result.message })
+      } else {
+        setTsMessage({ type: "error", text: result.message })
+      }
+      await fetchTailscale()
+    } catch (e) {
+      setTsMessage({ type: "error", text: e instanceof Error ? e.message : "Erreur" })
+    } finally {
+      setTsAction(null)
+    }
+  }
+  
+  const handleTsDown = async () => {
+    setTsAction("down")
+    setTsMessage(null)
+    try {
+      const result = await tailscaleDown()
+      setTsMessage({ type: result.status === "success" ? "success" : "error", text: result.message })
+      await fetchTailscale()
+    } catch (e) {
+      setTsMessage({ type: "error", text: e instanceof Error ? e.message : "Erreur" })
+    } finally {
+      setTsAction(null)
+    }
+  }
+  
+  const handleTsLogout = async () => {
+    setTsAction("logout")
+    setTsMessage(null)
+    try {
+      const result = await tailscaleLogout()
+      setTsMessage({ type: result.status === "success" ? "success" : "error", text: result.message })
+      await fetchTailscale()
+    } catch (e) {
+      setTsMessage({ type: "error", text: e instanceof Error ? e.message : "Erreur" })
+    } finally {
+      setTsAction(null)
+    }
+  }
+  
+  const handleTsExitNode = async (ip: string) => {
+    setTsAction("exit")
+    setTsMessage(null)
+    try {
+      const result = await tailscaleSetExitNode(ip)
+      setTsMessage({ type: result.status === "success" ? "success" : "error", text: result.message })
+      await fetchTailscale()
+    } catch (e) {
+      setTsMessage({ type: "error", text: e instanceof Error ? e.message : "Erreur" })
+    } finally {
+      setTsAction(null)
+    }
+  }
+  
+  const formatBytes = (bytes: number) => {
+    if (bytes === 0) return "0 B"
+    const k = 1024
+    const sizes = ["B", "KB", "MB", "GB"]
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`
+  }
+  
+  const getPeerOsIcon = (os: string) => {
+    const osLower = os.toLowerCase()
+    if (osLower.includes("android") || osLower.includes("ios")) return Smartphone
+    if (osLower.includes("windows") || osLower.includes("macos")) return Laptop
+    if (osLower.includes("linux")) return Server
+    return Monitor
+  }
+  
   // Initial load
   useEffect(() => {
     fetchConnectionStatus()
     handleScan()
     fetchVersionInfo()
     fetchBackups()
-  }, [fetchConnectionStatus, fetchVersionInfo, fetchBackups])
+    fetchTailscale()
+  }, [fetchConnectionStatus, fetchVersionInfo, fetchBackups, fetchTailscale])
 
   // Signal strength helper
   const getSignalIcon = (signal: number) => {
@@ -611,6 +727,244 @@ export default function ConfigurationPage() {
                 <p className="text-xs text-muted-foreground pl-6">Non connecte</p>
               )}
             </div>
+          </CardContent>
+        </Card>
+
+        {/* Tailscale VPN Card */}
+        <Card className="border-border bg-card">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${
+                  tsStatus?.running && tsStatus.online ? "bg-success/10" : "bg-muted"
+                }`}>
+                  {tsStatus?.running && tsStatus.online ? (
+                    <ShieldCheck className="h-5 w-5 text-success" />
+                  ) : tsStatus?.installed ? (
+                    <ShieldOff className="h-5 w-5 text-muted-foreground" />
+                  ) : (
+                    <Shield className="h-5 w-5 text-muted-foreground" />
+                  )}
+                </div>
+                <div>
+                  <CardTitle className="text-lg">Tailscale VPN</CardTitle>
+                  <CardDescription>
+                    {!tsStatus?.installed 
+                      ? "Non installe" 
+                      : tsStatus.running && tsStatus.online
+                        ? "Connecte au reseau"
+                        : tsStatus.running
+                          ? "En cours de connexion..."
+                          : "Deconnecte"}
+                  </CardDescription>
+                </div>
+              </div>
+              <Button variant="outline" size="sm" onClick={fetchTailscale} disabled={tsLoading} className="bg-transparent">
+                <RefreshCw className={`h-4 w-4 ${tsLoading ? "animate-spin" : ""}`} />
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {!tsStatus?.installed ? (
+              <div className="text-sm text-muted-foreground">
+                <p>Tailscale n&apos;est pas installe sur ce Pi.</p>
+                <p className="mt-1 font-mono text-xs bg-secondary rounded px-2 py-1">
+                  curl -fsSL https://tailscale.com/install.sh | sh
+                </p>
+              </div>
+            ) : (
+              <>
+                {/* Connection info */}
+                {tsStatus.running && tsStatus.online && (
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <p className="text-xs text-muted-foreground">IP Tailscale</p>
+                        <div className="flex items-center gap-1.5">
+                          <p className="font-mono text-xs">{tsStatus.tailscaleIp}</p>
+                          <button
+                            onClick={() => navigator.clipboard.writeText(tsStatus.tailscaleIp)}
+                            className="text-muted-foreground hover:text-foreground transition-colors"
+                            title="Copier"
+                          >
+                            <Copy className="h-3 w-3" />
+                          </button>
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Hostname</p>
+                        <p className="font-mono text-xs">{tsStatus.hostname}</p>
+                      </div>
+                      {tsStatus.magicDns && (
+                        <div className="col-span-2">
+                          <p className="text-xs text-muted-foreground">Magic DNS</p>
+                          <div className="flex items-center gap-1.5">
+                            <p className="font-mono text-xs truncate">{tsStatus.magicDns}</p>
+                            <button
+                              onClick={() => navigator.clipboard.writeText(tsStatus.magicDns)}
+                              className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                              title="Copier"
+                            >
+                              <Copy className="h-3 w-3" />
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                      <div>
+                        <p className="text-xs text-muted-foreground">Version</p>
+                        <p className="text-xs">{tsStatus.version}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Exit Node</p>
+                        <p className="text-xs">{tsStatus.exitNode ? "Actif" : "Desactive"}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Auth URL if needed */}
+                {tsStatus.authUrl && (
+                  <Alert className="border-amber-500/50 bg-amber-500/10">
+                    <AlertTriangle className="h-4 w-4 text-amber-500" />
+                    <AlertDescription className="text-amber-500 text-xs">
+                      <a href={tsStatus.authUrl} target="_blank" rel="noopener noreferrer" className="underline flex items-center gap-1">
+                        Authentifier ce device <ExternalLink className="h-3 w-3" />
+                      </a>
+                    </AlertDescription>
+                  </Alert>
+                )}
+                
+                {tsMessage && (
+                  <Alert className={
+                    tsMessage.type === "success" ? "border-success/50 bg-success/10" :
+                    tsMessage.type === "auth" ? "border-amber-500/50 bg-amber-500/10" :
+                    "border-destructive/50 bg-destructive/10"
+                  }>
+                    {tsMessage.type === "success" ? <CheckCircle2 className="h-4 w-4 text-success" /> :
+                     tsMessage.type === "auth" ? <AlertTriangle className="h-4 w-4 text-amber-500" /> :
+                     <AlertCircle className="h-4 w-4 text-destructive" />}
+                    <AlertDescription className={
+                      tsMessage.type === "success" ? "text-success text-xs" :
+                      tsMessage.type === "auth" ? "text-amber-500 text-xs" :
+                      "text-destructive text-xs"
+                    }>
+                      {tsMessage.text}
+                      {tsMessage.url && (
+                        <a href={tsMessage.url} target="_blank" rel="noopener noreferrer" className="ml-2 underline inline-flex items-center gap-1">
+                          Ouvrir <ExternalLink className="h-3 w-3" />
+                        </a>
+                      )}
+                    </AlertDescription>
+                  </Alert>
+                )}
+                
+                {/* Peers list */}
+                {tsStatus.running && tsStatus.online && tsStatus.peers.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-xs text-muted-foreground font-medium">
+                      Machines ({tsStatus.peers.filter(p => p.online).length}/{tsStatus.peers.length} en ligne)
+                    </p>
+                    <ScrollArea className="h-44 rounded-md border border-border">
+                      <div className="p-2 space-y-1">
+                        {tsStatus.peers.map((peer) => {
+                          const OsIcon = getPeerOsIcon(peer.os)
+                          return (
+                            <div
+                              key={peer.id}
+                              className={`flex items-center gap-2.5 p-2 rounded-md text-sm ${
+                                peer.online ? "bg-secondary/50" : "opacity-50"
+                              }`}
+                            >
+                              <OsIcon className={`h-4 w-4 shrink-0 ${peer.online ? "text-primary" : "text-muted-foreground"}`} />
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-medium truncate">{peer.hostname}</span>
+                                  {peer.online && (
+                                    <span className="h-1.5 w-1.5 rounded-full bg-success shrink-0" />
+                                  )}
+                                  {peer.isExitNode && (
+                                    <Badge variant="outline" className="text-[9px] px-1 py-0 border-success/50 text-success">EXIT</Badge>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                                  <span className="font-mono">{peer.ip}</span>
+                                  <span>{peer.os}</span>
+                                  {peer.online && (peer.rxBytes > 0 || peer.txBytes > 0) && (
+                                    <span>rx:{formatBytes(peer.rxBytes)} tx:{formatBytes(peer.txBytes)}</span>
+                                  )}
+                                </div>
+                              </div>
+                              {peer.exitNodeOption && !peer.isExitNode && peer.online && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6 shrink-0"
+                                  onClick={() => handleTsExitNode(peer.ip)}
+                                  disabled={!!tsAction}
+                                  title="Utiliser comme exit node"
+                                >
+                                  <Globe className="h-3 w-3" />
+                                </Button>
+                              )}
+                              {peer.isExitNode && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6 shrink-0 text-success"
+                                  onClick={() => handleTsExitNode("")}
+                                  disabled={!!tsAction}
+                                  title="Desactiver exit node"
+                                >
+                                  <Globe className="h-3 w-3" />
+                                </Button>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </ScrollArea>
+                  </div>
+                )}
+                
+                {/* Action buttons */}
+                <div className="flex gap-2">
+                  {tsStatus.running ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleTsDown}
+                      disabled={!!tsAction}
+                      className="gap-1.5 bg-transparent"
+                    >
+                      {tsAction === "down" ? <Loader2 className="h-3 w-3 animate-spin" /> : <PowerOff className="h-3 w-3" />}
+                      Deconnecter
+                    </Button>
+                  ) : (
+                    <Button
+                      size="sm"
+                      onClick={handleTsUp}
+                      disabled={!!tsAction}
+                      className="gap-1.5"
+                    >
+                      {tsAction === "up" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Power className="h-3 w-3" />}
+                      Connecter
+                    </Button>
+                  )}
+                  {tsStatus.running && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleTsLogout}
+                      disabled={!!tsAction}
+                      className="gap-1.5 text-destructive hover:text-destructive bg-transparent"
+                    >
+                      {tsAction === "logout" ? <Loader2 className="h-3 w-3 animate-spin" /> : <LogOut className="h-3 w-3" />}
+                      Logout
+                    </Button>
+                  )}
+                </div>
+              </>
+            )}
           </CardContent>
         </Card>
 
