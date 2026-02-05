@@ -1544,32 +1544,14 @@ export default function Isolation() {
                 {/* Actions */}
                 <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-border">
                   <span className="text-xs text-muted-foreground">
-                    {selectedCoOccurrenceIds.size} selectionnee(s)
+                    {selectedCoOccurrenceIds.size} selectionnee(s) - Utilisez Qualifier pour analyser et rejouer
                   </span>
-                  <Button 
-                    size="sm" 
-                    onClick={handleSendToReplayRapide}
-                    disabled={selectedCoOccurrenceIds.size === 0}
-                    className="gap-1"
-                  >
-                    <Send className="h-3 w-3" />
-                    Replay Rapide
-                  </Button>
                   <Button variant="outline" size="sm" className="bg-transparent" onClick={() => {
                     // Go back to log selection
                     setCoOccurrenceResult(null)
                     setCoOccStep("select")
                   }}>
                     Nouvelle analyse
-                  </Button>
-                  <Button variant="outline" size="sm" className="bg-transparent" onClick={() => {
-                    // Export selected IDs or all if none selected
-                    const ids = selectedCoOccurrenceIds.size > 0 
-                      ? Array.from(selectedCoOccurrenceIds)
-                      : coOccurrenceResult.relatedFrames.map(f => f.canId)
-                    navigator.clipboard.writeText(ids.join(","))
-                  }}>
-                    Copier IDs
                   </Button>
                   {coOccurrenceResult.ecuFamilies.length > 0 && (
                     <Button variant="outline" size="sm" className="bg-transparent" onClick={() => {
