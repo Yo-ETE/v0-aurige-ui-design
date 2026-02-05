@@ -427,11 +427,11 @@ export default function ConfigurationPage() {
               </div>
               {wifiStatus?.connected ? (
                 wifiStatus.isHotspot ? (
-                  <div className="pl-6 text-sm space-y-2">
+                  <div className="pl-6 text-sm space-y-3">
                     <Alert className="border-primary/50 bg-primary/10 py-2">
                       <Wifi className="h-4 w-4 text-primary" />
                       <AlertDescription className="text-primary text-xs">
-                        Hotspot "{wifiStatus.hotspotSsid || "Aurige"}" actif
+                        Hotspot &quot;{wifiStatus.hotspotSsid || "Aurige"}&quot; actif
                       </AlertDescription>
                     </Alert>
                     <div className="grid grid-cols-2 gap-3">
@@ -443,47 +443,86 @@ export default function ConfigurationPage() {
                         <p className="text-xs text-muted-foreground">IP Publique</p>
                         <p className="font-mono text-xs">{wifiStatus.ipPublic || "-"}</p>
                       </div>
-                      <div className="col-span-2">
-                        <p className="text-xs text-muted-foreground">Source Internet</p>
-                        <div className="flex items-center gap-2 font-medium">
-                          {wifiStatus.internetSource === "Ethernet" && <Cable className="h-3.5 w-3.5 text-primary" />}
-                          {wifiStatus.internetSource === "USB Tethering" && <Usb className="h-3.5 w-3.5 text-primary" />}
-                          {wifiStatus.internetSource?.startsWith("WiFi") && <Wifi className="h-3.5 w-3.5 text-primary" />}
-                          <span>{wifiStatus.internetSource || "Non detecte"}</span>
-                        </div>
-                        {wifiStatus.internetVia && (
-                          <p className="text-xs text-muted-foreground mt-0.5 pl-5.5">
-                            {wifiStatus.internetSource?.startsWith("WiFi") ? "SSID: " : ""}
-                            {wifiStatus.internetVia}
-                          </p>
-                        )}
-                      </div>
-                      <div className="col-span-2 pt-2 border-t border-border/50">
-                        <p className="text-xs text-muted-foreground mb-1">Connectivite Internet</p>
-                        {wifiStatus.hasInternet ? (
-                          <div className="flex items-center gap-3">
-                            <span className="flex items-center gap-1.5 text-success text-xs font-medium">
-                              <CheckCircle2 className="h-3 w-3" />
-                              Connecte
-                            </span>
-                            {wifiStatus.pingMs > 0 && (
-                              <span className="text-xs text-muted-foreground">
-                                Ping: {wifiStatus.pingMs} ms
-                              </span>
-                            )}
-                            {wifiStatus.downloadSpeed && (
-                              <span className="text-xs text-muted-foreground">
-                                DL: {wifiStatus.downloadSpeed}
-                              </span>
+                    </div>
+                    
+                    {/* Secondary interfaces - sources de connectivite */}
+                    {wifiStatus.secondaryInterfaces && wifiStatus.secondaryInterfaces.length > 0 && (
+                      <div className="space-y-2 pt-2 border-t border-border/50">
+                        <p className="text-xs text-muted-foreground font-medium">Interfaces reseau</p>
+                        {wifiStatus.secondaryInterfaces.map((iface: { name: string; type: string; label: string; ssid: string; ip: string; signal: number; connected: boolean; isDefaultRoute?: boolean }) => (
+                          <div
+                            key={iface.name}
+                            className={`rounded-md border p-2.5 ${
+                              iface.isDefaultRoute
+                                ? "border-success/40 bg-success/5"
+                                : iface.connected
+                                  ? "border-border bg-secondary/30"
+                                  : "border-border/50 bg-muted/20 opacity-60"
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                {iface.type === "wifi" && <Wifi className={`h-3.5 w-3.5 ${iface.connected ? "text-primary" : "text-muted-foreground"}`} />}
+                                {iface.type === "usb" && <Usb className={`h-3.5 w-3.5 ${iface.connected ? "text-primary" : "text-muted-foreground"}`} />}
+                                {iface.type === "ethernet" && <Cable className={`h-3.5 w-3.5 ${iface.connected ? "text-primary" : "text-muted-foreground"}`} />}
+                                <span className="text-xs font-medium">{iface.label}</span>
+                                <span className="text-xs text-muted-foreground font-mono">({iface.name})</span>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                {iface.isDefaultRoute && (
+                                  <span className="text-[10px] font-medium text-success bg-success/15 px-1.5 py-0.5 rounded">INTERNET</span>
+                                )}
+                                {iface.connected ? (
+                                  <CheckCircle2 className="h-3 w-3 text-success" />
+                                ) : (
+                                  <AlertCircle className="h-3 w-3 text-muted-foreground" />
+                                )}
+                              </div>
+                            </div>
+                            {iface.connected && (
+                              <div className="flex items-center gap-3 mt-1.5 pl-5.5 text-xs text-muted-foreground">
+                                {iface.ssid && (
+                                  <span>SSID: <span className="text-foreground font-medium">{iface.ssid}</span></span>
+                                )}
+                                {iface.ip && (
+                                  <span className="font-mono">{iface.ip}</span>
+                                )}
+                                {iface.signal !== 0 && (
+                                  <span>{iface.signal} dBm</span>
+                                )}
+                              </div>
                             )}
                           </div>
-                        ) : (
-                          <span className="flex items-center gap-1.5 text-destructive text-xs font-medium">
-                            <AlertCircle className="h-3 w-3" />
-                            Pas d&apos;acces Internet
-                          </span>
-                        )}
+                        ))}
                       </div>
+                    )}
+                    
+                    {/* Internet connectivity test */}
+                    <div className="pt-2 border-t border-border/50">
+                      <p className="text-xs text-muted-foreground mb-1">Connectivite Internet</p>
+                      {wifiStatus.hasInternet ? (
+                        <div className="flex items-center gap-3">
+                          <span className="flex items-center gap-1.5 text-success text-xs font-medium">
+                            <CheckCircle2 className="h-3 w-3" />
+                            Connecte
+                          </span>
+                          {wifiStatus.pingMs > 0 && (
+                            <span className="text-xs text-muted-foreground">
+                              Ping: {wifiStatus.pingMs} ms
+                            </span>
+                          )}
+                          {wifiStatus.downloadSpeed && (
+                            <span className="text-xs text-muted-foreground">
+                              DL: {wifiStatus.downloadSpeed}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="flex items-center gap-1.5 text-destructive text-xs font-medium">
+                          <AlertCircle className="h-3 w-3" />
+                          Pas d&apos;acces Internet
+                        </span>
+                      )}
                     </div>
                   </div>
                 ) : (

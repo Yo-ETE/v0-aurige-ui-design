@@ -2714,52 +2714,139 @@ async def get_wifi_status():
         except:
             pass
         
-        # Detect internet source by checking default route
+        # Detect ALL network interfaces and their status
         internet_source = ""
         internet_interface = ""
         internet_via = ""
-        if is_hotspot:
-            # Check default route to find how we get internet
-            route_result = run_command(["ip", "route", "show", "default"], check=False)
-            if route_result.returncode == 0:
-                for line in route_result.stdout.strip().split("\n"):
-                    if "default" in line:
-                        parts = line.split()
-                        # Find interface (after "dev")
-                        if "dev" in parts:
-                            idx = parts.index("dev")
-                            if idx + 1 < len(parts):
-                                internet_interface = parts[idx + 1]
+        
+        # Gather info on all secondary interfaces (not wlan0 hotspot)
+        secondary_interfaces = []
+        
+        # Check wlan1 (TP-Link USB dongle)
+        wlan1_ssid = ""
+        wlan1_ip = ""
+        wlan1_signal = 0
+        try:
+            wlan1_ip_result = run_command(["ip", "-4", "addr", "show", "wlan1"], check=False)
+            if wlan1_ip_result.returncode == 0:
+                for wline in wlan1_ip_result.stdout.split("\n"):
+                    if "inet " in wline:
+                        wlan1_ip = wline.strip().split()[1].split("/")[0]
                         break
-                
-                # Determine source type based on interface
-                if internet_interface == "eth0":
-                    internet_source = "Ethernet"
-                elif internet_interface.startswith("usb") or internet_interface.startswith("enx"):
-                    internet_source = "USB Tethering"
-                    # Try to detect USB device name
-                    try:
-                        usb_result = run_command(["lsusb"], check=False)
-                        if usb_result.returncode == 0:
-                            for uline in usb_result.stdout.split("\n"):
-                                uline_lower = uline.lower()
-                                # Common phone tethering identifiers
-                                if any(kw in uline_lower for kw in ["rndis", "cdc", "tether", "android", "apple", "iphone", "samsung", "huawei", "xiaomi"]):
-                                    # Extract device name after ID xxxx:xxxx
-                                    parts = uline.split(" ", 6)
-                                    if len(parts) >= 7:
-                                        internet_via = parts[6].strip()
+            ssid_result = run_command(["iwgetid", "-r", "wlan1"], check=False)
+            if ssid_result.returncode == 0 and ssid_result.stdout.strip():
+                wlan1_ssid = ssid_result.stdout.strip()
+            if wlan1_ssid or wlan1_ip:
+                # Get signal strength
+                iw_result = run_command(["iw", "dev", "wlan1", "link"], check=False)
+                if iw_result.returncode == 0:
+                    for wline in iw_result.stdout.split("\n"):
+                        if "signal:" in wline:
+                            try:
+                                wlan1_signal = int(wline.split("signal:")[1].strip().split()[0])
+                            except:
+                                pass
+                secondary_interfaces.append({
+                    "name": "wlan1",
+                    "type": "wifi",
+                    "label": "WiFi USB (TP-Link)",
+                    "ssid": wlan1_ssid,
+                    "ip": wlan1_ip,
+                    "signal": wlan1_signal,
+                    "connected": bool(wlan1_ssid),
+                })
+        except:
+            pass
+        
+        # Check USB interfaces (Huawei router, phone tethering)
+        try:
+            ip_link_result = run_command(["ip", "-j", "link", "show"], check=False)
+            if ip_link_result.returncode == 0:
+                all_links = json.loads(ip_link_result.stdout)
+                for link in all_links:
+                    iface_name = link.get("ifname", "")
+                    if iface_name.startswith("usb") or iface_name.startswith("enx"):
+                        usb_ip = ""
+                        usb_ip_result = run_command(["ip", "-4", "addr", "show", iface_name], check=False)
+                        if usb_ip_result.returncode == 0:
+                            for wline in usb_ip_result.stdout.split("\n"):
+                                if "inet " in wline:
+                                    usb_ip = wline.strip().split()[1].split("/")[0]
                                     break
-                    except:
-                        pass
-                elif internet_interface == "wlan1":
-                    # Second WiFi adapter - get its SSID
-                    ssid_result = run_command(["iwgetid", "-r", internet_interface], check=False)
-                    if ssid_result.returncode == 0 and ssid_result.stdout.strip():
-                        internet_via = ssid_result.stdout.strip()
-                    internet_source = "WiFi (wlan1)"
-                elif internet_interface:
-                    internet_source = internet_interface
+                        
+                        # Identify USB device
+                        usb_device_name = ""
+                        try:
+                            usb_result = run_command(["lsusb"], check=False)
+                            if usb_result.returncode == 0:
+                                for uline in usb_result.stdout.split("\n"):
+                                    uline_lower = uline.lower()
+                                    if any(kw in uline_lower for kw in ["huawei", "hilink", "rndis", "cdc ether", "android", "apple", "iphone", "samsung", "xiaomi"]):
+                                        parts = uline.split(" ", 6)
+                                        if len(parts) >= 7:
+                                            usb_device_name = parts[6].strip()
+                                        break
+                        except:
+                            pass
+                        
+                        operstate = link.get("operstate", "").upper()
+                        secondary_interfaces.append({
+                            "name": iface_name,
+                            "type": "usb",
+                            "label": usb_device_name or f"USB ({iface_name})",
+                            "ssid": "",
+                            "ip": usb_ip,
+                            "signal": 0,
+                            "connected": operstate == "UP" or bool(usb_ip),
+                        })
+        except:
+            pass
+        
+        # Check eth0
+        try:
+            eth_result = run_command(["ip", "-4", "addr", "show", "eth0"], check=False)
+            if eth_result.returncode == 0:
+                eth_ip = ""
+                for wline in eth_result.stdout.split("\n"):
+                    if "inet " in wline:
+                        eth_ip = wline.strip().split()[1].split("/")[0]
+                        break
+                if eth_ip:
+                    secondary_interfaces.append({
+                        "name": "eth0",
+                        "type": "ethernet",
+                        "label": "Ethernet",
+                        "ssid": "",
+                        "ip": eth_ip,
+                        "signal": 0,
+                        "connected": True,
+                    })
+        except:
+            pass
+        
+        # Find which interface provides the default route (= internet)
+        route_result = run_command(["ip", "route", "show", "default"], check=False)
+        if route_result.returncode == 0:
+            for line in route_result.stdout.strip().split("\n"):
+                if "default" in line:
+                    parts = line.split()
+                    if "dev" in parts:
+                        idx = parts.index("dev")
+                        if idx + 1 < len(parts):
+                            internet_interface = parts[idx + 1]
+                    break
+        
+        # Label the internet source from the default route interface
+        for si in secondary_interfaces:
+            if si["name"] == internet_interface:
+                si["isDefaultRoute"] = True
+                internet_source = si["label"]
+                if si["ssid"]:
+                    internet_via = si["ssid"]
+                break
+        else:
+            if internet_interface:
+                internet_source = internet_interface
         
         # Test internet connectivity with ping
         has_internet = False
@@ -2814,6 +2901,7 @@ async def get_wifi_status():
             "hasInternet": has_internet,
             "pingMs": round(ping_ms, 1),
             "downloadSpeed": download_speed,
+            "secondaryInterfaces": secondary_interfaces,
         }
     except Exception as e:
         return {"connected": False, "ssid": "", "signal": 0, "error": str(e)}
