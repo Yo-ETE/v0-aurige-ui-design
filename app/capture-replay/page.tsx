@@ -23,6 +23,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useMissionStore } from "@/lib/mission-store"
 import { useIsolationStore } from "@/lib/isolation-store"
+import { LogImportButton } from "@/components/log-import-button"
 
 export default function CaptureReplay() {
   const router = useRouter()
@@ -379,18 +380,25 @@ const handleDeleteLog = async (logId: string) => {
         {/* Logs disponibles Card */}
         <Card className="border-border bg-card">
           <CardHeader>
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                <FolderOpen className="h-5 w-5 text-primary" />
-              </div>
-              <div>
-                <CardTitle className="text-lg">Logs de la mission</CardTitle>
-                <CardDescription>
-                  Fichiers de capture enregistrés
-                </CardDescription>
-              </div>
-            </div>
-          </CardHeader>
+<div className="flex items-center justify-between w-full">
+    <div className="flex items-center gap-3">
+      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+        <FolderOpen className="h-5 w-5 text-primary" />
+      </div>
+      <div>
+        <CardTitle className="text-lg">Logs de la mission</CardTitle>
+        <CardDescription>
+          Fichiers de capture enregistres
+        </CardDescription>
+      </div>
+    </div>
+    <LogImportButton 
+      missionId={missionId} 
+      onImportSuccess={() => loadLogs()} 
+      size="sm"
+    />
+  </div>
+  </CardHeader>
           <CardContent>
             {logs.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-8 text-center">

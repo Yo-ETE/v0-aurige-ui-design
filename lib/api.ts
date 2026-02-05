@@ -977,3 +977,35 @@ export async function compareLogs(
     }),
   })
 }
+
+// =============================================================================
+// Log Import API
+// =============================================================================
+
+export interface ImportLogResponse {
+  id: string
+  filename: string
+  frames_count: number
+  message: string
+}
+
+export async function importLog(
+  missionId: string,
+  file: File
+): Promise<ImportLogResponse> {
+  const formData = new FormData()
+  formData.append("file", file)
+  
+  const url = `${getApiBaseUrl()}/api/missions/${missionId}/import-log`
+  const response = await fetch(url, {
+    method: "POST",
+    body: formData,
+  })
+  
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: "Erreur inconnue" }))
+    throw new Error(error.detail || `Erreur API: ${response.status}`)
+  }
+  
+  return response.json()
+}

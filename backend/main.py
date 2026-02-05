@@ -28,7 +28,7 @@ from typing import Optional
 from uuid import uuid4
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Query, Response
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Query, Response, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
@@ -3790,6 +3790,76 @@ async def compare_logs(mission_id: str, request: CompareLogsRequest):
         only_b_count=only_b_count,
         identical_count=identical_count,
         frames=results
+    )
+
+
+# =============================================================================
+# LOG IMPORT - Upload external log files
+# =============================================================================
+
+class ImportLogResponse(BaseModel):
+    id: str
+    filename: str
+    frames_count: int
+    message: str
+
+@app.post("/api/missions/{mission_id}/import-log", response_model=ImportLogResponse)
+async def import_log(mission_id: str, file: UploadFile = File(...)):
+    """Import an external log file into a mission"""
+    mission_dir = Path(MISSIONS_DIR) / mission_id
+    if not mission_dir.exists():
+        raise HTTPException(status_code=404, detail="Mission non trouvee")
+    
+    logs_dir = mission_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Validate file extension
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Nom de fichier requis")
+    
+    if not file.filename.endswith(".log"):
+        raise HTTPException(status_code=400, detail="Le fichier doit etre un .log")
+    
+    # Generate unique filename to avoid conflicts
+    base_name = file.filename.replace(".log", "")
+    safe_name = re.sub(r'[^a-zA-Z0-9_-]', '_', base_name)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_id = f"imported_{safe_name}_{timestamp}"
+    log_filename = f"{log_id}.log"
+    log_path = logs_dir / log_filename
+    
+    # Read and validate content
+    content = await file.read()
+    try:
+        text_content = content.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="Le fichier doit etre en UTF-8")
+    
+    # Count valid CAN frames
+    frames_count = 0
+    valid_lines = []
+    for line in text_content.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        # Validate CAN log format: (timestamp) interface CANID#DATA
+        match = re.match(r"\((\d+\.?\d*)\)\s+\w+\s+([0-9A-Fa-f]+)#([0-9A-Fa-f]*)", line)
+        if match:
+            frames_count += 1
+            valid_lines.append(line)
+    
+    if frames_count == 0:
+        raise HTTPException(status_code=400, detail="Aucune trame CAN valide trouvee dans le fichier")
+    
+    # Save the file
+    with open(log_path, "w") as f:
+        f.write("\n".join(valid_lines))
+    
+    return ImportLogResponse(
+        id=log_id,
+        filename=log_filename,
+        frames_count=frames_count,
+        message=f"Log importe avec {frames_count} trames"
     )
 
 

@@ -34,6 +34,7 @@ import { useMissionStore } from "@/lib/mission-store"
 import { useExportStore } from "@/lib/export-store"
 import { useRouter } from "next/navigation"
 import { useToast } from "@/hooks/use-toast"
+import { LogImportButton } from "@/components/log-import-button"
 
 export default function ComparaisonPage() {
   const router = useRouter()
@@ -253,13 +254,20 @@ export default function ComparaisonPage() {
         {/* Log Selection */}
         <Card className="border-border bg-card">
           <CardHeader className="pb-4">
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <GitCompare className="h-5 w-5 text-primary" />
-              Selectionner les logs a comparer
-            </CardTitle>
-            <CardDescription>
-              Choisissez deux logs representant des etats differents (ex: porte ouverte vs porte fermee)
-            </CardDescription>
+<div className="flex items-center justify-between">
+    <CardTitle className="flex items-center gap-2 text-lg">
+      <GitCompare className="h-5 w-5 text-primary" />
+      Selectionner les logs a comparer
+    </CardTitle>
+    <LogImportButton 
+      missionId={missionId} 
+      onImportSuccess={() => loadLogs()} 
+      size="sm"
+    />
+  </div>
+  <CardDescription>
+  Choisissez deux logs representant des etats differents (ex: porte ouverte vs porte fermee)
+  </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5 items-end">

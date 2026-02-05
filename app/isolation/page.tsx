@@ -45,6 +45,7 @@ import { useExportStore } from "@/lib/export-store"
 import { listMissionLogs, startReplay, stopReplay, getReplayStatus, splitLog, renameLog, deleteLog, getLogContent, getLogDownloadUrl, getLogFamilyDownloadUrl, analyzeCoOccurrence, analyzeFamilyDiff, addDBCSignal, getMissionDBC, getDBCExportUrl, type LogEntry, type CANInterface, type LogFrame, type CoOccurrenceResponse, type CoOccurrenceFrame, type EcuFamily, type FamilyAnalysisResponse, type FrameDiff, type DBCSignal } from "@/lib/api"
 import { useRouter as useNavRouter } from "next/navigation"
 import { useMissionStore } from "@/lib/mission-store"
+import { LogImportButton } from "@/components/log-import-button"
 
 const steps = [
   { number: 1, title: "Capturer une action", description: "Enregistrez le trafic CAN pendant une action vehicule" },
@@ -1056,12 +1057,21 @@ export default function Isolation() {
       <Dialog open={showImportDialog} onOpenChange={setShowImportDialog}>
         <DialogContent className="max-w-[95vw] sm:max-w-lg overflow-hidden">
 <DialogHeader>
-  <DialogTitle>Importer un log</DialogTitle>
+  <div className="flex items-center justify-between">
+    <DialogTitle>Importer un log</DialogTitle>
+    <LogImportButton 
+      missionId={missionId} 
+      onImportSuccess={() => {
+        if (missionId) loadMissionLogs(missionId)
+      }} 
+      size="sm"
+    />
+  </div>
   <DialogDescription>
   {pendingAnalyzeFrame ? (
-    <>Importez le log contenant la trame <span className="font-mono text-primary">{pendingAnalyzeFrame.canId}</span> pour lancer l&apos;analyse co-occurrence</>
+  <>Importez le log contenant la trame <span className="font-mono text-primary">{pendingAnalyzeFrame.canId}</span> pour lancer l&apos;analyse co-occurrence</>
   ) : (
-    <>Selectionnez un log a importer pour l&apos;isolation</>
+  <>Selectionnez un log de la mission ou importez un fichier externe</>
   )}
   </DialogDescription>
   </DialogHeader>
