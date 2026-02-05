@@ -342,7 +342,7 @@ export default function Isolation() {
   
   // Handle analyze param from Replay Rapide
   useEffect(() => {
-    if (analyzeParam) {
+    if (analyzeParam && logs.length > 0) {
       try {
         const params = new URLSearchParams(analyzeParam)
         const canId = params.get("canId")
@@ -350,32 +350,42 @@ export default function Isolation() {
         const source = params.get("source")
         
         if (canId && source) {
-          // Parse source to get log info (format: "log-name" or "qualified-logname")
-          const logName = source.replace("qualified-", "").replace("co-occurrence-", "")
+          // Parse source to get log info (format: "log-name" or "qualified-logname" or "co-occurrence-logname")
+          const logName = source.replace("qualified-", "").replace("co-occurrence-", "").replace(".log", "")
           
-          // Set the selected frame for analysis
-          setSelectedFrame({
-            timestamp: 0,
-            canId,
-            data: data || "",
-            // These will be filled by actual analysis
-          } as LogFrame)
+          // Find the log in isolation store
+          const foundLog = logs.find(l => 
+            l.name.replace(".log", "") === logName || 
+            l.id === logName ||
+            l.name.includes(logName)
+          )
           
-          // Set origin log ID from source
-          setOriginLogId(logName)
-          
-          // Open co-occurrence dialog
-          setCoOccStep("select")
-          setShowCoOccurrenceDialog(true)
-          
-          // Clear the URL param
-          router.replace("/isolation", { scroll: false })
+          if (foundLog) {
+            // Set the selected frame for analysis
+            setSelectedFrame({
+              timestamp: 0,
+              canId,
+              data: data || "",
+              interface: "can0",
+              raw: data || "",
+            } as LogFrame)
+            
+            // Set origin log ID and open the dialog
+            setOriginLogId(foundLog.id.replace(".log", ""))
+            setAnalyzingLog(foundLog)
+            setCoOccStep("select")
+            
+            // Clear the URL param
+            router.replace("/isolation", { scroll: false })
+          } else {
+            console.log("[v0] Log not found for source:", logName, "Available logs:", logs.map(l => l.name))
+          }
         }
-      } catch {
-        // Invalid param, ignore
+      } catch (e) {
+        console.log("[v0] Error parsing analyze param:", e)
       }
     }
-  }, [analyzeParam, router])
+  }, [analyzeParam, router, logs])
   
   // Load mission logs when dialog opens
   const handleOpenImport = async () => {
@@ -1386,6 +1396,7 @@ export default function Isolation() {
                         <th className="p-2 w-16">Interface</th>
                         <th className="p-2 w-20">CAN ID</th>
                         <th className="p-2">Data</th>
+                        <th className="p-2 w-20">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1407,6 +1418,26 @@ export default function Isolation() {
                             <td className="p-2">{frame.interface || "-"}</td>
                             <td className="p-2 text-primary font-semibold">{frame.canId || "-"}</td>
                             <td className="p-2">{frame.data || frame.raw}</td>
+                            <td className="p-2">
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-6 w-6"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  addFrames([{
+                                    canId: frame.canId,
+                                    data: frame.data || frame.raw || "",
+                                    timestamp: String(frame.timestamp || 0),
+                                    source: originLogId || viewingLog?.name || "unknown",
+                                  }])
+                                  navRouter.push("/replay-rapide")
+                                }}
+                                title="Envoyer vers Replay"
+                              >
+                                <Send className="h-3 w-3" />
+                              </Button>
+                            </td>
                           </tr>
                         )
                       })}
