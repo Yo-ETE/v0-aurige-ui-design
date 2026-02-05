@@ -1223,7 +1223,7 @@ export default function Isolation() {
           if (!analyzingLog) setOriginLogId(null)
         }
       }}>
-        <DialogContent className="w-[95vw] max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
+        <DialogContent className="w-[98vw] sm:w-[95vw] max-w-4xl max-h-[90vh] overflow-hidden flex flex-col p-3 sm:p-6">
           <DialogHeader className="shrink-0">
             <DialogTitle className="flex items-center gap-2 text-sm sm:text-base">
               <FileText className="h-4 w-4 sm:h-5 sm:w-5 shrink-0" />
@@ -1395,23 +1395,36 @@ export default function Isolation() {
           
           {/* Target frame info */}
           {coOccurrenceResult && (
-            <div className="flex flex-wrap items-center gap-4 py-3 px-4 rounded-lg border border-primary/30 bg-primary/5">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-4 py-3 px-4 rounded-lg border border-primary/30 bg-primary/5">
               <div className="flex items-center gap-2">
-                <span className="text-sm text-muted-foreground">Trame cible:</span>
+                <span className="text-xs sm:text-sm text-muted-foreground">Trame cible:</span>
                 <Badge className="font-mono">{coOccurrenceResult.targetFrame.canId}</Badge>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="hidden sm:flex items-center gap-2">
                 <span className="text-sm text-muted-foreground">Log analyse:</span>
-                <Badge variant="secondary" className="font-mono">{originLogId}.log</Badge>
+                <Badge variant="secondary" className="font-mono text-xs">{originLogId}.log</Badge>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-sm text-muted-foreground">IDs trouves:</span>
-                <span className="font-semibold">{coOccurrenceResult.uniqueIdsFound}</span>
+                <span className="text-xs sm:text-sm text-muted-foreground">IDs trouves:</span>
+                <span className="font-semibold text-sm">{coOccurrenceResult.uniqueIdsFound}</span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-sm text-muted-foreground">Trames:</span>
-                <span className="font-semibold">{coOccurrenceResult.totalFramesAnalyzed}</span>
+                <span className="text-xs sm:text-sm text-muted-foreground">Trames:</span>
+                <span className="font-semibold text-sm">{coOccurrenceResult.totalFramesAnalyzed}</span>
               </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="bg-transparent ml-auto text-xs"
+                onClick={() => {
+                  // Qualifier la trame cible (t0)
+                  setSelectedFamilyIds([coOccurrenceResult.targetFrame.canId])
+                  setShowFamilyDiff(true)
+                  handleFamilyDiff([coOccurrenceResult.targetFrame.canId])
+                }}
+              >
+                Qualifier t0
+              </Button>
             </div>
           )}
           

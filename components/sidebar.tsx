@@ -198,16 +198,17 @@ export function Sidebar() {
                       const isActive = pathname === item.href || 
                         (item.href !== "/" && pathname.startsWith(item.href))
                       return (
-                        <Link
-                          key={item.name}
-                          href={item.href}
-                          className={cn(
-                            "group relative flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-all",
-                            isActive
-                              ? "bg-sidebar-accent text-sidebar-primary shadow-[inset_0_0_0_1px_rgba(99,102,241,0.3)]"
-                              : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
-                          )}
-                        >
+<Link
+                                          key={item.name}
+                                          href={item.href}
+                                          onClick={() => setMobileOpen(false)}
+                                          className={cn(
+                                            "group relative flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-all",
+                                            isActive
+                                              ? "bg-sidebar-accent text-sidebar-primary shadow-[inset_0_0_0_1px_rgba(99,102,241,0.3)]"
+                                              : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+                                          )}
+                                        >
                           <item.icon
                             className={cn(
                               "h-4 w-4 flex-shrink-0",

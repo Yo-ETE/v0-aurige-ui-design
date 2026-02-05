@@ -101,3 +101,38 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Mobile responsive utilities */
+@layer utilities {
+  /* Improve touch targets on mobile */
+  @media (max-width: 640px) {
+    .btn, button {
+      min-height: 44px;
+    }
+    
+    /* Reduce padding on cards for mobile */
+    .card-content-mobile {
+      padding: 0.75rem;
+    }
+    
+    /* Smaller text on mobile */
+    .text-responsive {
+      font-size: 0.75rem;
+    }
+    
+    /* Hide on mobile */
+    .hide-mobile {
+      display: none;
+    }
+  }
+  
+  /* Scrollable tables on mobile */
+  .table-responsive {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  .table-responsive table {
+    min-width: 500px;
+  }
+}

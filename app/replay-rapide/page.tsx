@@ -55,6 +55,8 @@ export default function ReplayRapide() {
   
   // Save frame to DBC
   const handleSaveToDBC = async (canId: string, data: string, source?: string) => {
+    console.log("[v0] handleSaveToDBC called:", { canId, data, source, missionId: currentMission?.id })
+    
     if (!currentMission?.id) {
       toast({ title: "Erreur", description: "Aucune mission selectionnee", variant: "destructive" })
       return
@@ -76,9 +78,11 @@ export default function ReplayRapide() {
         comment: source ? `Trame rejouee: ${source}` : "Trame rejouee depuis Replay Rapide",
         sample_status: data,
       }
+      console.log("[v0] Calling addDBCSignal with:", { missionId: currentMission.id, signal })
       await addDBCSignal(currentMission.id, signal)
       toast({ title: "Enregistre", description: `Signal ${canId} ajoute au DBC` })
     } catch (err) {
+      console.error("[v0] addDBCSignal error:", err)
       toast({ title: "Erreur", description: "Echec de l'enregistrement DBC", variant: "destructive" })
     }
   }
@@ -205,24 +209,24 @@ export default function ReplayRapide() {
       title="Replay Rapide"
       description="Envoi rapide de trames CAN avec raccourcis clavier"
     >
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid gap-4 sm:gap-6 grid-cols-1 lg:grid-cols-2">
         {error && (
           <Alert className="lg:col-span-2 border-destructive/50 bg-destructive/10">
             <AlertTriangle className="h-4 w-4 text-destructive" />
-            <AlertDescription className="text-destructive">{error}</AlertDescription>
+            <AlertDescription className="text-destructive text-sm">{error}</AlertDescription>
           </Alert>
         )}
 
         {/* Interface Selector */}
         <Card className="lg:col-span-2 border-border bg-card">
-          <CardContent className="py-4">
-            <div className="flex items-center gap-4">
-              <Label htmlFor="can-interface" className="whitespace-nowrap">Interface CAN:</Label>
+          <CardContent className="py-3 sm:py-4">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4">
+              <Label htmlFor="can-interface" className="whitespace-nowrap text-sm">Interface CAN:</Label>
               <Select
                 value={canInterface}
                 onValueChange={(v) => setCanInterface(v as CANInterface)}
               >
-                <SelectTrigger id="can-interface" className="w-48">
+                <SelectTrigger id="can-interface" className="w-full sm:w-48">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -457,15 +461,16 @@ export default function ReplayRapide() {
                     onClick={handleReplayExported}
                     disabled={isReplayingExported}
                     className="gap-2"
+                    size="sm"
                   >
                     {isReplayingExported ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (
                       <Play className="h-4 w-4" />
                     )}
-                    {isReplayingExported ? "Replay..." : "Rejouer tout"}
+                    <span className="hidden sm:inline">{isReplayingExported ? "Replay..." : "Rejouer tout"}</span>
                   </Button>
-                  <Button variant="outline" size="icon" onClick={clearExported} className="bg-transparent">
+                  <Button variant="outline" size="icon" onClick={clearExported} className="bg-transparent h-8 w-8">
                     <Trash2 className="h-4 w-4" />
                   </Button>
                 </div>
