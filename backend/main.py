@@ -3644,6 +3644,155 @@ async def export_dbc(mission_id: str):
     )
 
 
+# =============================================================================
+# LOG COMPARISON - Compare two logs to find differential frames
+# =============================================================================
+
+class CompareLogsRequest(BaseModel):
+    mission_id: str
+    log_a_id: str  # e.g. "ouverture" log
+    log_b_id: str  # e.g. "fermeture" log
+
+class CompareFrameDiff(BaseModel):
+    can_id: str
+    payload_a: str  # Most common payload in log A
+    payload_b: str  # Most common payload in log B
+    count_a: int    # Number of frames in log A
+    count_b: int    # Number of frames in log B
+    bytes_changed: list[int]  # Indices of bytes that changed
+    classification: str  # "differential", "only_a", "only_b", "identical"
+    confidence: float
+
+class CompareLogsResponse(BaseModel):
+    log_a_name: str
+    log_b_name: str
+    total_ids_a: int
+    total_ids_b: int
+    differential_count: int  # IDs with different payloads
+    only_a_count: int        # IDs only in log A
+    only_b_count: int        # IDs only in log B
+    identical_count: int     # IDs with same payload in both
+    frames: list[CompareFrameDiff]
+
+@app.post("/api/missions/{mission_id}/compare-logs", response_model=CompareLogsResponse)
+async def compare_logs(mission_id: str, request: CompareLogsRequest):
+    """Compare two logs to identify differential frames between states (e.g., open vs closed)"""
+    from collections import Counter, defaultdict
+    
+    mission_dir = Path(MISSIONS_DIR) / mission_id
+    if not mission_dir.exists():
+        raise HTTPException(status_code=404, detail="Mission non trouvee")
+    
+    log_a_file = mission_dir / "logs" / f"{request.log_a_id}.log"
+    log_b_file = mission_dir / "logs" / f"{request.log_b_id}.log"
+    
+    if not log_a_file.exists():
+        raise HTTPException(status_code=404, detail=f"Log A non trouve: {request.log_a_id}")
+    if not log_b_file.exists():
+        raise HTTPException(status_code=404, detail=f"Log B non trouve: {request.log_b_id}")
+    
+    def parse_log(log_file: Path) -> dict[str, list[str]]:
+        """Parse log and return dict of can_id -> list of payloads"""
+        frames = defaultdict(list)
+        with open(log_file, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                match = re.match(r"\((\d+\.\d+)\)\s+\w+\s+([0-9A-Fa-f]+)#([0-9A-Fa-f]*)", line)
+                if match:
+                    can_id = match.group(2).upper()
+                    data = match.group(3).upper()
+                    frames[can_id].append(data)
+        return dict(frames)
+    
+    def get_most_common(data_list: list[str]) -> str:
+        if not data_list:
+            return ""
+        return Counter(data_list).most_common(1)[0][0]
+    
+    # Parse both logs
+    frames_a = parse_log(log_a_file)
+    frames_b = parse_log(log_b_file)
+    
+    # Get all unique CAN IDs
+    all_ids = set(frames_a.keys()) | set(frames_b.keys())
+    
+    # Compare each ID
+    results = []
+    differential_count = 0
+    only_a_count = 0
+    only_b_count = 0
+    identical_count = 0
+    
+    for can_id in sorted(all_ids):
+        payloads_a = frames_a.get(can_id, [])
+        payloads_b = frames_b.get(can_id, [])
+        
+        payload_a = get_most_common(payloads_a)
+        payload_b = get_most_common(payloads_b)
+        
+        # Determine classification
+        if not payloads_a:
+            classification = "only_b"
+            only_b_count += 1
+            confidence = 80.0
+        elif not payloads_b:
+            classification = "only_a"
+            only_a_count += 1
+            confidence = 80.0
+        elif payload_a == payload_b:
+            classification = "identical"
+            identical_count += 1
+            confidence = 95.0
+        else:
+            classification = "differential"
+            differential_count += 1
+            # Higher confidence if more samples
+            confidence = min(95.0, 60.0 + min(len(payloads_a), len(payloads_b)) * 2)
+        
+        # Find changed bytes
+        bytes_changed = []
+        if payload_a and payload_b:
+            max_len = max(len(payload_a), len(payload_b))
+            pa = payload_a.ljust(max_len, "0")
+            pb = payload_b.ljust(max_len, "0")
+            for i in range(0, max_len, 2):
+                byte_a = pa[i:i+2]
+                byte_b = pb[i:i+2]
+                if byte_a != byte_b:
+                    bytes_changed.append(i // 2)
+        
+        # Only include interesting frames (not identical unless few)
+        if classification != "identical" or len(all_ids) < 50:
+            results.append(CompareFrameDiff(
+                can_id=can_id,
+                payload_a=payload_a,
+                payload_b=payload_b,
+                count_a=len(payloads_a),
+                count_b=len(payloads_b),
+                bytes_changed=bytes_changed,
+                classification=classification,
+                confidence=confidence
+            ))
+    
+    # Sort by classification priority: differential > only_a > only_b > identical
+    priority = {"differential": 0, "only_a": 1, "only_b": 2, "identical": 3}
+    results.sort(key=lambda x: (priority.get(x.classification, 4), -x.confidence))
+    
+    return CompareLogsResponse(
+        log_a_name=request.log_a_id,
+        log_b_name=request.log_b_id,
+        total_ids_a=len(frames_a),
+        total_ids_b=len(frames_b),
+        differential_count=differential_count,
+        only_a_count=only_a_count,
+        only_b_count=only_b_count,
+        identical_count=identical_count,
+        frames=results
+    )
+
+
 # Service management endpoints
 @app.post("/api/system/restart-services")
 async def restart_services():

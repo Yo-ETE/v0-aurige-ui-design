@@ -935,3 +935,45 @@ export function getDBCExportUrl(missionId: string): string {
 export function getMissionExportUrl(missionId: string): string {
   return `${getApiBaseUrl()}/api/missions/${missionId}/export`
 }
+
+// =============================================================================
+// Log Comparison API
+// =============================================================================
+
+export interface CompareFrameDiff {
+  can_id: string
+  payload_a: string
+  payload_b: string
+  count_a: number
+  count_b: number
+  bytes_changed: number[]
+  classification: "differential" | "only_a" | "only_b" | "identical"
+  confidence: number
+}
+
+export interface CompareLogsResponse {
+  log_a_name: string
+  log_b_name: string
+  total_ids_a: number
+  total_ids_b: number
+  differential_count: number
+  only_a_count: number
+  only_b_count: number
+  identical_count: number
+  frames: CompareFrameDiff[]
+}
+
+export async function compareLogs(
+  missionId: string,
+  logAId: string,
+  logBId: string
+): Promise<CompareLogsResponse> {
+  return fetchApi(`/missions/${missionId}/compare-logs`, {
+    method: "POST",
+    body: JSON.stringify({
+      mission_id: missionId,
+      log_a_id: logAId,
+      log_b_id: logBId,
+    }),
+  })
+}

@@ -14,6 +14,7 @@ import {
   Video,
   Zap,
   GitBranch,
+  GitCompare,
   Activity,
   Flame,
   Cpu,
@@ -63,8 +64,9 @@ const baseNavigation: NavSection[] = [
     items: [
       { name: "Capture & Replay", href: "/capture-replay", icon: Video },
       { name: "Replay Rapide", href: "/replay-rapide", icon: Zap },
-      { name: "Isolation", href: "/isolation", icon: GitBranch },
-      { name: "DBC", href: "/dbc", icon: FileCode },
+{ name: "Isolation", href: "/isolation", icon: GitBranch },
+  { name: "Comparaison", href: "/comparaison", icon: GitCompare },
+  { name: "DBC", href: "/dbc", icon: FileCode },
     ],
   },
   {
