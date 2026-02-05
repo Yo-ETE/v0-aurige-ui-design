@@ -619,9 +619,10 @@ export default function Isolation() {
   const handleAnalyzeCoOccurrence = async (log: IsolationLog) => {
     if (!missionId) return
     
-    // Load ALL logs from the mission
-    const logsForSelection = await loadAvailableLogsForAnalysis()
-    setAvailableLogsForAnalysis(logsForSelection)
+    try {
+      // Load ALL logs from the mission
+      const logsForSelection = await loadAvailableLogsForAnalysis()
+      setAvailableLogsForAnalysis(logsForSelection)
       
       // Find the root log in the isolation tree for default selection
       let rootLogId = log.id
