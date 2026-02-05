@@ -343,66 +343,6 @@ export default function Isolation() {
     }
   }, [currentMissionId, setMission])
   
-  // Handle analyze param from Replay Rapide
-  useEffect(() => {
-    if (analyzeParam && missionId) {
-      const handleAnalyzeParam = async () => {
-        try {
-          const params = new URLSearchParams(analyzeParam)
-          const canId = params.get("canId")
-          const data = params.get("data")
-          const source = params.get("source")
-          
-          if (canId) {
-            // Load all mission logs for selection
-            const logsForSelection = await loadAvailableLogsForAnalysis()
-            setAvailableLogsForAnalysis(logsForSelection)
-            
-            // Set the frame to analyze
-            setSelectedFrame({
-              timestamp: 0,
-              canId,
-              data: data || "",
-              interface: "can0",
-              raw: data || "",
-            } as LogFrame)
-            
-            // Try to find the source log in the list
-            const logName = source ? source.replace("qualified-", "").replace("co-occurrence-", "").replace(".log", "") : ""
-            const matchingLog = logsForSelection.find(l => 
-              l.name.replace(".log", "") === logName || 
-              l.id === logName ||
-              l.name.includes(logName)
-            )
-            
-            if (matchingLog) {
-              setOriginLogId(matchingLog.id)
-            }
-            
-            // Create a minimal log object to open the dialog
-            setAnalyzingLog({
-              id: matchingLog?.id || "pending",
-              name: matchingLog?.name || source || "Log",
-              filename: matchingLog?.name || source || "Log",
-              missionId: missionId,
-              tags: [],
-              frameCount: 0,
-            })
-            
-            setCoOccStep("select")
-            
-            // Clear the URL param
-            router.replace("/isolation", { scroll: false })
-          }
-        } catch {
-          // Invalid param, ignore
-        }
-      }
-      
-      handleAnalyzeParam()
-    }
-  }, [analyzeParam, router, missionId])
-  
   // Load mission logs when dialog opens
   const handleOpenImport = async () => {
     setShowImportDialog(true)
@@ -613,6 +553,66 @@ export default function Isolation() {
       return []
     }
   }
+  
+  // Handle analyze param from Replay Rapide
+  useEffect(() => {
+    if (analyzeParam && missionId) {
+      const handleAnalyzeParam = async () => {
+        try {
+          const params = new URLSearchParams(analyzeParam)
+          const canId = params.get("canId")
+          const data = params.get("data")
+          const source = params.get("source")
+          
+          if (canId) {
+            // Load all mission logs for selection
+            const logsForSelection = await loadAvailableLogsForAnalysis()
+            setAvailableLogsForAnalysis(logsForSelection)
+            
+            // Set the frame to analyze
+            setSelectedFrame({
+              timestamp: 0,
+              canId,
+              data: data || "",
+              interface: "can0",
+              raw: data || "",
+            } as LogFrame)
+            
+            // Try to find the source log in the list
+            const logName = source ? source.replace("qualified-", "").replace("co-occurrence-", "").replace(".log", "") : ""
+            const matchingLog = logsForSelection.find(l => 
+              l.name.replace(".log", "") === logName || 
+              l.id === logName ||
+              l.name.includes(logName)
+            )
+            
+            if (matchingLog) {
+              setOriginLogId(matchingLog.id)
+            }
+            
+            // Create a minimal log object to open the dialog
+            setAnalyzingLog({
+              id: matchingLog?.id || "pending",
+              name: matchingLog?.name || source || "Log",
+              filename: matchingLog?.name || source || "Log",
+              missionId: missionId,
+              tags: [],
+              frameCount: 0,
+            })
+            
+            setCoOccStep("select")
+            
+            // Clear the URL param
+            router.replace("/isolation", { scroll: false })
+          }
+        } catch {
+          // Invalid param, ignore
+        }
+      }
+      
+      handleAnalyzeParam()
+    }
+  }, [analyzeParam, router, missionId])
   
   // Co-occurrence analysis handlers
   // Step 1: Open the log viewer to select a frame
