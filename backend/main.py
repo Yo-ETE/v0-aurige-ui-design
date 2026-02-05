@@ -3118,31 +3118,42 @@ async def start_update():
                 update_output_store["lines"].append(f"[ERROR] Erreur install_pi.sh (code: {process.returncode})")
             else:
                 update_output_store["lines"].append("[OK] Mise a jour terminee!")
-                update_output_store["lines"].append(">>> Redemarrage automatique des services...")
+                update_output_store["lines"].append(">>> Redemarrage automatique des services dans 3 secondes...")
                 
-                # Use nohup + disown pattern to survive process termination
-                # The script runs as root via systemd, so sudo should work
-                restart_cmd = (
-                    "nohup bash -c '"
-                    "sleep 2 && "
-                    "systemctl restart aurige-web.service && "
-                    "sleep 1 && "
-                    "systemctl restart aurige-api.service"
-                    "' > /tmp/aurige_restart.log 2>&1 &"
-                )
-                
+                # Use systemd-run to create a completely independent transient service
+                # This survives when aurige-api is killed
                 import subprocess
-                # Run via shell to properly handle nohup/background
+                
+                # Create restart script
+                restart_script = "/tmp/aurige_restart_services.sh"
+                with open(restart_script, "w") as f:
+                    f.write("#!/bin/bash\n")
+                    f.write("sleep 3\n")
+                    f.write("systemctl restart aurige-web.service\n")
+                    f.write("sleep 2\n")
+                    f.write("systemctl restart aurige-api.service\n")
+                os.chmod(restart_script, 0o755)
+                
+                # Use systemd-run to execute the script as a transient service
                 result = subprocess.run(
-                    ["bash", "-c", restart_cmd],
+                    ["systemd-run", "--no-block", "--unit=aurige-restart-temp", "/bin/bash", restart_script],
                     capture_output=True,
                     text=True
                 )
                 
                 if result.returncode == 0:
-                    update_output_store["lines"].append("[OK] Services vont redemarrer dans 2 secondes. Rechargez la page.")
+                    update_output_store["lines"].append("[OK] Services vont redemarrer automatiquement. Rechargez la page dans 5-10 secondes.")
                 else:
-                    update_output_store["lines"].append(f"[WARNING] Redemarrage auto echoue: {result.stderr}. Utilisez le bouton manuel.")
+                    # Fallback: try with at command
+                    at_result = subprocess.run(
+                        ["bash", "-c", f"echo '{restart_script}' | at now + 1 minute 2>/dev/null || echo 'at failed'"],
+                        capture_output=True,
+                        text=True
+                    )
+                    if "at failed" not in at_result.stdout:
+                        update_output_store["lines"].append("[OK] Services vont redemarrer dans 1 minute. Rechargez la page.")
+                    else:
+                        update_output_store["lines"].append("[WARNING] Redemarrage auto echoue. Utilisez le bouton 'Redemarrer services'.")
             
         except Exception as e:
             update_output_store["lines"].append(f"[ERROR] {str(e)}")
