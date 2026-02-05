@@ -108,6 +108,7 @@ export default function ComparaisonPage() {
   const { addFrames } = useExportStore()
 
   const [missionId, setMissionId] = useState<string>("")
+  const [missionResolved, setMissionResolved] = useState(false)
   const [viewMode, setViewMode] = useState<ViewMode>("list")
 
   // Saved comparisons
@@ -144,12 +145,20 @@ export default function ComparaisonPage() {
     if (effectiveMissionId) {
       setMissionId(effectiveMissionId)
     }
+    // Mark as resolved after checking - whether we found a mission or not
+    setMissionResolved(true)
   }, [currentMissionId])
 
   useEffect(() => {
     if (missionId) {
       loadSavedComparisons()
       loadLogs()
+    } else {
+      // Reset when no mission
+      setSavedComparisons([])
+      setMissionLogs([])
+      setComparisonResult(null)
+      setViewMode("list")
     }
   }, [missionId])
 
@@ -359,19 +368,6 @@ export default function ComparaisonPage() {
     return <span className="font-mono text-xs">{bytes}</span>
   }
 
-  // Wait for mission ID to be resolved before rendering
-  const [missionResolved, setMissionResolved] = useState(false)
-  
-  useEffect(() => {
-    if (missionId) {
-      setMissionResolved(true)
-    } else {
-      // Give time for localStorage/store to load
-      const timeout = setTimeout(() => setMissionResolved(true), 500)
-      return () => clearTimeout(timeout)
-    }
-  }, [missionId])
-  
   if (!missionResolved) {
     return (
       <AppShell title="Comparaison de Logs" description="Chargement...">
