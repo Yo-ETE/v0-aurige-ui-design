@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/dialog"
 import { MissionWizard } from "@/components/dashboard/mission-wizard"
 import { useMissionStore, type Mission } from "@/lib/mission-store"
+import { getMissionExportUrl } from "@/lib/api"
 import {
   Car,
   Edit2,
@@ -189,13 +190,8 @@ export default function MissionPage() {
   }
 
   const handleExport = () => {
-    // Trigger download via link
-    const link = document.createElement("a")
-    link.href = `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/missions/${mission.id}/export`
-    link.download = `${mission.name}.zip`
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
+    // Trigger download via link using the correct API URL
+    window.location.href = getMissionExportUrl(mission.id)
   }
 
   const handleDelete = () => {

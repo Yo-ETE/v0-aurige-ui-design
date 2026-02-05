@@ -2058,19 +2058,6 @@ export default function Isolation() {
                   <Send className="h-4 w-4" />
                   Envoyer vers Replay Rapide
                 </Button>
-                <Button 
-                  variant="outline" 
-                  className="bg-transparent gap-1"
-                  onClick={() => {
-                    // Copy qualified frame IDs to clipboard
-                    const qualifiedFrames = familyDiffResult.frames_analysis
-                      .filter(f => f.classification === "status" || f.classification === "ack")
-                      .map(f => f.can_id)
-                    navigator.clipboard.writeText(qualifiedFrames.join(","))
-                  }}
-                >
-                  Copier IDs qualifies
-                </Button>
                 {missionId && (
                   <Button variant="outline" className="bg-transparent gap-1" asChild>
                     <a href={getDBCExportUrl(missionId)} download>

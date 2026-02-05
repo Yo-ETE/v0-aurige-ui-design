@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
+import { AppShell } from "@/components/app-shell"
 import { useMissionStore } from "@/lib/mission-store"
-import { useReplayStore } from "@/lib/replay-store"
+import { useExportStore } from "@/lib/export-store"
 import {
   getMissionDBC,
   deleteDBCSignal,
@@ -60,7 +61,6 @@ import {
   ChevronDown,
   AlertCircle,
   Search,
-  Copy,
   FileText,
 } from "lucide-react"
 
@@ -68,7 +68,7 @@ export default function DBCPage() {
   const router = useRouter()
   const currentMission = useMissionStore((state) => state.getCurrentMission())
   const missionId = currentMission?.id
-  const addFrames = useReplayStore((state) => state.addFrames)
+  const addFrames = useExportStore((state) => state.addFrames)
   
   const [dbcData, setDbcData] = useState<MissionDBC | null>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -195,12 +195,6 @@ export default function DBCPage() {
     router.push("/replay-rapide")
   }
 
-  // Copy CAN IDs to clipboard
-  const handleCopyIds = (messages: DBCMessage[]) => {
-    const ids = messages.map(m => m.can_id).join(",")
-    navigator.clipboard.writeText(ids)
-  }
-
   // Filter messages
   const filteredMessages = dbcData?.messages.filter(msg => {
     const term = searchTerm.toLowerCase()
@@ -216,24 +210,27 @@ export default function DBCPage() {
 
   if (!missionId) {
     return (
-      <div className="p-6">
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12">
-            <AlertCircle className="h-12 w-12 text-muted-foreground mb-4" />
-            <h3 className="text-lg font-medium mb-2">Aucune mission selectionnee</h3>
-            <p className="text-sm text-muted-foreground mb-4">
-              Selectionnez une mission depuis le Dashboard pour acceder au DBC.
-            </p>
-            <Button onClick={() => router.push("/")}>
-              Aller au Dashboard
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
+      <AppShell>
+        <div className="p-6">
+          <Card>
+            <CardContent className="flex flex-col items-center justify-center py-12">
+              <AlertCircle className="h-12 w-12 text-muted-foreground mb-4" />
+              <h3 className="text-lg font-medium mb-2">Aucune mission selectionnee</h3>
+              <p className="text-sm text-muted-foreground mb-4">
+                Selectionnez une mission depuis le Dashboard pour acceder au DBC.
+              </p>
+              <Button onClick={() => router.push("/")}>
+                Aller au Dashboard
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      </AppShell>
     )
   }
 
   return (
+    <AppShell>
     <div className="p-6 space-y-6">
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -293,31 +290,19 @@ export default function DBCPage() {
             className="pl-10"
           />
         </div>
-        <div className="flex items-center gap-2">
-          <Button 
-            variant="outline" 
-            size="sm" 
-            className="bg-transparent gap-1"
-            onClick={() => handleCopyIds(filteredMessages)}
-            disabled={filteredMessages.length === 0}
-          >
-            <Copy className="h-4 w-4" />
-            Copier IDs
-          </Button>
-          <Button 
-            variant="default" 
-            size="sm" 
-            className="gap-1"
-            onClick={() => {
-              const allSignals = filteredMessages.flatMap(m => m.signals)
-              handleSendToReplay(allSignals)
-            }}
-            disabled={filteredMessages.length === 0}
-          >
-            <Send className="h-4 w-4" />
-            Envoyer vers Replay
-          </Button>
-        </div>
+        <Button 
+          variant="default" 
+          size="sm" 
+          className="gap-1"
+          onClick={() => {
+            const allSignals = filteredMessages.flatMap(m => m.signals)
+            handleSendToReplay(allSignals)
+          }}
+          disabled={filteredMessages.length === 0}
+        >
+          <Send className="h-4 w-4" />
+          Envoyer vers Replay
+        </Button>
       </div>
 
       {/* Messages List */}
@@ -711,5 +696,6 @@ export default function DBCPage() {
         </DialogContent>
       </Dialog>
     </div>
+    </AppShell>
   )
 }
