@@ -8,7 +8,8 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Zap, Keyboard, Send, AlertTriangle, Loader2, Import, Trash2, Play } from "lucide-react"
+import { Zap, Keyboard, Send, AlertTriangle, Loader2, Import, Trash2, Play, FlaskConical } from "lucide-react"
+import { useRouter } from "next/navigation"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { sendCANFrame, type CANInterface } from "@/lib/api"
@@ -46,6 +47,7 @@ export default function ReplayRapide() {
   // Exported frames from isolation
   const { frames: exportedFrames, clearFrames: clearExported, removeFrame: removeExportedFrame } = useExportStore()
   const [isReplayingExported, setIsReplayingExported] = useState(false)
+  const router = useRouter()
   
   const handleSlotChange = (index: number, field: "id" | "data", value: string) => {
     const newSlots = [...slots]
@@ -464,6 +466,23 @@ export default function ReplayRapide() {
                                 title="Envoyer"
                               >
                                 <Send className="h-3 w-3" />
+                              </Button>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-6 w-6 text-amber-500"
+                                onClick={() => {
+                                  // Go to Isolation to analyze this frame with its source log
+                                  const params = new URLSearchParams({
+                                    canId: frame.canId,
+                                    data: frame.data,
+                                    source: frame.source || "",
+                                  })
+                                  router.push(`/isolation?analyze=${params.toString()}`)
+                                }}
+                                title="Analyser dans Isolation"
+                              >
+                                <FlaskConical className="h-3 w-3" />
                               </Button>
                               <Button
                                 size="icon"

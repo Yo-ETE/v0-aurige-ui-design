@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { AppShell } from "@/components/app-shell"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -266,8 +266,12 @@ function LogTreeItem({
 export default function Isolation() {
   const router = useRouter()
   const navRouter = useNavRouter()
+  const searchParams = useSearchParams()
   const { logs, importLog, addChildLog, removeLog, updateLogTags, updateLogName, clearLogs, setMission, findLog } = useIsolationStore()
   const { addFrames } = useExportStore()
+  
+  // Analyze param from Replay Rapide (frame to analyze with source context)
+  const analyzeParam = searchParams.get("analyze")
   
   // Mission context
   const currentMissionId = useMissionStore((state) => state.currentMissionId)
@@ -335,6 +339,43 @@ export default function Isolation() {
       setMission(null)
     }
   }, [currentMissionId, setMission])
+  
+  // Handle analyze param from Replay Rapide
+  useEffect(() => {
+    if (analyzeParam) {
+      try {
+        const params = new URLSearchParams(analyzeParam)
+        const canId = params.get("canId")
+        const data = params.get("data")
+        const source = params.get("source")
+        
+        if (canId && source) {
+          // Parse source to get log info (format: "log-name" or "qualified-logname")
+          const logName = source.replace("qualified-", "").replace("co-occurrence-", "")
+          
+          // Set the selected frame for analysis
+          setSelectedFrame({
+            timestamp: 0,
+            canId,
+            data: data || "",
+            // These will be filled by actual analysis
+          } as LogFrame)
+          
+          // Set origin log ID from source
+          setOriginLogId(logName)
+          
+          // Open co-occurrence dialog
+          setCoOccStep("select")
+          setShowCoOccurrenceDialog(true)
+          
+          // Clear the URL param
+          router.replace("/isolation", { scroll: false })
+        }
+      } catch {
+        // Invalid param, ignore
+      }
+    }
+  }, [analyzeParam, router])
   
   // Load mission logs when dialog opens
   const handleOpenImport = async () => {
@@ -795,7 +836,15 @@ export default function Isolation() {
   }
   
   const handleTagChange = (logId: string, tag: "success" | "failed") => {
-    updateLogTags(logId, [tag])
+    // Find the log to check if it already has the tag
+    const log = findLog(logId)
+    if (log?.tags.includes(tag)) {
+      // Remove the tag (toggle off)
+      updateLogTags(logId, log.tags.filter(t => t !== tag))
+    } else {
+      // Add the tag (toggle on)
+      updateLogTags(logId, [tag])
+    }
   }
 
   const handleDeleteLog = async (logId: string) => {
