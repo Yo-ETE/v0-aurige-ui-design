@@ -2737,6 +2737,21 @@ async def get_wifi_status():
                     internet_source = "Ethernet"
                 elif internet_interface.startswith("usb") or internet_interface.startswith("enx"):
                     internet_source = "USB Tethering"
+                    # Try to detect USB device name
+                    try:
+                        usb_result = run_command(["lsusb"], check=False)
+                        if usb_result.returncode == 0:
+                            for uline in usb_result.stdout.split("\n"):
+                                uline_lower = uline.lower()
+                                # Common phone tethering identifiers
+                                if any(kw in uline_lower for kw in ["rndis", "cdc", "tether", "android", "apple", "iphone", "samsung", "huawei", "xiaomi"]):
+                                    # Extract device name after ID xxxx:xxxx
+                                    parts = uline.split(" ", 6)
+                                    if len(parts) >= 7:
+                                        internet_via = parts[6].strip()
+                                    break
+                    except:
+                        pass
                 elif internet_interface == "wlan1":
                     # Second WiFi adapter - get its SSID
                     ssid_result = run_command(["iwgetid", "-r", internet_interface], check=False)

@@ -445,13 +445,18 @@ export default function ConfigurationPage() {
                       </div>
                       <div className="col-span-2">
                         <p className="text-xs text-muted-foreground">Source Internet</p>
-                        <p className="font-medium flex items-center gap-2">
-                          {wifiStatus.internetSource === "Ethernet" && <Cable className="h-3 w-3" />}
-                          {wifiStatus.internetSource === "USB Tethering" && <Usb className="h-3 w-3" />}
-                          {wifiStatus.internetSource?.startsWith("WiFi") && <Wifi className="h-3 w-3" />}
-                          {wifiStatus.internetSource || "Non detecte"}
-                          {wifiStatus.internetVia && ` (${wifiStatus.internetVia})`}
-                        </p>
+                        <div className="flex items-center gap-2 font-medium">
+                          {wifiStatus.internetSource === "Ethernet" && <Cable className="h-3.5 w-3.5 text-primary" />}
+                          {wifiStatus.internetSource === "USB Tethering" && <Usb className="h-3.5 w-3.5 text-primary" />}
+                          {wifiStatus.internetSource?.startsWith("WiFi") && <Wifi className="h-3.5 w-3.5 text-primary" />}
+                          <span>{wifiStatus.internetSource || "Non detecte"}</span>
+                        </div>
+                        {wifiStatus.internetVia && (
+                          <p className="text-xs text-muted-foreground mt-0.5 pl-5.5">
+                            {wifiStatus.internetSource?.startsWith("WiFi") ? "SSID: " : ""}
+                            {wifiStatus.internetVia}
+                          </p>
+                        )}
                       </div>
                       <div className="col-span-2 pt-2 border-t border-border/50">
                         <p className="text-xs text-muted-foreground mb-1">Connectivite Internet</p>
