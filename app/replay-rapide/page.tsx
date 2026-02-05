@@ -8,15 +8,12 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Zap, Keyboard, Send, AlertTriangle, Loader2, Import, Trash2, Play, FileCode, FlaskConical } from "lucide-react"
+import { Zap, Keyboard, Send, AlertTriangle, Loader2, Import, Trash2, Play } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { useRouter } from "next/navigation"
-import { sendCANFrame, addDBCSignal, type CANInterface } from "@/lib/api"
+import { sendCANFrame, type CANInterface } from "@/lib/api"
 import { SentFramesHistory, useSentFramesHistory } from "@/components/sent-frames-history"
 import { useExportStore } from "@/lib/export-store"
-import { useMissionStore } from "@/lib/mission-store"
-import { useToast } from "@/hooks/use-toast"
 
 interface QuickSlot {
   key: string
@@ -50,42 +47,6 @@ export default function ReplayRapide() {
   const { frames: exportedFrames, clearFrames: clearExported, removeFrame: removeExportedFrame } = useExportStore()
   const [isReplayingExported, setIsReplayingExported] = useState(false)
   
-  // DBC save and navigation
-  const currentMission = useMissionStore((state) => state.currentMission)
-  const { toast } = useToast()
-  const router = useRouter()
-  
-  // Save frame to DBC
-  const handleSaveToDBC = async (canId: string, data: string, source?: string) => {
-    if (!currentMission?.id) {
-      toast({ title: "Erreur", description: "Aucune mission selectionnee. Selectionnez une mission dans le Dashboard.", variant: "destructive" })
-      return
-    }
-    
-    try {
-      const signal = {
-        can_id: canId,
-        name: `SIG_${canId}_REPLAY_${Date.now().toString(36).slice(-4).toUpperCase()}`,
-        start_bit: 0,
-        length: Math.min(data.length * 4, 64), // bits, max 64 for 8 bytes
-        byte_order: "little_endian" as const,
-        is_signed: false,
-        scale: 1,
-        offset: 0,
-        min_val: 0,
-        max_val: 255,
-        unit: "",
-        comment: source ? `Trame rejouee: ${source}` : "Trame rejouee depuis Replay Rapide",
-        sample_status: data,
-      }
-      const result = await addDBCSignal(currentMission.id, signal)
-      toast({ title: "Enregistre", description: `Signal ${signal.name} ajoute au DBC` })
-    } catch (err: unknown) {
-      const errorMsg = err instanceof Error ? err.message : "Erreur inconnue"
-      toast({ title: "Erreur DBC", description: errorMsg, variant: "destructive" })
-    }
-  }
-
   const handleSlotChange = (index: number, field: "id" | "data", value: string) => {
     const newSlots = [...slots]
     newSlots[index][field] = value
@@ -503,27 +464,6 @@ export default function ReplayRapide() {
                                 title="Envoyer"
                               >
                                 <Send className="h-3 w-3" />
-                              </Button>
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                className="h-6 w-6 text-amber-500"
-                                onClick={() => {
-                                  // Go to isolation with this CAN ID for qualification
-                                  router.push(`/isolation?qualify=${frame.canId}`)
-                                }}
-                                title="Qualifier dans Isolation"
-                              >
-                                <FlaskConical className="h-3 w-3" />
-                              </Button>
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                className="h-6 w-6 text-primary"
-                                onClick={() => handleSaveToDBC(frame.canId, frame.data, frame.source)}
-                                title="Enregistrer dans DBC"
-                              >
-                                <FileCode className="h-3 w-3" />
                               </Button>
                               <Button
                                 size="icon"

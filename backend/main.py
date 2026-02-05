@@ -3326,19 +3326,14 @@ async def analyze_family_diff(request: AnalyzeFamilyRequest) -> FamilyAnalysisRe
             sample_ack = get_representative(ack_data) or ""
             sample_status = get_representative(status_data) or ""
             
-            # Pad all to same length for comparison
-            max_len = max(len(sample_before), len(sample_ack), len(sample_status), 16)
-            if sample_before:
-                sample_before = sample_before.ljust(max_len, "0")[:max_len]
-            if sample_ack:
-                sample_ack = sample_ack.ljust(max_len, "0")[:max_len]
-            if sample_status:
-                sample_status = sample_status.ljust(max_len, "0")[:max_len]
+            # Keep original payload lengths - no padding to 16
+            # Only pad to match lengths between samples for comparison
+            max_len = max(len(sample_before), len(sample_ack), len(sample_status)) or 16
             
             # Calculate byte-level diff (BEFORE vs STATUS for persistence)
             bytes_diff = []
-            compare_before = sample_before or "0" * max_len
-            compare_after = sample_status or sample_ack or "0" * max_len
+            compare_before = sample_before.ljust(max_len, "0") if sample_before else "0" * max_len
+            compare_after = (sample_status or sample_ack or "").ljust(max_len, "0") if (sample_status or sample_ack) else "0" * max_len
             
             for i in range(0, min(len(compare_before), len(compare_after)), 2):
                 byte_before = compare_before[i:i+2] if i+2 <= len(compare_before) else "00"
