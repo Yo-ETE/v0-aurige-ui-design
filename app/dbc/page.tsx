@@ -62,7 +62,6 @@ import {
   AlertCircle,
   Search,
   FileText,
-  Copy,
 } from "lucide-react"
 
 export default function DBCPage() {
@@ -186,12 +185,16 @@ export default function DBCPage() {
 
   // Send signals to Replay Rapide
   const handleSendToReplay = (signals: DBCSignal[]) => {
-    const frames = signals.map(s => ({
-      canId: s.can_id,
-      data: "00".repeat(8), // Default payload
-      timestamp: "0",
-      source: `dbc-${s.name}`,
-    }))
+    const frames = signals.map(s => {
+      // Use sample_status first (most likely the desired state), then sample_ack, then sample_before
+      const payload = s.sample_status || s.sample_ack || s.sample_before || "00".repeat(8)
+      return {
+        canId: s.can_id,
+        data: payload.replace(/\s/g, ""), // Remove any spaces
+        timestamp: "0",
+        source: `dbc-${s.name}`,
+      }
+    })
     addFrames(frames)
     router.push("/replay-rapide")
   }
@@ -368,10 +371,6 @@ export default function DBCPage() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => navigator.clipboard.writeText(message.can_id)}>
-                            <Copy className="h-4 w-4 mr-2" />
-                            Copier CAN ID
-                          </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => handleSendToReplay(message.signals)}>
                             <Send className="h-4 w-4 mr-2" />
                             Envoyer vers Replay

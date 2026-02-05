@@ -890,6 +890,10 @@ export interface DBCSignal {
   max_val: number
   unit: string
   comment: string
+  // Sample payload data for replay
+  sample_before?: string  // Full payload AVANT t0
+  sample_ack?: string     // Full payload ACK
+  sample_status?: string  // Full payload STATUS
 }
 
 export interface DBCMessage {

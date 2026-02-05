@@ -712,6 +712,9 @@ export default function Isolation() {
       valueAfter: string
       classification: string
       persistence: string
+      sampleBefore?: string   // Full payload AVANT
+      sampleAck?: string      // Full payload ACK
+      sampleStatus?: string   // Full payload STATUS
     }
   ) => {
     // Generate default comment based on analysis
@@ -737,6 +740,10 @@ export default function Isolation() {
       max_val: bitIndex !== undefined ? 1 : 255,
       unit: "",
       comment: defaultComment,
+      // Store sample payloads for replay
+      sample_before: analysisInfo?.sampleBefore,
+      sample_ack: analysisInfo?.sampleAck,
+      sample_status: analysisInfo?.sampleStatus,
     })
     setShowSignalEditor(true)
   }
@@ -1962,7 +1969,10 @@ export default function Isolation() {
                                 valueBefore: diff.value_before,
                                 valueAfter: diff.value_after,
                                 classification: selectedDiffFrame.classification,
-                                persistence: selectedDiffFrame.persistence || "unknown"
+                                persistence: selectedDiffFrame.persistence || "unknown",
+                                sampleBefore: selectedDiffFrame.sample_before,
+                                sampleAck: selectedDiffFrame.sample_ack,
+                                sampleStatus: selectedDiffFrame.sample_status,
                               }
                               return (
                               <div 
