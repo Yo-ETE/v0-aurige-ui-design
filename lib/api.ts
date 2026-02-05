@@ -873,28 +873,63 @@ export async function analyzeFamilyDiff(request: AnalyzeFamilyRequest): Promise<
 }
 
 // =============================================================================
-// DBC Signal Management
+// Saved Comparisons API
 // =============================================================================
 
-export interface DBCSignal {
+export interface SavedComparisonSummary {
   id: string
-  can_id: string
   name: string
-  start_bit: number
-  length: number
-  byte_order: "little_endian" | "big_endian"
-  is_signed: boolean
-  scale: number
-  offset: number
-  min_val: number
-  max_val: number
-  unit: string
-  comment: string
-  // Sample payload data for replay
-  sample_before?: string  // Full payload AVANT t0
-  sample_ack?: string     // Full payload ACK
-  sample_status?: string  // Full payload STATUS
+  log_a_id: string
+  log_a_name: string
+  log_b_id: string
+  log_b_name: string
+  created_at: string
+  differential_count: number
+  only_a_count: number
+  only_b_count: number
+  identical_count: number
 }
+
+export interface SavedComparison extends SavedComparisonSummary {
+  result: CompareLogsResponse
+}
+
+export async function listComparisons(missionId: string): Promise<SavedComparisonSummary[]> {
+  return fetchApi(`/missions/${missionId}/comparisons`)
+}
+
+export async function getComparison(missionId: string, comparisonId: string): Promise<SavedComparison> {
+  return fetchApi(`/missions/${missionId}/comparisons/${comparisonId}`)
+}
+
+export async function saveComparison(
+  missionId: string,
+  name: string,
+  logAId: string,
+  logAName: string,
+  logBId: string,
+  logBName: string,
+  result: CompareLogsResponse
+): Promise<SavedComparison> {
+  return fetchApi(`/missions/${missionId}/comparisons`, {
+    method: "POST",
+    body: JSON.stringify({
+      name,
+      log_a_id: logAId,
+      log_a_name: logAName,
+      log_b_id: logBId,
+      log_b_name: logBName,
+      result,
+    }),
+  })
+}
+
+export async function deleteComparison(missionId: string, comparisonId: string): Promise<void> {
+  return fetchApi(`/missions/${missionId}/comparisons/${comparisonId}`, {
+    method: "DELETE",
+  })
+}
+
 
 export interface DBCMessage {
   can_id: string

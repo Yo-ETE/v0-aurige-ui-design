@@ -3863,6 +3863,113 @@ async def import_log(mission_id: str, file: UploadFile = File(...)):
     )
 
 
+# =============================================================================
+# SAVED COMPARISONS - CRUD for comparison results
+# =============================================================================
+
+class SavedComparisonRequest(BaseModel):
+    name: str
+    log_a_id: str
+    log_a_name: str
+    log_b_id: str
+    log_b_name: str
+    result: dict  # Full CompareLogsResponse as dict
+
+class SavedComparison(BaseModel):
+    id: str
+    name: str
+    log_a_id: str
+    log_a_name: str
+    log_b_id: str
+    log_b_name: str
+    created_at: str
+    result: dict
+
+def get_comparisons_file(mission_id: str) -> Path:
+    return Path(MISSIONS_DIR) / mission_id / "comparisons.json"
+
+def load_comparisons(mission_id: str) -> list[dict]:
+    f = get_comparisons_file(mission_id)
+    if f.exists():
+        with open(f, "r") as fh:
+            return json.load(fh)
+    return []
+
+def save_comparisons(mission_id: str, comparisons: list[dict]):
+    f = get_comparisons_file(mission_id)
+    with open(f, "w") as fh:
+        json.dump(comparisons, fh, indent=2)
+
+@app.get("/api/missions/{mission_id}/comparisons")
+async def list_comparisons(mission_id: str):
+    """List all saved comparisons for a mission"""
+    mission_dir = Path(MISSIONS_DIR) / mission_id
+    if not mission_dir.exists():
+        raise HTTPException(status_code=404, detail="Mission non trouvee")
+    comparisons = load_comparisons(mission_id)
+    # Return without full result data for list view
+    return [
+        {
+            "id": c["id"],
+            "name": c["name"],
+            "log_a_id": c["log_a_id"],
+            "log_a_name": c["log_a_name"],
+            "log_b_id": c["log_b_id"],
+            "log_b_name": c["log_b_name"],
+            "created_at": c["created_at"],
+            "differential_count": c.get("result", {}).get("differential_count", 0),
+            "only_a_count": c.get("result", {}).get("only_a_count", 0),
+            "only_b_count": c.get("result", {}).get("only_b_count", 0),
+            "identical_count": c.get("result", {}).get("identical_count", 0),
+        }
+        for c in comparisons
+    ]
+
+@app.post("/api/missions/{mission_id}/comparisons")
+async def save_comparison(mission_id: str, req: SavedComparisonRequest):
+    """Save a comparison result"""
+    mission_dir = Path(MISSIONS_DIR) / mission_id
+    if not mission_dir.exists():
+        raise HTTPException(status_code=404, detail="Mission non trouvee")
+    
+    comparisons = load_comparisons(mission_id)
+    
+    comp_id = f"comp_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{len(comparisons)}"
+    new_comp = {
+        "id": comp_id,
+        "name": req.name,
+        "log_a_id": req.log_a_id,
+        "log_a_name": req.log_a_name,
+        "log_b_id": req.log_b_id,
+        "log_b_name": req.log_b_name,
+        "created_at": datetime.now().isoformat(),
+        "result": req.result,
+    }
+    comparisons.append(new_comp)
+    save_comparisons(mission_id, comparisons)
+    
+    return new_comp
+
+@app.get("/api/missions/{mission_id}/comparisons/{comparison_id}")
+async def get_comparison(mission_id: str, comparison_id: str):
+    """Get a single saved comparison with full result"""
+    comparisons = load_comparisons(mission_id)
+    for c in comparisons:
+        if c["id"] == comparison_id:
+            return c
+    raise HTTPException(status_code=404, detail="Comparaison non trouvee")
+
+@app.delete("/api/missions/{mission_id}/comparisons/{comparison_id}")
+async def delete_comparison(mission_id: str, comparison_id: str):
+    """Delete a saved comparison"""
+    comparisons = load_comparisons(mission_id)
+    new_comparisons = [c for c in comparisons if c["id"] != comparison_id]
+    if len(new_comparisons) == len(comparisons):
+        raise HTTPException(status_code=404, detail="Comparaison non trouvee")
+    save_comparisons(mission_id, new_comparisons)
+    return {"status": "deleted", "id": comparison_id}
+
+
 # Service management endpoints
 @app.post("/api/system/restart-services")
 async def restart_services():
@@ -4034,6 +4141,11 @@ async def export_mission(mission_id: str):
                 except Exception as e:
                     print(f"[WARNING] Could not generate DBC: {e}")
             
+            # Add comparisons file if exists
+            comp_file = mission_dir / "comparisons.json"
+            if comp_file.exists():
+                zf.write(comp_file, f"{safe_name}/comparisons.json")
+            
             # Add a README
             readme = f"""# Mission Export: {mission_name}
 Exported: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
@@ -4044,6 +4156,7 @@ Exported: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 - isolation/: Isolated log files from analysis
 - dbc.json: DBC signals data (JSON format)
 - {safe_name}.dbc: Generated DBC file (standard format)
+- comparisons.json: Saved log comparisons
 
 ## Usage:
 - Import .log files into any CAN analysis tool
