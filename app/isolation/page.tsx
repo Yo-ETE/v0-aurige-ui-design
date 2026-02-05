@@ -1563,19 +1563,42 @@ export default function Isolation() {
                   )}
                 </div>
                 {originLogId && (
-                  <div className="flex items-center gap-4 pt-4 border-t">
-                    <span className="text-sm text-muted-foreground">Log selectionne: <span className="font-mono font-medium">{originLogId}</span></span>
-                    <Button 
-                      onClick={async () => {
-                        await runCoOccurrenceAnalysis()
-                        setCoOccStep("results")
-                      }}
-                      disabled={isAnalyzing}
-                      className="gap-2"
-                    >
-                      {isAnalyzing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-                      Analyser les co-occurrences
-                    </Button>
+                  <div className="flex flex-col gap-3 pt-4 border-t">
+                    <div className="flex items-center gap-4">
+                      <span className="text-sm text-muted-foreground">Log selectionne: <span className="font-mono font-medium">{originLogId}</span></span>
+                    </div>
+                    {selectedFrame ? (
+                      <div className="flex items-center gap-4">
+                        <span className="text-sm text-muted-foreground">Trame cible: <Badge className="font-mono">{selectedFrame.canId}</Badge> @ {selectedFrame.timestamp}</span>
+                        <Button 
+                          onClick={async () => {
+                            setIsAnalyzing(true)
+                            try {
+                              const result = await analyzeCoOccurrence(missionId!, originLogId, {
+                                logId: originLogId,
+                                targetCanId: selectedFrame.canId,
+                                targetTimestamp: parseFloat(selectedFrame.timestamp),
+                                windowMs: analysisWindowMs,
+                                direction: analysisDirection,
+                              })
+                              setCoOccurrenceResult(result)
+                              setCoOccStep("results")
+                            } catch (error) {
+                              console.error("[v0] Co-occurrence analysis error:", error)
+                            } finally {
+                              setIsAnalyzing(false)
+                            }
+                          }}
+                          disabled={isAnalyzing}
+                          className="gap-2"
+                        >
+                          {isAnalyzing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                          Analyser les co-occurrences
+                        </Button>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-amber-500">Aucune trame cible selectionnee. Retournez a l&apos;arbre et selectionnez une trame dans un log d&apos;abord.</p>
+                    )}
                   </div>
                 )}
               </div>
