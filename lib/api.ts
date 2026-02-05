@@ -927,3 +927,7 @@ export async function deleteDBCSignal(missionId: string, signalId: string): Prom
 export function getDBCExportUrl(missionId: string): string {
   return `${getApiBaseUrl()}/api/missions/${missionId}/dbc/export`
 }
+
+export function getMissionExportUrl(missionId: string): string {
+  return `${getApiBaseUrl()}/api/missions/${missionId}/export`
+}

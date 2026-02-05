@@ -35,7 +35,9 @@ import {
   Car,
   Loader2,
   RefreshCw,
+  Download,
 } from "lucide-react"
+import { getMissionExportUrl } from "@/lib/api"
 
 type SortOption = "recent" | "az"
 
@@ -106,6 +108,17 @@ function MissionRow({
         </div>
       </div>
       <div className="flex items-center gap-2">
+        <Button
+          variant="ghost"
+          size="icon"
+          asChild
+          className="h-8 w-8 text-muted-foreground hover:text-foreground"
+          title="Exporter"
+        >
+          <a href={getMissionExportUrl(mission.id)} download>
+            <Download className="h-4 w-4" />
+          </a>
+        </Button>
         <Button
           variant="ghost"
           size="icon"

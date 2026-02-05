@@ -703,10 +703,30 @@ export default function Isolation() {
   }
   
   // Open signal editor for a specific byte/bit
-  const handleCreateSignal = (canId: string, byteIndex: number, bitIndex?: number) => {
+  const handleCreateSignal = (
+    canId: string, 
+    byteIndex: number, 
+    bitIndex?: number,
+    analysisInfo?: {
+      valueBefore: string
+      valueAfter: string
+      classification: string
+      persistence: string
+    }
+  ) => {
+    // Generate default comment based on analysis
+    let defaultComment = ""
+    if (analysisInfo) {
+      const classLabel = analysisInfo.classification === "status" ? "STATUS" : 
+                         analysisInfo.classification === "ack" ? "ACK" : 
+                         analysisInfo.classification === "info" ? "INFO" : analysisInfo.classification.toUpperCase()
+      const persLabel = analysisInfo.persistence === "persistent" ? "persistant" : "transitoire"
+      defaultComment = `${classLabel} ${persLabel} - Octet ${byteIndex}: ${analysisInfo.valueBefore} -> ${analysisInfo.valueAfter}`
+    }
+    
     setEditingSignal({
       can_id: canId,
-      name: `SIG_${canId}_B${byteIndex}`,
+      name: `SIG_${canId}_B${byteIndex}${bitIndex !== undefined ? `_b${bitIndex}` : ""}`,
       start_bit: byteIndex * 8 + (bitIndex ?? 0),
       length: bitIndex !== undefined ? 1 : 8,
       byte_order: "little_endian",
@@ -716,7 +736,7 @@ export default function Isolation() {
       min_val: 0,
       max_val: bitIndex !== undefined ? 1 : 255,
       unit: "",
-      comment: "",
+      comment: defaultComment,
     })
     setShowSignalEditor(true)
   }
@@ -1937,17 +1957,27 @@ export default function Isolation() {
                         <div className="mt-4 space-y-2">
                           <h5 className="text-sm font-medium">Octets modifies - Cliquez pour creer un signal</h5>
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            {selectedDiffFrame.bytes_diff.map((diff, idx) => (
+                            {selectedDiffFrame.bytes_diff.map((diff, idx) => {
+                              const analysisInfo = {
+                                valueBefore: diff.value_before,
+                                valueAfter: diff.value_after,
+                                classification: selectedDiffFrame.classification,
+                                persistence: selectedDiffFrame.persistence || "unknown"
+                              }
+                              return (
                               <div 
                                 key={idx} 
                                 className="p-3 rounded-lg border bg-secondary/30 hover:bg-secondary/50 cursor-pointer transition-colors"
-                                onClick={() => handleCreateSignal(selectedDiffFrame.can_id, diff.byte_index)}
+                                onClick={() => handleCreateSignal(selectedDiffFrame.can_id, diff.byte_index, undefined, analysisInfo)}
                               >
                                 <div className="flex items-center justify-between mb-2">
                                   <span className="text-xs font-medium">Octet {diff.byte_index}</span>
-                                  <Button size="sm" variant="ghost" className="h-6 px-2 text-xs text-primary">
+                                  <Button size="sm" variant="ghost" className="h-6 px-2 text-xs text-primary bg-transparent">
                                     + Signal
                                   </Button>
+                                </div>
+                                <div className="text-xs text-muted-foreground mb-1">
+                                  Octet {diff.byte_index} detecte comme changeant:
                                 </div>
                                 <div className="flex items-center gap-2 text-sm font-mono">
                                   <span className="text-destructive">{diff.value_before}</span>
@@ -1961,10 +1991,10 @@ export default function Isolation() {
                                       return (
                                         <span 
                                           key={bit} 
-                                          className={`w-5 h-5 flex items-center justify-center text-[10px] rounded ${changed ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}
+                                          className={`w-5 h-5 flex items-center justify-center text-[10px] rounded cursor-pointer ${changed ? "bg-primary text-primary-foreground hover:bg-primary/80" : "bg-muted text-muted-foreground"}`}
                                           onClick={(e) => {
                                             e.stopPropagation()
-                                            if (changed) handleCreateSignal(selectedDiffFrame.can_id, diff.byte_index, bit)
+                                            if (changed) handleCreateSignal(selectedDiffFrame.can_id, diff.byte_index, bit, analysisInfo)
                                           }}
                                         >
                                           {bit}
@@ -1974,7 +2004,7 @@ export default function Isolation() {
                                   </div>
                                 )}
                               </div>
-                            ))}
+                            )})}
                           </div>
                         </div>
                       )}
@@ -2067,6 +2097,13 @@ export default function Isolation() {
           
           {editingSignal && (
             <div className="space-y-4 py-4">
+              {/* Analysis info banner */}
+              {editingSignal.comment && editingSignal.comment.includes("->") && (
+                <div className="p-3 rounded-lg bg-primary/10 border border-primary/20">
+                  <p className="text-sm font-medium text-primary">{editingSignal.comment}</p>
+                </div>
+              )}
+              
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>CAN ID</Label>

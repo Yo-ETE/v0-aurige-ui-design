@@ -189,7 +189,13 @@ export default function MissionPage() {
   }
 
   const handleExport = () => {
-    alert("Export de la mission à venir")
+    // Trigger download via link
+    const link = document.createElement("a")
+    link.href = `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/missions/${mission.id}/export`
+    link.download = `${mission.name}.zip`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
   }
 
   const handleDelete = () => {

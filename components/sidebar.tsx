@@ -23,6 +23,7 @@ import {
   Menu,
   X,
   Cog,
+  FileCode,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
@@ -63,6 +64,7 @@ const baseNavigation: NavSection[] = [
       { name: "Capture & Replay", href: "/capture-replay", icon: Video },
       { name: "Replay Rapide", href: "/replay-rapide", icon: Zap },
       { name: "Isolation", href: "/isolation", icon: GitBranch },
+      { name: "DBC", href: "/dbc", icon: FileCode },
     ],
   },
   {
