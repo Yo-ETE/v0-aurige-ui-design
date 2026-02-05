@@ -822,6 +822,9 @@ export default function ConfigurationPage() {
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
+            <p className="text-xs text-muted-foreground">
+              Archive le dossier <code className="bg-secondary px-1 rounded">/opt/aurige/data/</code> contenant toutes les missions, captures CAN, logs d{"'"}isolation et fichiers DBC. Utilisez la restauration pour recuperer vos donnees apres un crash ou reinstallation.
+            </p>
             <Button
               onClick={handleCreateBackup}
               disabled={isCreatingBackup}

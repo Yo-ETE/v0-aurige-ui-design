@@ -1553,14 +1553,6 @@ export default function Isolation() {
                   }}>
                     Nouvelle analyse
                   </Button>
-                  {coOccurrenceResult.ecuFamilies.length > 0 && (
-                    <Button variant="outline" size="sm" className="bg-transparent" onClick={() => {
-                      const allIds = coOccurrenceResult.ecuFamilies.flatMap(f => f.frameIds)
-                      navigator.clipboard.writeText(allIds.join(","))
-                    }}>
-                      Copier IDs ECU
-                    </Button>
-                  )}
                 </div>
               </div>
             ) : (
