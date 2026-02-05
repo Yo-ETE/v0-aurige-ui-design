@@ -1541,26 +1541,30 @@ export default function Isolation() {
             ) : (
               <div className="flex flex-col gap-4 p-4">
                 <h4 className="font-medium">Selectionnez un log a analyser</h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 max-h-[400px] overflow-auto">
-                  {logs.map((log) => (
+                <div className="flex flex-col gap-1 max-h-[500px] overflow-auto border rounded-lg p-2">
+                  {availableLogsForAnalysis.length > 0 ? availableLogsForAnalysis.map((log) => (
                     <Button
-                      key={log.name}
-                      variant={originLogId === log.name.replace(".log", "") ? "default" : "outline"}
-                      className={`justify-start gap-2 h-auto py-2 ${originLogId === log.name.replace(".log", "") ? "" : "bg-transparent"}`}
+                      key={log.id}
+                      variant={originLogId === log.id ? "default" : "ghost"}
+                      className={`justify-start gap-2 h-auto py-2 ${originLogId === log.id ? "" : "hover:bg-secondary"}`}
+                      style={{ paddingLeft: `${(log.depth || 0) * 16 + 8}px` }}
                       onClick={() => {
-                        const logId = log.name.replace(".log", "")
-                        setOriginLogId(logId)
-                        setAnalyzingLog(log)
+                        setOriginLogId(log.id)
+                        const foundLog = findLog(log.id)
+                        if (foundLog) setAnalyzingLog(foundLog)
                       }}
                     >
+                      {(log.depth || 0) > 0 && <ChevronRight className="h-3 w-3 text-muted-foreground" />}
                       <FileText className="h-4 w-4 shrink-0" />
-                      <span className="truncate text-sm">{log.name}</span>
+                      <span className="truncate text-sm font-mono">{log.name}</span>
                     </Button>
-                  ))}
+                  )) : (
+                    <p className="text-sm text-muted-foreground p-4 text-center">Aucun log disponible. Importez d&apos;abord un log.</p>
+                  )}
                 </div>
                 {originLogId && (
                   <div className="flex items-center gap-4 pt-4 border-t">
-                    <span className="text-sm text-muted-foreground">Log selectionne: <span className="font-mono font-medium">{originLogId}.log</span></span>
+                    <span className="text-sm text-muted-foreground">Log selectionne: <span className="font-mono font-medium">{originLogId}</span></span>
                     <Button 
                       onClick={async () => {
                         await runCoOccurrenceAnalysis()
