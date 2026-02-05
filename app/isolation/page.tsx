@@ -320,20 +320,6 @@ export default function Isolation() {
   // State for co-occurrence dialog navigation
   const [coOccStep, setCoOccStep] = useState<"select" | "results">("select")
   
-  // State for solo ID qualification
-  const [qualifyingSoloId, setQualifyingSoloId] = useState<string | null>(null)
-  const [soloIdClassification, setSoloIdClassification] = useState<"ack" | "event" | "info" | "status">("ack")
-  const [soloIdNote, setSoloIdNote] = useState("")
-  const [soloIdAnalysis, setSoloIdAnalysis] = useState<{
-    countBefore: number
-    countAfter: number
-    persistence: "persistent" | "transient" | "new" | "disappeared"
-    payloadChanged: boolean
-    sampleBefore: string
-    sampleAfter: string
-  } | null>(null)
-  const [isAnalyzingSoloId, setIsAnalyzingSoloId] = useState(false)
-  
   // Get mission ID from localStorage and sync with store
   useEffect(() => {
     const localId = localStorage.getItem("activeMissionId")
@@ -1512,19 +1498,9 @@ export default function Isolation() {
                                   className="h-6 px-2 text-xs bg-transparent hover:bg-primary/10"
                                   onClick={(e) => {
                                     e.stopPropagation()
-                                    setQualifyingSoloId(frame.canId)
-                                    setSoloIdClassification(frame.frameType === "ack" ? "ack" : "info")
-                                    setSoloIdNote("")
-                                    setSoloIdAnalysis({
-                                      countBefore: frame.countBefore,
-                                      countAfter: frame.countAfter,
-                                      persistence: frame.countBefore === 0 && frame.countAfter > 0 ? "new" 
-                                        : frame.countBefore > 0 && frame.countAfter === 0 ? "disappeared"
-                                        : frame.countAfter > 0 ? "persistent" : "transient",
-                                      payloadChanged: false,
-                                      sampleBefore: frame.sampleData[0] || "",
-                                      sampleAfter: frame.sampleData[0] || "",
-                                    })
+                                    // Open Family Diff dialog with this single ID
+                                    setSelectedFamilyIds([frame.canId])
+                                    setShowFamilyDiff(true)
                                   }}
                                 >
                                   Qualifier
@@ -2073,127 +2049,6 @@ export default function Isolation() {
                     </a>
                   </Button>
                 )}
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-      
-      {/* Solo ID Qualification Dialog */}
-      <Dialog open={qualifyingSoloId !== null} onOpenChange={(open) => !open && setQualifyingSoloId(null)}>
-        <DialogContent style={{ width: "98vw", maxWidth: "600px" }}>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <FlaskConical className="h-5 w-5 text-primary" />
-              Qualifier l&apos;ID: <span className="font-mono text-primary">{qualifyingSoloId}</span>
-            </DialogTitle>
-            <DialogDescription>
-              Classifiez cette trame individuelle pour documenter son role
-            </DialogDescription>
-          </DialogHeader>
-          
-          {soloIdAnalysis && (
-            <div className="space-y-4 py-4">
-              {/* Analysis Summary */}
-              <div className="grid grid-cols-2 gap-4 p-3 bg-secondary/50 rounded-lg">
-                <div className="space-y-1">
-                  <p className="text-xs text-muted-foreground">Avant t0</p>
-                  <p className="font-mono font-semibold">{soloIdAnalysis.countBefore} trames</p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-xs text-muted-foreground">Apres t0</p>
-                  <p className="font-mono font-semibold">{soloIdAnalysis.countAfter} trames</p>
-                </div>
-                <div className="col-span-2 space-y-1">
-                  <p className="text-xs text-muted-foreground">Persistance</p>
-                  <Badge variant={
-                    soloIdAnalysis.persistence === "persistent" ? "default" :
-                    soloIdAnalysis.persistence === "new" ? "secondary" :
-                    soloIdAnalysis.persistence === "disappeared" ? "destructive" : "outline"
-                  }>
-                    {soloIdAnalysis.persistence === "persistent" ? "Persistant" :
-                     soloIdAnalysis.persistence === "new" ? "Nouveau (apparait apres t0)" :
-                     soloIdAnalysis.persistence === "disappeared" ? "Disparu (avant t0 uniquement)" : "Transitoire"}
-                  </Badge>
-                </div>
-                {soloIdAnalysis.sampleBefore && (
-                  <div className="col-span-2 space-y-1">
-                    <p className="text-xs text-muted-foreground">Payload echantillon</p>
-                    <p className="font-mono text-xs bg-background p-2 rounded">{soloIdAnalysis.sampleBefore}</p>
-                  </div>
-                )}
-              </div>
-              
-              {/* Classification */}
-              <div className="space-y-2">
-                <Label>Classification</Label>
-                <div className="grid grid-cols-4 gap-2">
-                  {(["ack", "event", "info", "status"] as const).map((type) => (
-                    <Button
-                      key={type}
-                      variant={soloIdClassification === type ? "default" : "outline"}
-                      className={soloIdClassification === type ? "" : "bg-transparent"}
-                      onClick={() => setSoloIdClassification(type)}
-                    >
-                      {type === "ack" && "ACK"}
-                      {type === "event" && "EVENT"}
-                      {type === "info" && "INFO"}
-                      {type === "status" && "STATUS"}
-                    </Button>
-                  ))}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {soloIdClassification === "ack" && "Accusé de reception - reponse transitoire a la commande"}
-                  {soloIdClassification === "event" && "Evenement - declenchement ponctuel lie a l'action"}
-                  {soloIdClassification === "info" && "Information - trame de contexte ou debug"}
-                  {soloIdClassification === "status" && "Status - etat persistant du systeme"}
-                </p>
-              </div>
-              
-              {/* Note */}
-              <div className="space-y-2">
-                <Label>Note / Annotation</Label>
-                <textarea
-                  className="w-full h-20 p-2 text-sm border rounded-md bg-background resize-none"
-                  placeholder="Description libre de cette trame..."
-                  value={soloIdNote}
-                  onChange={(e) => setSoloIdNote(e.target.value)}
-                />
-              </div>
-              
-              {/* Actions */}
-              <div className="flex items-center justify-between pt-4 border-t">
-                <Button
-                  variant="outline"
-                  className="bg-transparent gap-1"
-                  onClick={() => {
-                    // Open full diff analysis for this single ID
-                    if (qualifyingSoloId) {
-                      setSelectedFamilyIds([qualifyingSoloId])
-                      setQualifyingSoloId(null)
-                      setShowFamilyDiff(true)
-                    }
-                  }}
-                >
-                  <Eye className="h-4 w-4" />
-                  Analyse detaillee (DBC)
-                </Button>
-                <div className="flex items-center gap-2">
-                  <Button variant="outline" className="bg-transparent" onClick={() => setQualifyingSoloId(null)}>
-                    Annuler
-                  </Button>
-                  <Button onClick={() => {
-                    // Save classification (could be stored in state or sent to backend)
-                    console.log("Qualified ID:", qualifyingSoloId, {
-                      classification: soloIdClassification,
-                      note: soloIdNote,
-                      analysis: soloIdAnalysis
-                    })
-                    setQualifyingSoloId(null)
-                  }}>
-                    Valider
-                  </Button>
-                </div>
               </div>
             </div>
           )}
