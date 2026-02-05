@@ -8,9 +8,10 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Zap, Keyboard, Send, AlertTriangle, Loader2, Import, Trash2, Play, FileCode } from "lucide-react"
+import { Zap, Keyboard, Send, AlertTriangle, Loader2, Import, Trash2, Play, FileCode, FlaskConical } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { useRouter } from "next/navigation"
 import { sendCANFrame, addDBCSignal, type CANInterface } from "@/lib/api"
 import { SentFramesHistory, useSentFramesHistory } from "@/components/sent-frames-history"
 import { useExportStore } from "@/lib/export-store"
@@ -43,31 +44,30 @@ export default function ReplayRapide() {
   const [isSendingManual, setIsSendingManual] = useState(false)
   
   // Sent frames history
-  const { frames, trackFrame, clearHistory } = useSentFramesHistory()
+  const { frames, trackFrame, toggleSuccess, clearHistory } = useSentFramesHistory()
   
   // Exported frames from isolation
   const { frames: exportedFrames, clearFrames: clearExported, removeFrame: removeExportedFrame } = useExportStore()
   const [isReplayingExported, setIsReplayingExported] = useState(false)
   
-  // DBC save
+  // DBC save and navigation
   const currentMission = useMissionStore((state) => state.currentMission)
   const { toast } = useToast()
+  const router = useRouter()
   
   // Save frame to DBC
   const handleSaveToDBC = async (canId: string, data: string, source?: string) => {
-    console.log("[v0] handleSaveToDBC called:", { canId, data, source, missionId: currentMission?.id })
-    
     if (!currentMission?.id) {
-      toast({ title: "Erreur", description: "Aucune mission selectionnee", variant: "destructive" })
+      toast({ title: "Erreur", description: "Aucune mission selectionnee. Selectionnez une mission dans le Dashboard.", variant: "destructive" })
       return
     }
     
     try {
       const signal = {
         can_id: canId,
-        name: `SIG_${canId}_REPLAY`,
+        name: `SIG_${canId}_REPLAY_${Date.now().toString(36).slice(-4).toUpperCase()}`,
         start_bit: 0,
-        length: data.length * 4, // bits
+        length: Math.min(data.length * 4, 64), // bits, max 64 for 8 bytes
         byte_order: "little_endian" as const,
         is_signed: false,
         scale: 1,
@@ -78,12 +78,11 @@ export default function ReplayRapide() {
         comment: source ? `Trame rejouee: ${source}` : "Trame rejouee depuis Replay Rapide",
         sample_status: data,
       }
-      console.log("[v0] Calling addDBCSignal with:", { missionId: currentMission.id, signal })
-      await addDBCSignal(currentMission.id, signal)
-      toast({ title: "Enregistre", description: `Signal ${canId} ajoute au DBC` })
-    } catch (err) {
-      console.error("[v0] addDBCSignal error:", err)
-      toast({ title: "Erreur", description: "Echec de l'enregistrement DBC", variant: "destructive" })
+      const result = await addDBCSignal(currentMission.id, signal)
+      toast({ title: "Enregistre", description: `Signal ${signal.name} ajoute au DBC` })
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : "Erreur inconnue"
+      toast({ title: "Erreur DBC", description: errorMsg, variant: "destructive" })
     }
   }
 
@@ -411,16 +410,16 @@ export default function ReplayRapide() {
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <Button size="sm" variant="outline" className="font-mono text-xs" onClick={() => setManualFrame("7DF#0100")}>
+              <Button size="sm" variant="outline" className="font-mono text-xs bg-transparent" onClick={() => setManualFrame("7DF#0100")}>
                 PIDs supportes
               </Button>
-              <Button size="sm" variant="outline" className="font-mono text-xs" onClick={() => setManualFrame("7DF#02010C")}>
+              <Button size="sm" variant="outline" className="font-mono text-xs bg-transparent" onClick={() => setManualFrame("7DF#02010C")}>
                 RPM
               </Button>
-              <Button size="sm" variant="outline" className="font-mono text-xs" onClick={() => setManualFrame("7DF#02010D")}>
+              <Button size="sm" variant="outline" className="font-mono text-xs bg-transparent" onClick={() => setManualFrame("7DF#02010D")}>
                 Vitesse
               </Button>
-              <Button size="sm" variant="outline" className="font-mono text-xs" onClick={() => setManualFrame("7DF#020105")}>
+              <Button size="sm" variant="outline" className="font-mono text-xs bg-transparent" onClick={() => setManualFrame("7DF#020105")}>
                 Temp. moteur
               </Button>
             </div>
@@ -508,6 +507,18 @@ export default function ReplayRapide() {
                               <Button
                                 size="icon"
                                 variant="ghost"
+                                className="h-6 w-6 text-amber-500"
+                                onClick={() => {
+                                  // Go to isolation with this CAN ID for qualification
+                                  router.push(`/isolation?qualify=${frame.canId}`)
+                                }}
+                                title="Qualifier dans Isolation"
+                              >
+                                <FlaskConical className="h-3 w-3" />
+                              </Button>
+                              <Button
+                                size="icon"
+                                variant="ghost"
                                 className="h-6 w-6 text-primary"
                                 onClick={() => handleSaveToDBC(frame.canId, frame.data, frame.source)}
                                 title="Enregistrer dans DBC"
@@ -536,7 +547,7 @@ export default function ReplayRapide() {
         )}
 
         {/* Sent Frames History */}
-        <SentFramesHistory frames={frames} onClear={clearHistory} />
+        <SentFramesHistory frames={frames} onClear={clearHistory} onToggleSuccess={toggleSuccess} />
       </div>
     </AppShell>
   )

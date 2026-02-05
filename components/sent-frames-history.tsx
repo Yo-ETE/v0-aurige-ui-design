@@ -47,6 +47,16 @@ export function useSentFramesHistory(maxItems = 50) {
     )
   }, [])
 
+  const toggleSuccess = useCallback((id: string) => {
+    setFrames((prev) =>
+      prev.map((f) => {
+        if (f.id !== id) return f
+        // Toggle between success and pending (allows undo)
+        return { ...f, status: f.status === "success" ? "pending" : "success" }
+      })
+    )
+  }, [])
+
   const clearHistory = useCallback(() => {
     setFrames([])
   }, [])
@@ -70,15 +80,17 @@ export function useSentFramesHistory(maxItems = 50) {
     [addFrame, updateStatus]
   )
 
-  return { frames, addFrame, updateStatus, clearHistory, trackFrame }
+  return { frames, addFrame, updateStatus, toggleSuccess, clearHistory, trackFrame }
 }
 
 export function SentFramesHistory({
   frames,
   onClear,
+  onToggleSuccess,
 }: {
   frames: SentFrame[]
   onClear: () => void
+  onToggleSuccess?: (id: string) => void
 }) {
   if (frames.length === 0) {
     return (
@@ -142,10 +154,24 @@ export function SentFramesHistory({
                 className="flex items-center gap-2 rounded border border-border bg-secondary/30 px-2 py-1.5 font-mono text-xs"
               >
                 {frame.status === "pending" && (
-                  <Clock className="h-3 w-3 text-warning animate-pulse" />
+                  <button
+                    type="button"
+                    onClick={() => onToggleSuccess?.(frame.id)}
+                    className="hover:scale-110 transition-transform"
+                    title="Marquer comme succes"
+                  >
+                    <Clock className="h-3 w-3 text-warning animate-pulse" />
+                  </button>
                 )}
                 {frame.status === "success" && (
-                  <CheckCircle2 className="h-3 w-3 text-success" />
+                  <button
+                    type="button"
+                    onClick={() => onToggleSuccess?.(frame.id)}
+                    className="hover:scale-110 transition-transform"
+                    title="Annuler le succes"
+                  >
+                    <CheckCircle2 className="h-3 w-3 text-success" />
+                  </button>
                 )}
                 {frame.status === "error" && (
                   <XCircle className="h-3 w-3 text-destructive" />

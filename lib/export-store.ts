@@ -27,9 +27,14 @@ export const useExportStore = create<ExportStore>()(
       frames: [],
       
       addFrames: (newFrames) => {
-        set((state) => ({
-          frames: [...state.frames, ...newFrames],
-        }))
+        set((state) => {
+          // Deduplicate: same canId + data = same frame
+          const existing = new Set(state.frames.map(f => `${f.canId}:${f.data}`))
+          const uniqueNew = newFrames.filter(f => !existing.has(`${f.canId}:${f.data}`))
+          return {
+            frames: [...state.frames, ...uniqueNew],
+          }
+        })
       },
       
       clearFrames: () => {
