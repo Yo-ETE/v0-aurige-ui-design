@@ -345,26 +345,20 @@ export default function Isolation() {
   
   // Handle analyze param from Replay Rapide
   useEffect(() => {
-    if (analyzeParam) {
-      try {
-        const params = new URLSearchParams(analyzeParam)
-        const canId = params.get("canId")
-        const data = params.get("data")
-        const source = params.get("source")
-        
-        if (canId) {
-          // Parse source to get log info (format: "log-name" or "qualified-logname" or "co-occurrence-logname")
-          const logName = source ? source.replace("qualified-", "").replace("co-occurrence-", "").replace(".log", "") : ""
+    if (analyzeParam && missionId) {
+      const handleAnalyzeParam = async () => {
+        try {
+          const params = new URLSearchParams(analyzeParam)
+          const canId = params.get("canId")
+          const data = params.get("data")
+          const source = params.get("source")
           
-          // Find the log in isolation store
-          const foundLog = logs.find(l => 
-            l.name.replace(".log", "") === logName || 
-            l.id === logName ||
-            l.name.includes(logName)
-          )
-          
-          if (foundLog) {
-            // Log found - set selected frame and open co-occurrence dialog
+          if (canId) {
+            // Load all mission logs for selection
+            const logsForSelection = await loadAvailableLogsForAnalysis()
+            setAvailableLogsForAnalysis(logsForSelection)
+            
+            // Set the frame to analyze
             setSelectedFrame({
               timestamp: 0,
               canId,
@@ -373,27 +367,41 @@ export default function Isolation() {
               raw: data || "",
             } as LogFrame)
             
-            setOriginLogId(foundLog.id.replace(".log", ""))
-            setAnalyzingLog(foundLog)
-            setCoOccStep("select")
-          } else {
-            // Log not found in Isolation - save pending frame and open import dialog
-            setPendingAnalyzeFrame({ canId, data: data || "", source: source || "" })
-            setShowImportDialog(true)
-            // Pre-load mission logs
-            if (missionId) {
-              loadMissionLogs(missionId)
+            // Try to find the source log in the list
+            const logName = source ? source.replace("qualified-", "").replace("co-occurrence-", "").replace(".log", "") : ""
+            const matchingLog = logsForSelection.find(l => 
+              l.name.replace(".log", "") === logName || 
+              l.id === logName ||
+              l.name.includes(logName)
+            )
+            
+            if (matchingLog) {
+              setOriginLogId(matchingLog.id)
             }
+            
+            // Create a minimal log object to open the dialog
+            setAnalyzingLog({
+              id: matchingLog?.id || "pending",
+              name: matchingLog?.name || source || "Log",
+              filename: matchingLog?.name || source || "Log",
+              missionId: missionId,
+              tags: [],
+              frameCount: 0,
+            })
+            
+            setCoOccStep("select")
+            
+            // Clear the URL param
+            router.replace("/isolation", { scroll: false })
           }
-          
-          // Clear the URL param
-          router.replace("/isolation", { scroll: false })
+        } catch {
+          // Invalid param, ignore
         }
-      } catch (e) {
-        // Invalid param, ignore
       }
+      
+      handleAnalyzeParam()
     }
-  }, [analyzeParam, router, logs, missionId])
+  }, [analyzeParam, router, missionId])
   
   // Load mission logs when dialog opens
   const handleOpenImport = async () => {
@@ -568,12 +576,10 @@ export default function Isolation() {
     navRouter.push("/replay-rapide")
   }
   
-  // Co-occurrence analysis handlers
-  // Step 1: Open the log viewer to select a frame
-  const handleAnalyzeCoOccurrence = async (log: IsolationLog) => {
-    if (!missionId) return
+  // Load all mission logs for co-occurrence analysis
+  const loadAvailableLogsForAnalysis = async (): Promise<Array<{id: string, name: string, depth: number}>> => {
+    if (!missionId) return []
     
-    // Load ALL logs from the mission (not just the isolation tree)
     try {
       const allMissionLogs = await listMissionLogs(missionId)
       
@@ -602,7 +608,20 @@ export default function Isolation() {
       rootLogs.sort((a, b) => a.filename.localeCompare(b.filename))
       rootLogs.forEach(log => addLogWithChildren(log, 0))
       
-      setAvailableLogsForAnalysis(logsForSelection)
+      return logsForSelection
+    } catch {
+      return []
+    }
+  }
+  
+  // Co-occurrence analysis handlers
+  // Step 1: Open the log viewer to select a frame
+  const handleAnalyzeCoOccurrence = async (log: IsolationLog) => {
+    if (!missionId) return
+    
+    // Load ALL logs from the mission
+    const logsForSelection = await loadAvailableLogsForAnalysis()
+    setAvailableLogsForAnalysis(logsForSelection)
       
       // Find the root log in the isolation tree for default selection
       let rootLogId = log.id
