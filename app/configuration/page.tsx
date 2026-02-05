@@ -23,6 +23,7 @@ import {
   Loader2,
   CheckCircle2,
   AlertTriangle,
+  AlertCircle,
   Terminal,
   ArrowUpCircle,
   GitBranch,
@@ -452,6 +453,32 @@ export default function ConfigurationPage() {
                           {wifiStatus.internetVia && ` (${wifiStatus.internetVia})`}
                         </p>
                       </div>
+                      <div className="col-span-2 pt-2 border-t border-border/50">
+                        <p className="text-xs text-muted-foreground mb-1">Connectivite Internet</p>
+                        {wifiStatus.hasInternet ? (
+                          <div className="flex items-center gap-3">
+                            <span className="flex items-center gap-1.5 text-success text-xs font-medium">
+                              <CheckCircle2 className="h-3 w-3" />
+                              Connecte
+                            </span>
+                            {wifiStatus.pingMs > 0 && (
+                              <span className="text-xs text-muted-foreground">
+                                Ping: {wifiStatus.pingMs} ms
+                              </span>
+                            )}
+                            {wifiStatus.downloadSpeed && (
+                              <span className="text-xs text-muted-foreground">
+                                DL: {wifiStatus.downloadSpeed}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="flex items-center gap-1.5 text-destructive text-xs font-medium">
+                            <AlertCircle className="h-3 w-3" />
+                            Pas d&apos;acces Internet
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ) : (
@@ -482,6 +509,32 @@ export default function ConfigurationPage() {
                     <div>
                       <p className="text-xs text-muted-foreground">Debit RX</p>
                       <p className="font-medium">{wifiStatus.rxRate || "-"}</p>
+                    </div>
+                    <div className="col-span-2 pt-2 border-t border-border/50">
+                      <p className="text-xs text-muted-foreground mb-1">Connectivite Internet</p>
+                      {wifiStatus.hasInternet ? (
+                        <div className="flex items-center gap-3">
+                          <span className="flex items-center gap-1.5 text-success text-xs font-medium">
+                            <CheckCircle2 className="h-3 w-3" />
+                            Connecte
+                          </span>
+                          {wifiStatus.pingMs > 0 && (
+                            <span className="text-xs text-muted-foreground">
+                              Ping: {wifiStatus.pingMs} ms
+                            </span>
+                          )}
+                          {wifiStatus.downloadSpeed && (
+                            <span className="text-xs text-muted-foreground">
+                              DL: {wifiStatus.downloadSpeed}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="flex items-center gap-1.5 text-destructive text-xs font-medium">
+                          <AlertCircle className="h-3 w-3" />
+                          Pas d&apos;acces Internet
+                        </span>
+                      )}
                     </div>
                   </div>
                 )

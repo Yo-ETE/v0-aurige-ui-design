@@ -359,6 +359,31 @@ export default function ComparaisonPage() {
     return <span className="font-mono text-xs">{bytes}</span>
   }
 
+  // Wait for mission ID to be resolved before rendering
+  const [missionResolved, setMissionResolved] = useState(false)
+  
+  useEffect(() => {
+    if (missionId) {
+      setMissionResolved(true)
+    } else {
+      // Give time for localStorage/store to load
+      const timeout = setTimeout(() => setMissionResolved(true), 500)
+      return () => clearTimeout(timeout)
+    }
+  }, [missionId])
+  
+  if (!missionResolved) {
+    return (
+      <AppShell title="Comparaison de Logs" description="Chargement...">
+        <Card className="border-border bg-card">
+          <CardContent className="py-12 text-center">
+            <Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" />
+          </CardContent>
+        </Card>
+      </AppShell>
+    )
+  }
+  
   if (!missionId) {
     return (
       <AppShell title="Comparaison de Logs" description="Comparez deux logs pour identifier les trames differentielles">

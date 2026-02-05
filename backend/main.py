@@ -2746,6 +2746,43 @@ async def get_wifi_status():
                 elif internet_interface:
                     internet_source = internet_interface
         
+        # Test internet connectivity with ping
+        has_internet = False
+        ping_ms = 0
+        try:
+            ping_result = run_command(["ping", "-c", "1", "-W", "2", "8.8.8.8"], check=False)
+            if ping_result.returncode == 0:
+                has_internet = True
+                # Parse ping time
+                for pline in ping_result.stdout.split("\n"):
+                    if "time=" in pline:
+                        try:
+                            ping_ms = float(pline.split("time=")[1].split()[0])
+                        except:
+                            pass
+        except:
+            pass
+        
+        # Quick download speed test (download a small file)
+        download_speed = ""
+        if has_internet:
+            try:
+                speed_result = run_command(
+                    ["curl", "-s", "-w", "%{speed_download}", "-o", "/dev/null",
+                     "--max-time", "5", "http://speedtest.tele2.net/1MB.zip"],
+                    check=False
+                )
+                if speed_result.returncode == 0 and speed_result.stdout.strip():
+                    speed_bps = float(speed_result.stdout.strip())
+                    speed_mbps = (speed_bps * 8) / 1_000_000
+                    if speed_mbps >= 1:
+                        download_speed = f"{speed_mbps:.1f} Mbps"
+                    else:
+                        speed_kbps = (speed_bps * 8) / 1000
+                        download_speed = f"{speed_kbps:.0f} kbps"
+            except:
+                pass
+        
         return {
             "connected": bool(ip_local),
             "isHotspot": is_hotspot,
@@ -2759,6 +2796,9 @@ async def get_wifi_status():
             "internetSource": internet_source,
             "internetInterface": internet_interface,
             "internetVia": internet_via,
+            "hasInternet": has_internet,
+            "pingMs": round(ping_ms, 1),
+            "downloadSpeed": download_speed,
         }
     except Exception as e:
         return {"connected": False, "ssid": "", "signal": 0, "error": str(e)}
