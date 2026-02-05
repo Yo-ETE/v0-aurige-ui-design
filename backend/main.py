@@ -3690,11 +3690,11 @@ async def export_mission(mission_id: str):
         
         # Sanitize mission name for filesystem
         safe_name = re.sub(r'[^\w\-_]', '_', mission_name)
-    
-    # Create ZIP in memory
-    buffer = io.BytesIO()
-    
-    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        
+        # Create ZIP in memory
+        buffer = io.BytesIO()
+        
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
             # Add mission metadata
             if metadata_file.exists():
                 zf.write(metadata_file, f"{safe_name}/mission.json")
@@ -3716,65 +3716,65 @@ async def export_mission(mission_id: str):
             dbc_file = mission_dir / "signals.json"
             if dbc_file.exists():
                 zf.write(dbc_file, f"{safe_name}/signals.json")
-            
-            # Also generate and include the actual DBC file
-            try:
-                with open(dbc_file, "r") as f:
-                    signals_data = json.load(f)
                 
-                # Generate DBC content
-                dbc_lines = [
-                    'VERSION ""',
-                    '',
-                    'NS_ :',
-                    '',
-                    'BS_:',
-                    '',
-                    'BU_:',
-                    '',
-                ]
-                
-                # Group signals by CAN ID
-                signals_by_id = {}
-                for sig in signals_data.get("signals", []):
-                    can_id = sig.get("can_id", "000")
-                    if can_id not in signals_by_id:
-                        signals_by_id[can_id] = []
-                    signals_by_id[can_id].append(sig)
-                
-                # Generate BO_ (message) and SG_ (signal) entries
-                for can_id, sigs in signals_by_id.items():
-                    can_id_int = int(can_id, 16)
-                    msg_name = f"MSG_{can_id}"
-                    dbc_lines.append(f'BO_ {can_id_int} {msg_name}: 8 Vector__XXX')
+                # Also generate and include the actual DBC file
+                try:
+                    with open(dbc_file, "r") as f:
+                        signals_data = json.load(f)
                     
-                    for sig in sigs:
-                        name = sig.get("name", f"SIG_{can_id}")
-                        start_bit = sig.get("start_bit", 0)
-                        length = sig.get("length", 8)
-                        byte_order = 1 if sig.get("byte_order") == "little_endian" else 0
-                        is_signed = "-" if sig.get("is_signed") else "+"
-                        scale = sig.get("scale", 1)
-                        offset = sig.get("offset", 0)
-                        min_val = sig.get("min_val", 0)
-                        max_val = sig.get("max_val", 255)
-                        unit = sig.get("unit", "")
+                    # Generate DBC content
+                    dbc_lines = [
+                        'VERSION ""',
+                        '',
+                        'NS_ :',
+                        '',
+                        'BS_:',
+                        '',
+                        'BU_:',
+                        '',
+                    ]
+                    
+                    # Group signals by CAN ID
+                    signals_by_id = {}
+                    for sig in signals_data.get("signals", []):
+                        can_id = sig.get("can_id", "000")
+                        if can_id not in signals_by_id:
+                            signals_by_id[can_id] = []
+                        signals_by_id[can_id].append(sig)
+                    
+                    # Generate BO_ (message) and SG_ (signal) entries
+                    for can_id, sigs in signals_by_id.items():
+                        can_id_int = int(can_id, 16)
+                        msg_name = f"MSG_{can_id}"
+                        dbc_lines.append(f'BO_ {can_id_int} {msg_name}: 8 Vector__XXX')
                         
-                        dbc_lines.append(f' SG_ {name} : {start_bit}|{length}@{byte_order}{is_signed} ({scale},{offset}) [{min_val}|{max_val}] "{unit}" Vector__XXX')
-                    
-                    dbc_lines.append('')
-                
-                # Add comments
-                dbc_lines.append('')
-                for can_id, sigs in signals_by_id.items():
-                    for sig in sigs:
-                        comment = sig.get("comment", "")
-                        if comment:
-                            can_id_int = int(can_id, 16)
+                        for sig in sigs:
                             name = sig.get("name", f"SIG_{can_id}")
-                            dbc_lines.append(f'CM_ SG_ {can_id_int} {name} "{comment}";')
-                
-                dbc_content = "\n".join(dbc_lines)
+                            start_bit = sig.get("start_bit", 0)
+                            length = sig.get("length", 8)
+                            byte_order = 1 if sig.get("byte_order") == "little_endian" else 0
+                            is_signed = "-" if sig.get("is_signed") else "+"
+                            scale = sig.get("scale", 1)
+                            offset = sig.get("offset", 0)
+                            min_val = sig.get("min_val", 0)
+                            max_val = sig.get("max_val", 255)
+                            unit = sig.get("unit", "")
+                            
+                            dbc_lines.append(f' SG_ {name} : {start_bit}|{length}@{byte_order}{is_signed} ({scale},{offset}) [{min_val}|{max_val}] "{unit}" Vector__XXX')
+                        
+                        dbc_lines.append('')
+                    
+                    # Add comments
+                    dbc_lines.append('')
+                    for can_id, sigs in signals_by_id.items():
+                        for sig in sigs:
+                            comment = sig.get("comment", "")
+                            if comment:
+                                can_id_int = int(can_id, 16)
+                                name = sig.get("name", f"SIG_{can_id}")
+                                dbc_lines.append(f'CM_ SG_ {can_id_int} {name} "{comment}";')
+                    
+                    dbc_content = "\n".join(dbc_lines)
                     zf.writestr(f"{safe_name}/{safe_name}.dbc", dbc_content)
                 except Exception as e:
                     print(f"[WARNING] Could not generate DBC: {e}")
