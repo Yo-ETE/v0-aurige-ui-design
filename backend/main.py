@@ -2321,6 +2321,149 @@ async def obd_send_with_flow_control(interface: str, request_id: str, request_da
     return {"success": True, "responses": responses, "error": None}
 
 
+def parse_candump_line(line: str):
+    """Parse a candump -L line: (timestamp) interface ID#DATA"""
+    line = line.strip()
+    if not line:
+        return None
+    # Format: (1770403100.903541) vcan0 7E8#1014490249574631
+    parts = line.split()
+    if len(parts) < 3:
+        return None
+    id_data = parts[2] if '#' in parts[2] else (parts[3] if len(parts) > 3 and '#' in parts[3] else None)
+    if not id_data:
+        return None
+    can_id, data_hex = id_data.split('#', 1)
+    return {"id": can_id.upper(), "data": data_hex.upper()}
+
+
+def decode_vin_from_frames(responses: list) -> str:
+    """
+    Decode VIN from ISO-TP multi-frame CAN responses.
+    
+    VIN response on 7E8:
+    - First frame:  7E8#1014490249 + first VIN bytes
+    - Consecutive:  7E8#21xxxxxxxx  7E8#22xxxxxxxx etc.
+    
+    The VIN is 17 ASCII characters.
+    """
+    # Filter only 7E8 responses (ECU response)
+    frames = []
+    for line in responses:
+        parsed = parse_candump_line(line) if isinstance(line, str) else line
+        if parsed and parsed["id"] in ("7E8", "7E9", "7EA", "7EB"):
+            frames.append(parsed["data"])
+    
+    if not frames:
+        return ""
+    
+    vin_bytes = []
+    
+    for data in frames:
+        # Convert hex string to byte list
+        byte_list = [data[i:i+2] for i in range(0, len(data), 2)]
+        
+        if not byte_list:
+            continue
+        
+        first_byte = int(byte_list[0], 16)
+        
+        if first_byte == 0x10:
+            # First frame of multi-frame: 10 14 49 02 01 VIN_BYTE1 VIN_BYTE2 ...
+            # Skip: 10 (PCI), length byte, 49 (response SID), 02 (PID), 01 (message count)
+            if len(byte_list) > 5:
+                vin_bytes.extend(byte_list[5:])
+        elif (first_byte & 0xF0) == 0x20:
+            # Consecutive frame: 21 xx xx xx xx xx xx xx
+            vin_bytes.extend(byte_list[1:])
+        elif byte_list[0] == "07" or (len(byte_list) > 1 and byte_list[1] == "49"):
+            # Single frame response: 07 49 02 01 VIN...
+            # Skip: length, 49, 02, 01
+            if len(byte_list) > 4:
+                vin_bytes.extend(byte_list[4:])
+    
+    # Convert to ASCII
+    vin = ""
+    for b in vin_bytes:
+        try:
+            val = int(b, 16)
+            if 0x20 <= val <= 0x7E:  # Printable ASCII
+                vin += chr(val)
+        except ValueError:
+            pass
+    
+    return vin[:17] if len(vin) >= 17 else vin
+
+
+def decode_dtcs_from_frames(responses: list) -> list:
+    """
+    Decode DTCs from OBD-II Service 03 response.
+    
+    DTC encoding: 2 bytes per DTC
+    First byte upper nibble:
+      00 = P0xxx, 01 = P1xxx, 10 = P2xxx, 11 = P3xxx
+      C, B, U prefixes for other modules.
+    
+    Example: 7E8#0443010301030000
+    04 = 4 bytes follow, 43 = response to service 03, 0103 = P0103, 0103 = P0103
+    """
+    frames = []
+    for line in responses:
+        parsed = parse_candump_line(line) if isinstance(line, str) else line
+        if parsed and parsed["id"] in ("7E8", "7E9", "7EA", "7EB"):
+            frames.append(parsed["data"])
+    
+    if not frames:
+        return []
+    
+    dtc_codes = []
+    dtc_type_map = {0: "P0", 1: "P1", 2: "P2", 3: "P3",
+                    4: "C0", 5: "C1", 6: "C2", 7: "C3",
+                    8: "B0", 9: "B1", 10: "B2", 11: "B3",
+                    12: "U0", 13: "U1", 14: "U2", 15: "U3"}
+    
+    for data in frames:
+        byte_list = [data[i:i+2] for i in range(0, len(data), 2)]
+        if len(byte_list) < 2:
+            continue
+        
+        first_byte = int(byte_list[0], 16)
+        
+        # Single frame: first byte is length, second should be 0x43 (response to service 03)
+        if first_byte <= 7 and len(byte_list) > 1 and byte_list[1].upper() == "43":
+            num_bytes = first_byte - 1  # Subtract 1 for the service byte
+            dtc_data = byte_list[2:]
+            # Each DTC is 2 bytes
+            for i in range(0, min(num_bytes, len(dtc_data)), 2):
+                if i + 1 < len(dtc_data):
+                    b1 = int(dtc_data[i], 16)
+                    b2 = int(dtc_data[i + 1], 16)
+                    if b1 == 0 and b2 == 0:
+                        continue  # No DTC
+                    upper_nibble = (b1 >> 4) & 0x0F
+                    prefix = dtc_type_map.get(upper_nibble >> 2, "P0")
+                    # The rest: lower 2 bits of upper nibble + lower nibble + second byte
+                    code_num = ((b1 & 0x3F) << 8) | b2
+                    dtc_codes.append(f"{prefix}{code_num:03X}")
+        
+        # Multi-frame first frame
+        elif first_byte == 0x10:
+            if len(byte_list) > 2 and byte_list[2].upper() == "43":
+                dtc_data = byte_list[3:]
+                for i in range(0, len(dtc_data), 2):
+                    if i + 1 < len(dtc_data):
+                        b1 = int(dtc_data[i], 16)
+                        b2 = int(dtc_data[i + 1], 16)
+                        if b1 == 0 and b2 == 0:
+                            continue
+                        upper_nibble = (b1 >> 4) & 0x0F
+                        prefix = dtc_type_map.get(upper_nibble >> 2, "P0")
+                        code_num = ((b1 & 0x3F) << 8) | b2
+                        dtc_codes.append(f"{prefix}{code_num:03X}")
+    
+    return dtc_codes
+
+
 @app.post("/api/obd/vin")
 async def read_vin(request: OBDRequest):
     """
@@ -2347,11 +2490,14 @@ async def read_vin(request: OBDRequest):
         }
     
     responses = result["responses"]
+    decoded_vin = decode_vin_from_frames(responses) if responses else ""
+    
     return {
-        "status": "success" if responses else "sent",
-        "message": "VIN request completed" if responses else "VIN request sent, waiting for response",
-        "data": responses[0] if responses else None,
+        "status": "success" if decoded_vin else ("sent" if responses else "sent"),
+        "message": f"VIN: {decoded_vin}" if decoded_vin else ("VIN request sent, waiting for response" if not responses else "VIN response received but could not decode"),
+        "data": decoded_vin if decoded_vin else (responses[0] if responses else None),
         "frames": responses,
+        "decoded": True if decoded_vin else False,
     }
 
 
@@ -2380,10 +2526,14 @@ async def read_dtc(request: OBDRequest):
         }
     
     responses = result["responses"]
+    decoded_dtcs = decode_dtcs_from_frames(responses) if responses else []
+    
     return {
         "status": "success" if responses else "sent",
-        "message": "DTC read completed" if responses else "DTC request sent",
+        "message": f"DTC read completed: {len(decoded_dtcs)} code(s) detecte(s)" if decoded_dtcs else ("No DTC found" if responses else "DTC request sent"),
+        "data": ",".join(decoded_dtcs) if decoded_dtcs else None,
         "frames": responses,
+        "dtcs": decoded_dtcs,
     }
 
 
@@ -2523,7 +2673,9 @@ async def full_obd_scan(request: OBDRequest):
         if vin_result["success"]:
             for line in vin_result["responses"]:
                 f.write(line + "\n")
-            results["vin"] = vin_result["responses"]
+            decoded_vin = decode_vin_from_frames(vin_result["responses"])
+            results["vin"] = [decoded_vin] if decoded_vin else vin_result["responses"]
+            results["vin_raw"] = vin_result["responses"]
         else:
             f.write(f"Error: {vin_result['error']}\n")
             results["vin"] = []
@@ -2558,7 +2710,9 @@ async def full_obd_scan(request: OBDRequest):
         if dtc_result["success"]:
             for line in dtc_result["responses"]:
                 f.write(line + "\n")
-            results["dtcs"] = dtc_result["responses"]
+            decoded_dtcs = decode_dtcs_from_frames(dtc_result["responses"])
+            results["dtcs"] = decoded_dtcs if decoded_dtcs else dtc_result["responses"]
+            results["dtcs_raw"] = dtc_result["responses"]
         else:
             f.write(f"Error: {dtc_result['error']}\n")
             results["dtcs"] = []

@@ -132,6 +132,78 @@ const PID_DESCRIPTIONS: Record<string, string> = {
 }
 
 // ============================================================================
+// DTC code descriptions
+// ============================================================================
+
+const DTC_DESCRIPTIONS: Record<string, string> = {
+  // Common Powertrain codes
+  "P0100": "Debit d'air massique - Dysfonctionnement",
+  "P0101": "Debit d'air massique - Plage/Performance",
+  "P0102": "Debit d'air massique - Entree basse",
+  "P0103": "Debit d'air massique - Entree haute",
+  "P0110": "Temperature air admission - Dysfonctionnement",
+  "P0115": "Temperature liquide refroidissement - Dysfonctionnement",
+  "P0120": "Capteur position papillon - Dysfonctionnement",
+  "P0130": "Sonde O2 (banc 1, capteur 1) - Dysfonctionnement",
+  "P0133": "Sonde O2 (banc 1, capteur 1) - Reponse lente",
+  "P0171": "Systeme trop pauvre (banc 1)",
+  "P0172": "Systeme trop riche (banc 1)",
+  "P0300": "Rates d'allumage detectes - Cylindres multiples",
+  "P0301": "Rate d'allumage - Cylindre 1",
+  "P0302": "Rate d'allumage - Cylindre 2",
+  "P0303": "Rate d'allumage - Cylindre 3",
+  "P0304": "Rate d'allumage - Cylindre 4",
+  "P0325": "Capteur de cliquetis 1 - Dysfonctionnement",
+  "P0335": "Capteur position vilebrequin A - Dysfonctionnement",
+  "P0340": "Capteur position arbre a cames A - Dysfonctionnement",
+  "P0401": "EGR - Debit insuffisant",
+  "P0420": "Catalyseur - Efficacite insuffisante (banc 1)",
+  "P0440": "Systeme EVAP - Dysfonctionnement",
+  "P0442": "Systeme EVAP - Petite fuite detectee",
+  "P0446": "Systeme EVAP - Controle purge - Dysfonctionnement",
+  "P0455": "Systeme EVAP - Grosse fuite detectee",
+  "P0500": "Capteur vitesse vehicule - Dysfonctionnement",
+  "P0505": "Controle ralenti - Dysfonctionnement",
+  "P0507": "Controle ralenti - Regime superieur",
+  "P0562": "Tension systeme - Basse",
+  "P0563": "Tension systeme - Haute",
+  // Common Chassis codes
+  "C0035": "Capteur vitesse roue AV gauche - Dysfonctionnement",
+  "C0040": "Capteur vitesse roue AV droite - Dysfonctionnement",
+  "C0045": "Capteur vitesse roue AR gauche - Dysfonctionnement",
+  "C0050": "Capteur vitesse roue AR droite - Dysfonctionnement",
+  // Common Body codes
+  "B0001": "Module commande eclairage - Court-circuit",
+  "B1000": "Memoire defaut ECU - Dysfonctionnement interne",
+}
+
+function getDTCDescription(code: string): string {
+  return DTC_DESCRIPTIONS[code.toUpperCase()] || ""
+}
+
+function getDTCCategory(code: string): string {
+  const prefix = code.charAt(0).toUpperCase()
+  switch (prefix) {
+    case "P": return "Powertrain"
+    case "C": return "Chassis"
+    case "B": return "Body"
+    case "U": return "Network"
+    default: return "Inconnu"
+  }
+}
+
+function getDTCColor(code: string): string {
+  const prefix = code.charAt(0).toUpperCase()
+  switch (prefix) {
+    case "P": return "bg-destructive text-destructive-foreground"
+    case "C": return "bg-warning text-warning-foreground"
+    case "B": return "bg-primary text-primary-foreground"
+    case "U": return "bg-muted text-muted-foreground"
+    default: return "bg-muted text-muted-foreground"
+  }
+}
+
+// ============================================================================
 // Export utilities
 // ============================================================================
 
@@ -608,20 +680,30 @@ export default function OBDII() {
                 {dtcCodes.length === 0 ? (
                   <p className="text-sm text-success">Aucun code defaut detecte</p>
                 ) : (
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     <Label className="text-xs text-muted-foreground">
                       {dtcCodes.length} code(s) detecte(s)
                     </Label>
-                    <div className="flex flex-wrap gap-2">
-                      {dtcCodes.map((code) => (
-                        <Badge
-                          key={code}
-                          variant="destructive"
-                          className="font-mono text-sm px-2 py-1"
-                        >
-                          {code}
-                        </Badge>
-                      ))}
+                    <div className="space-y-2">
+                      {dtcCodes.map((code) => {
+                        const desc = getDTCDescription(code)
+                        const cat = getDTCCategory(code)
+                        return (
+                          <div key={code} className="flex items-center gap-3 rounded-lg border border-border/50 bg-background/30 p-2.5">
+                            <Badge className={`font-mono text-sm px-2 py-1 ${getDTCColor(code)}`}>
+                              {code}
+                            </Badge>
+                            <div className="flex-1 min-w-0">
+                              {desc ? (
+                                <p className="text-sm text-foreground truncate">{desc}</p>
+                              ) : (
+                                <p className="text-sm text-muted-foreground italic">Description non disponible</p>
+                              )}
+                              <p className="text-[10px] text-muted-foreground/60">{cat}</p>
+                            </div>
+                          </div>
+                        )
+                      })}
                     </div>
                   </div>
                 )}
@@ -784,12 +866,26 @@ export default function OBDII() {
                     <Label className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">
                       Codes defaut ({scanResult.results.dtcs.length})
                     </Label>
-                    <div className="flex flex-wrap gap-2 mt-2">
-                      {scanResult.results.dtcs.map((dtc) => (
-                        <Badge key={dtc} variant="destructive" className="font-mono text-sm px-2 py-1">
-                          {dtc}
-                        </Badge>
-                      ))}
+                    <div className="space-y-2 mt-2">
+                      {scanResult.results.dtcs.map((dtc) => {
+                        const desc = getDTCDescription(dtc)
+                        const cat = getDTCCategory(dtc)
+                        return (
+                          <div key={dtc} className="flex items-center gap-3 rounded border border-border/50 bg-background/30 p-2">
+                            <Badge className={`font-mono text-sm px-2 py-1 ${getDTCColor(dtc)}`}>
+                              {dtc}
+                            </Badge>
+                            <div className="flex-1 min-w-0">
+                              {desc ? (
+                                <p className="text-sm text-foreground truncate">{desc}</p>
+                              ) : (
+                                <p className="text-sm text-muted-foreground italic">Description non disponible</p>
+                              )}
+                              <p className="text-[10px] text-muted-foreground/60">{cat}</p>
+                            </div>
+                          </div>
+                        )
+                      })}
                     </div>
                   </div>
                 )}
