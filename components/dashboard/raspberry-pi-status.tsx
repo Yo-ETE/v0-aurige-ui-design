@@ -213,15 +213,22 @@ function StatusTileComponent({ tile }: { tile: StatusTile }) {
         tile.status === "error" && "border-destructive/30 bg-destructive/5"
       )}
     >
-      <div
-        className={cn(
-          "flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md",
-          tile.status === "ok" && "bg-success/20 text-success",
-          tile.status === "warning" && "bg-warning/20 text-warning",
-          tile.status === "error" && "bg-destructive/20 text-destructive"
+      <div className="relative flex-shrink-0">
+        <div
+          className={cn(
+            "flex h-9 w-9 items-center justify-center rounded-md",
+            tile.status === "ok" && "bg-success/20 text-success",
+            tile.status === "warning" && "bg-warning/20 text-warning",
+            tile.status === "error" && "bg-destructive/20 text-destructive"
+          )}
+        >
+          <Icon className="h-4 w-4" />
+        </div>
+        {tile.id === "wifi" && tile.subvalue && tile.status === "ok" && (
+          <span className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-success/90 px-1.5 py-px text-[9px] font-bold leading-tight text-success-foreground">
+            {tile.subvalue.split(" / ")[0] || tile.subvalue}
+          </span>
         )}
-      >
-        <Icon className="h-4 w-4" />
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between gap-2">
@@ -242,7 +249,7 @@ function StatusTileComponent({ tile }: { tile: StatusTile }) {
 export function RaspberryPiStatus() {
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [tiles, setTiles] = useState<StatusTile[]>(getLoadingTiles())
-  const [lastUpdate, setLastUpdate] = useState(new Date())
+  const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
   const [isApiAvailable, setIsApiAvailable] = useState(false)
 
   const fetchStatus = useCallback(async () => {
@@ -275,8 +282,8 @@ export function RaspberryPiStatus() {
             État du Raspberry Pi
           </CardTitle>
           <p className="text-xs text-muted-foreground mt-1">
-            Dernière mise à jour: {lastUpdate.toLocaleTimeString("fr-FR")}
-            {!isApiAvailable && " (données simulées)"}
+            Dernière mise à jour: {lastUpdate ? lastUpdate.toLocaleTimeString("fr-FR") : "..."}
+            {!isApiAvailable && lastUpdate && " (données simulées)"}
           </p>
         </div>
         <Button
