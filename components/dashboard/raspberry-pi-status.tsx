@@ -242,7 +242,7 @@ function StatusTileComponent({ tile }: { tile: StatusTile }) {
 export function RaspberryPiStatus() {
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [tiles, setTiles] = useState<StatusTile[]>(getLoadingTiles())
-  const [lastUpdate, setLastUpdate] = useState(new Date())
+  const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
   const [isApiAvailable, setIsApiAvailable] = useState(false)
 
   const fetchStatus = useCallback(async () => {
@@ -275,8 +275,8 @@ export function RaspberryPiStatus() {
             État du Raspberry Pi
           </CardTitle>
           <p className="text-xs text-muted-foreground mt-1">
-            Dernière mise à jour: {lastUpdate.toLocaleTimeString("fr-FR")}
-            {!isApiAvailable && " (données simulées)"}
+            Dernière mise à jour: {lastUpdate ? lastUpdate.toLocaleTimeString("fr-FR") : "..."}
+            {!isApiAvailable && lastUpdate && " (données simulées)"}
           </p>
         </div>
         <Button
