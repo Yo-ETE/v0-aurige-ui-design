@@ -352,10 +352,14 @@ setup_git_repo() {
         CURRENT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
         log_success "Git repository set up at $AURIGE_DIR/repo (commit: $CURRENT_COMMIT)"
         
-        # Save current branch for future updates
-        CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "v0/yo-ete-5c91d9cb")
-        echo "$CURRENT_BRANCH" > "$AURIGE_DIR/branch.txt"
-        log_info "Saved branch for updates: $CURRENT_BRANCH"
+        # Save current branch for future updates (don't overwrite if branch.txt already exists)
+        if [ ! -f "$AURIGE_DIR/branch.txt" ] || [ -z "$(cat "$AURIGE_DIR/branch.txt" 2>/dev/null)" ]; then
+            CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "v0/yo-ete-5c91d9cb")
+            echo "$CURRENT_BRANCH" > "$AURIGE_DIR/branch.txt"
+            log_info "Saved branch for updates: $CURRENT_BRANCH"
+        else
+            log_info "Keeping existing branch preference: $(cat "$AURIGE_DIR/branch.txt")"
+        fi
     else
         log_warn "No git repository found, version tracking will be unavailable"
     fi
