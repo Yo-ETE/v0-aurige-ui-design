@@ -111,9 +111,6 @@ export function MissionWizard({
     if (!editVehicleOnly && !isStep1Valid) return
 
     setIsSubmitting(true)
-    
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 400))
 
     const vehicle: Vehicle = {
       brand: brand.trim(),
@@ -125,26 +122,35 @@ export function MissionWizard({
       trim: trim.trim() || undefined,
     }
 
-    if (editMission) {
-      if (editVehicleOnly) {
-        updateMissionVehicle(editMission.id, vehicle)
+    try {
+      if (editMission) {
+        if (editVehicleOnly) {
+          await updateMissionVehicle(editMission.id, vehicle)
+        } else {
+          await updateMission(editMission.id, {
+            name: name.trim(),
+            notes: notes.trim() || undefined,
+            vehicle,
+          })
+        }
+        handleClose()
       } else {
-        updateMission(editMission.id, {
+        const newMission = await addMission({
           name: name.trim(),
           notes: notes.trim() || undefined,
           vehicle,
         })
+        if (newMission) {
+          setCurrentMission(newMission.id)
+          handleClose()
+          router.push(`/missions/${newMission.id}`)
+        } else {
+          setIsSubmitting(false)
+        }
       }
-      handleClose()
-    } else {
-      const newMission = addMission({
-        name: name.trim(),
-        notes: notes.trim() || undefined,
-        vehicle,
-      })
-      setCurrentMission(newMission.id)
-      handleClose()
-      router.push(`/missions/${newMission.id}`)
+    } catch (error) {
+      console.error("Failed to save mission:", error)
+      setIsSubmitting(false)
     }
   }
 

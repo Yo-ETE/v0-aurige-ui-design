@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/dialog"
 import { MissionWizard } from "@/components/dashboard/mission-wizard"
 import { useMissionStore, type Mission } from "@/lib/mission-store"
+import { getMissionExportUrl } from "@/lib/api"
 import {
   Car,
   Edit2,
@@ -39,12 +40,14 @@ import {
   Video,
   Zap,
   GitBranch,
+  GitCompare,
   Activity,
   Flame,
   Cpu,
   Settings,
   ArrowRight,
   Info,
+  FileCode,
 } from "lucide-react"
 import Link from "next/link"
 
@@ -81,10 +84,16 @@ const moduleLinks: ModuleLink[] = [
     description: "Isoler les trames par fonction",
   },
   {
-    name: "Trames",
-    href: "/trames",
-    icon: FileText,
-    description: "Catalogue des trames découvertes",
+    name: "Comparaison",
+    href: "/comparaison",
+    icon: GitCompare,
+    description: "Comparer deux logs",
+  },
+  {
+    name: "DBC",
+    href: "/dbc",
+    icon: FileCode,
+    description: "Gestion des signaux DBC",
   },
   {
     name: "OBD-II",
@@ -106,7 +115,10 @@ const moduleLinks: ModuleLink[] = [
   },
 ]
 
-function formatDate(date: Date): string {
+function formatDate(dateInput: string | Date | null | undefined): string {
+  if (!dateInput) return "N/A"
+  const date = typeof dateInput === "string" ? new Date(dateInput) : dateInput
+  if (isNaN(date.getTime())) return "N/A"
   return new Intl.DateTimeFormat("fr-FR", {
     day: "2-digit",
     month: "2-digit",
@@ -132,14 +144,41 @@ export default function MissionPage() {
   const [showEditVehicle, setShowEditVehicle] = useState(false)
   const [newName, setNewName] = useState("")
 
+  // Set active mission ID immediately when entering this page
+  useEffect(() => {
+    if (id) {
+      // Store in sessionStorage for persistence across page navigation (cleared on browser close)
+      sessionStorage.setItem("activeMissionId", id)
+      // Clean up any old localStorage key
+      localStorage.removeItem("activeMissionId")
+      // Also update zustand store
+      setCurrentMission(id)
+    }
+  }, [id, setCurrentMission])
+
+  const fetchMissions = useMissionStore((state) => state.fetchMissions)
+
+  // Refresh mission data periodically and on mount
+  useEffect(() => {
+    // Initial fetch
+    fetchMissions()
+    
+    // Refresh every 5 seconds to get updated stats
+    const interval = setInterval(() => {
+      fetchMissions()
+    }, 5000)
+    
+    return () => clearInterval(interval)
+  }, [fetchMissions])
+
+  // Find mission data from store
   useEffect(() => {
     const found = missions.find((m) => m.id === id)
     if (found) {
       setMission(found)
-      setCurrentMission(found.id)
       setNewName(found.name)
     }
-  }, [id, missions, setCurrentMission])
+  }, [id, missions])
 
   if (!mission) {
     return (
@@ -167,12 +206,14 @@ export default function MissionPage() {
   }
 
   const handleExport = () => {
-    alert("Export de la mission à venir")
+    // Trigger download via link using the correct API URL
+    window.location.href = getMissionExportUrl(mission.id)
   }
 
   const handleDelete = () => {
     deleteMission(mission.id)
     setCurrentMission(null)
+    sessionStorage.removeItem("activeMissionId")
     router.push("/")
   }
 
@@ -249,6 +290,18 @@ export default function MissionPage() {
                   <Trash2 className="h-4 w-4" />
                   Supprimer
                 </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setCurrentMission(null)
+                    sessionStorage.removeItem("activeMissionId")
+                    router.push("/")
+                  }}
+                  className="gap-2"
+                >
+                  Fermer la mission
+                </Button>
               </div>
             </div>
 
@@ -297,7 +350,7 @@ export default function MissionPage() {
                 <Radio className="h-5 w-5 text-primary" />
                 <div>
                   <p className="text-sm font-medium text-foreground">
-                    {mission.canInterface} @ {(mission.bitrate / 1000).toFixed(0)}k
+                    {mission.canInterface || "can0"} @ {mission.bitrate ? `${(mission.bitrate / 1000).toFixed(0)}k` : "500k"}
                   </p>
                   <p className="text-xs text-muted-foreground">Interface / Bitrate</p>
                 </div>

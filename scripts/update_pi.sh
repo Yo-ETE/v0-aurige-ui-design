@@ -14,6 +14,10 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 AURIGE_DIR="/opt/aurige"
+GITHUB_REPO="https://github.com/Yo-ETE/v0-aurige-ui-design.git"
+TEMP_DIR="/tmp/aurige-update"
+# Branch to use - change this if needed
+TARGET_BRANCH="v0/main-37135798"
 
 log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 log_success() { echo -e "${GREEN}[OK]${NC} $1"; }
@@ -31,37 +35,49 @@ echo -e "${BLUE}    AURIGE Update Script${NC}"
 echo -e "${BLUE}============================================${NC}"
 echo ""
 
-# Stop services
+# Stop services first
 log_info "Stopping services..."
-systemctl stop aurige-web || true
-systemctl stop aurige-api || true
+systemctl stop aurige-web aurige-api 2>/dev/null || true
 
-# Pull latest changes
-log_info "Pulling latest changes..."
-cd "$AURIGE_DIR"
-git pull origin main
+# Clean up temp directory
+rm -rf "$TEMP_DIR"
 
-# Update frontend
-log_info "Updating frontend..."
-cd "$AURIGE_DIR/frontend"
-npm install --legacy-peer-deps
-npm run build
+# Clone fresh from GitHub
+log_info "Cloning latest from GitHub..."
+git clone "$GITHUB_REPO" "$TEMP_DIR"
+cd "$TEMP_DIR"
 
-# Update backend
-log_info "Updating backend..."
-cd "$AURIGE_DIR/backend"
-./venv/bin/pip install -r requirements.txt
+# Try to get branch from saved config, otherwise use TARGET_BRANCH
+SAVED_BRANCH=""
+if [ -f "$AURIGE_DIR/branch.txt" ]; then
+    SAVED_BRANCH=$(cat "$AURIGE_DIR/branch.txt")
+fi
 
-# Restart services
-log_info "Restarting services..."
-systemctl daemon-reload
-systemctl start aurige-api
-systemctl start aurige-web
-systemctl restart nginx
+BRANCH_TO_USE="${SAVED_BRANCH:-$TARGET_BRANCH}"
+log_info "Using branch: $BRANCH_TO_USE"
+
+# Fetch all branches
+git fetch origin
+
+# Checkout the target branch
+if git rev-parse --verify "origin/$BRANCH_TO_USE" >/dev/null 2>&1; then
+    git checkout "$BRANCH_TO_USE"
+    log_success "Checked out branch: $BRANCH_TO_USE"
+else
+    log_warn "Branch $BRANCH_TO_USE not found, trying main..."
+    git checkout main
+fi
+
+# Save the branch for next time
+echo "$BRANCH_TO_USE" > "$AURIGE_DIR/branch.txt" 2>/dev/null || true
+
+log_success "Git cloned: $(git rev-parse --short HEAD)"
+
+# Run install script
+log_info "Running install script..."
+bash "$TEMP_DIR/scripts/install_pi.sh"
+
+# Clean up
+rm -rf "$TEMP_DIR"
 
 log_success "Update complete!"
-echo ""
-echo -e "Services status:"
-systemctl status aurige-web --no-pager -l | head -5
-systemctl status aurige-api --no-pager -l | head -5
-echo ""

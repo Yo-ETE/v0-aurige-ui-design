@@ -55,8 +55,14 @@ function mapStatusToTiles(status: SystemStatus): StatusTile[] {
       id: "wifi",
       icon: Wifi,
       title: "Wi-Fi",
-      value: status.wifiConnected ? "Connecté" : "Déconnecté",
-      subvalue: status.wifiConnected ? "wlan0 actif" : "Aucune connexion",
+      value: status.wifiConnected 
+        ? (status.wifiIsHotspot ? `Hotspot: ${status.wifiHotspotSsid || "Aurige"}` : (status.wifiSsid || "Connecté"))
+        : "Déconnecté",
+      subvalue: status.wifiConnected 
+        ? (status.wifiIsHotspot 
+            ? `Internet: ${status.wifiInternetSource || "?"}${status.wifiInternetVia ? ` (${status.wifiInternetVia})` : ""}`
+            : `${status.wifiTxRate || "-"} / ${status.wifiRxRate || "-"}`)
+        : "Aucune connexion",
       status: status.wifiConnected ? "ok" : "warning",
     },
     {
@@ -124,20 +130,12 @@ function mapStatusToTiles(status: SystemStatus): StatusTile[] {
       status: status.can1Up ? "ok" : "warning",
     },
     {
-      id: "vehicle",
-      icon: Activity,
-      title: "Véhicule",
-      value: status.vehicleConnected ? "Présent" : "Non détecté",
-      subvalue: status.vehicleConnected ? "Traffic CAN détecté" : "Aucun signal",
-      status: status.vehicleConnected ? "ok" : "warning",
-    },
-    {
-      id: "ecu",
-      icon: AlertTriangle,
-      title: "ECU / Bus",
-      value: status.ecuResponding ? "Répondant" : "Silencieux",
-      subvalue: status.ecuResponding ? "Communication OK" : "Pas de réponse ECU",
-      status: status.ecuResponding ? "ok" : "warning",
+      id: "vcan0",
+      icon: Radio,
+      title: "vcan0",
+      value: status.vcan0Up ? "UP" : "DOWN",
+      subvalue: status.vcan0Up ? "Interface test active" : "Non configuré",
+      status: status.vcan0Up ? "ok" : "warning",
     },
     {
       id: "api",
@@ -158,22 +156,39 @@ function mapStatusToTiles(status: SystemStatus): StatusTile[] {
   ]
 }
 
-// Fallback mock status when API is unavailable
-function getMockStatus(): StatusTile[] {
+// Initial loading tiles - shown before first API call
+function getLoadingTiles(): StatusTile[] {
   return [
-    { id: "wifi", icon: Wifi, title: "Wi-Fi", value: "Connecté", subvalue: "wlan0 actif", status: "ok" },
-    { id: "ethernet", icon: Network, title: "Ethernet", value: "Connecté", subvalue: "eth0 actif", status: "ok" },
-    { id: "cpu", icon: Cpu, title: "CPU", value: "23%", subvalue: "Normal", status: "ok" },
-    { id: "temp", icon: Thermometer, title: "Température", value: "48°C", subvalue: "Normal", status: "ok" },
-    { id: "memory", icon: MemoryStick, title: "Mémoire", value: "1.2 / 4 GB", subvalue: "30% utilisé", status: "ok" },
-    { id: "storage", icon: HardDrive, title: "Stockage", value: "12 / 32 GB", subvalue: "38% utilisé", status: "ok" },
-    { id: "uptime", icon: Clock, title: "Uptime", value: "3j 14h 22m", subvalue: "3 jours", status: "ok" },
-    { id: "can0", icon: Radio, title: "can0", value: "UP", subvalue: "500000 bps", status: "ok" },
-    { id: "can1", icon: Radio, title: "can1", value: "DOWN", subvalue: "Non configuré", status: "warning" },
-    { id: "vehicle", icon: Activity, title: "Véhicule", value: "Présent", subvalue: "Traffic CAN détecté", status: "ok" },
-    { id: "ecu", icon: AlertTriangle, title: "ECU / Bus", value: "Silencieux", subvalue: "Pas de réponse ECU", status: "warning" },
-    { id: "api", icon: Server, title: "API Backend", value: "Mock", subvalue: "API non disponible", status: "warning" },
-    { id: "web", icon: Server, title: "Web Frontend", value: "Online", subvalue: "Port 3000", status: "ok" },
+    { id: "wifi", icon: Wifi, title: "Wi-Fi", value: "...", subvalue: "Connexion...", status: "warning" },
+    { id: "ethernet", icon: Network, title: "Ethernet", value: "...", subvalue: "Connexion...", status: "warning" },
+    { id: "cpu", icon: Cpu, title: "CPU", value: "...", subvalue: "Connexion...", status: "warning" },
+    { id: "temp", icon: Thermometer, title: "Temp.", value: "...", subvalue: "Connexion...", status: "warning" },
+    { id: "memory", icon: MemoryStick, title: "Mémoire", value: "...", subvalue: "Connexion...", status: "warning" },
+    { id: "storage", icon: HardDrive, title: "Stockage", value: "...", subvalue: "Connexion...", status: "warning" },
+    { id: "uptime", icon: Clock, title: "Uptime", value: "...", subvalue: "Connexion...", status: "warning" },
+    { id: "can0", icon: Radio, title: "can0", value: "...", subvalue: "Connexion...", status: "warning" },
+    { id: "can1", icon: Radio, title: "can1", value: "...", subvalue: "Connexion...", status: "warning" },
+    { id: "vcan0", icon: Radio, title: "vcan0", value: "...", subvalue: "Connexion...", status: "warning" },
+    { id: "api", icon: Server, title: "API Backend", value: "...", subvalue: "Connexion en cours...", status: "warning" },
+    { id: "web", icon: Server, title: "Web Frontend", value: "OK", subvalue: "Port 3000", status: "ok" },
+  ]
+}
+
+// Offline tiles - shown when API is unreachable after retry
+function getOfflineTiles(): StatusTile[] {
+  return [
+    { id: "wifi", icon: Wifi, title: "Wi-Fi", value: "?", subvalue: "API hors ligne", status: "error" },
+    { id: "ethernet", icon: Network, title: "Ethernet", value: "?", subvalue: "API hors ligne", status: "error" },
+    { id: "cpu", icon: Cpu, title: "CPU", value: "?", subvalue: "API hors ligne", status: "error" },
+    { id: "temp", icon: Thermometer, title: "Temp.", value: "?", subvalue: "API hors ligne", status: "error" },
+    { id: "memory", icon: MemoryStick, title: "Mémoire", value: "?", subvalue: "API hors ligne", status: "error" },
+    { id: "storage", icon: HardDrive, title: "Stockage", value: "?", subvalue: "API hors ligne", status: "error" },
+    { id: "uptime", icon: Clock, title: "Uptime", value: "?", subvalue: "API hors ligne", status: "error" },
+    { id: "can0", icon: Radio, title: "can0", value: "?", subvalue: "API hors ligne", status: "error" },
+    { id: "can1", icon: Radio, title: "can1", value: "?", subvalue: "API hors ligne", status: "error" },
+    { id: "vcan0", icon: Radio, title: "vcan0", value: "?", subvalue: "API hors ligne", status: "error" },
+    { id: "api", icon: Server, title: "API Backend", value: "Hors ligne", subvalue: "Connexion impossible", status: "error" },
+    { id: "web", icon: Server, title: "Web Frontend", value: "OK", subvalue: "Port 3000", status: "ok" },
   ]
 }
 
@@ -226,7 +241,7 @@ function StatusTileComponent({ tile }: { tile: StatusTile }) {
 
 export function RaspberryPiStatus() {
   const [isRefreshing, setIsRefreshing] = useState(false)
-  const [tiles, setTiles] = useState<StatusTile[]>(getMockStatus())
+  const [tiles, setTiles] = useState<StatusTile[]>(getLoadingTiles())
   const [lastUpdate, setLastUpdate] = useState(new Date())
   const [isApiAvailable, setIsApiAvailable] = useState(false)
 
@@ -237,8 +252,8 @@ export function RaspberryPiStatus() {
       setTiles(mapStatusToTiles(status))
       setIsApiAvailable(true)
     } catch {
-      // API not available, use mock data
-      setTiles(getMockStatus())
+      // API not available, show offline state
+      setTiles(getOfflineTiles())
       setIsApiAvailable(false)
     }
     setLastUpdate(new Date())
@@ -284,8 +299,8 @@ export function RaspberryPiStatus() {
           ))}
         </div>
         {!isApiAvailable && (
-          <p className="mt-4 text-xs text-muted-foreground italic border-t border-border pt-4">
-            API non disponible. Les données affichées sont simulées. Connectez-vous au Raspberry Pi pour obtenir les vraies informations.
+          <p className="mt-4 text-xs text-destructive italic border-t border-border pt-4">
+            Connexion au Raspberry Pi impossible. Vérifiez que l'API backend est en cours d'exécution sur le port 8000 et que l'adresse IP est correctement configurée.
           </p>
         )}
       </CardContent>

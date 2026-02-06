@@ -2,6 +2,13 @@
 
 Professional CAN bus analysis tool for automotive forensics and diagnostics, designed for Raspberry Pi 5.
 
+## Quick Start
+
+After installation, AURIGE is immediately accessible at:
+- **http://aurige.local** (mDNS - works automatically on most networks)
+
+No configuration required - just open the URL and start analyzing CAN traffic.
+
 ## Hardware Requirements
 
 - **Raspberry Pi 5** (ARM64)
@@ -28,7 +35,7 @@ curl -fsSL https://raw.githubusercontent.com/YOUR_REPO/aurige/main/scripts/insta
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y curl git nginx python3 python3-venv python3-pip can-utils build-essential
+sudo apt-get install -y curl git nginx python3 python3-venv python3-pip can-utils build-essential avahi-daemon avahi-utils
 ```
 
 2. **Install Node.js LTS:**
@@ -46,15 +53,25 @@ cd /opt/aurige
 sudo git clone https://github.com/YOUR_REPO/aurige.git .
 ```
 
-4. **Setup frontend:**
+4. **Configure environment:**
 
 ```bash
-cd /opt/aurige/frontend
+# Copy and edit the environment file
+sudo cp /opt/aurige/.env.example /opt/aurige/.env.local
+
+# For production with nginx (recommended):
+# Leave NEXT_PUBLIC_API_URL empty in .env.local
+```
+
+5. **Setup frontend:**
+
+```bash
+cd /opt/aurige
 sudo npm install --legacy-peer-deps
 sudo npm run build
 ```
 
-5. **Setup backend:**
+6. **Setup backend:**
 
 ```bash
 cd /opt/aurige/backend
@@ -62,7 +79,7 @@ sudo python3 -m venv venv
 sudo ./venv/bin/pip install -r requirements.txt
 ```
 
-6. **Install systemd services:**
+7. **Install systemd services:**
 
 ```bash
 sudo cp /opt/aurige/deploy/*.service /etc/systemd/system/
@@ -71,7 +88,7 @@ sudo systemctl enable aurige-web aurige-api
 sudo systemctl start aurige-web aurige-api
 ```
 
-7. **Configure nginx:**
+8. **Configure nginx:**
 
 ```bash
 sudo cp /opt/aurige/deploy/nginx-aurige.conf /etc/nginx/sites-available/aurige
@@ -294,17 +311,72 @@ sudo chmod -R 777 /opt/aurige/data
 
 ## API Reference
 
+### System
+
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/health` | GET | Health check |
-| `/api/status` | GET | System status |
-| `/api/missions` | GET | List missions |
+| `/api/status` | GET | System status (CPU, memory, CAN, network) |
+
+### CAN Control
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/can/init` | POST | Initialize CAN interface with bitrate |
+| `/api/can/stop` | POST | Bring down CAN interface |
+| `/api/can/send` | POST | Send single CAN frame |
+| `/api/can/{interface}/status` | GET | Get CAN interface status |
+
+### Capture & Replay
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/capture/start` | POST | Start CAN capture to file |
+| `/api/capture/stop` | POST | Stop capture |
+| `/api/capture/status` | GET | Get capture status |
+| `/api/replay/start` | POST | Start log replay |
+| `/api/replay/stop` | POST | Stop replay |
+| `/api/replay/status` | GET | Get replay status |
+
+### Generator & Fuzzing
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/generator/start` | POST | Start CAN traffic generator |
+| `/api/generator/stop` | POST | Stop generator |
+| `/api/fuzzing/start` | POST | Start fuzzing sequence |
+| `/api/fuzzing/stop` | POST | Stop fuzzing |
+
+### OBD-II Diagnostics
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/obd/vin` | POST | Request VIN |
+| `/api/obd/dtc/read` | POST | Read DTCs |
+| `/api/obd/dtc/clear` | POST | Clear DTCs |
+| `/api/obd/reset` | POST | ECU reset |
+| `/api/obd/pid` | POST | Read specific OBD PID |
+
+### Missions
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/missions` | GET | List all missions |
 | `/api/missions` | POST | Create mission |
 | `/api/missions/{id}` | GET | Get mission |
 | `/api/missions/{id}` | PATCH | Update mission |
 | `/api/missions/{id}` | DELETE | Delete mission |
+| `/api/missions/{id}/duplicate` | POST | Duplicate mission |
 | `/api/missions/{id}/logs` | GET | List mission logs |
+| `/api/missions/{id}/logs/{log_id}` | DELETE | Delete log |
 | `/api/missions/{id}/logs/{log_id}/download` | GET | Download log |
+
+### WebSocket Streams
+
+| Endpoint | Description |
+|----------|-------------|
+| `/ws/candump?interface=can0` | Live CAN frame stream |
+| `/ws/cansniffer?interface=can0` | Aggregated CAN view |
 
 ## License
 

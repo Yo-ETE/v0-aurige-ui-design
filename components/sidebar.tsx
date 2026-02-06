@@ -1,24 +1,32 @@
 "use client"
 
-import React, { useEffect, useState } from "react"
+import React from "react"
+
+import { useState, useEffect } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { useMissionStore } from "@/lib/mission-store"
+import { getApiHost } from "@/lib/api-config"
 import {
   Car,
   Settings,
   Video,
   Zap,
   GitBranch,
-  FileText,
+  GitCompare,
   Activity,
   Flame,
   Cpu,
   ChevronDown,
   Radio,
   Home,
+  Menu,
+  X,
+  Cog,
+  FileCode,
 } from "lucide-react"
+import { Button } from "@/components/ui/button"
 
 type SystemStatus = {
   wifiConnected: boolean
@@ -67,8 +75,9 @@ const baseNavigation: NavSection[] = [
     items: [
       { name: "Capture & Replay", href: "/capture-replay", icon: Video },
       { name: "Replay Rapide", href: "/replay-rapide", icon: Zap },
-      { name: "Isolation", href: "/isolation", icon: GitBranch },
-      { name: "Trames", href: "/trames", icon: FileText },
+{ name: "Isolation", href: "/isolation", icon: GitBranch },
+  { name: "Comparaison", href: "/comparaison", icon: GitCompare },
+  { name: "DBC", href: "/dbc", icon: FileCode },
     ],
   },
   {
@@ -82,6 +91,12 @@ const baseNavigation: NavSection[] = [
       { name: "Générateur", href: "/generateur", icon: Cpu },
     ],
   },
+  {
+    title: "Administration",
+    items: [
+      { name: "Configuration Pi", href: "/configuration", icon: Cog },
+    ],
+  },
 ]
 
 export function Sidebar() {
@@ -91,6 +106,18 @@ export function Sidebar() {
   const [expandedSections, setExpandedSections] = useState<string[]>(
     baseNavigation.map((section) => section.title)
   )
+  const [mobileOpen, setMobileOpen] = useState(false)
+  const [isHydrated, setIsHydrated] = useState(false)
+
+  // Handle hydration
+  useEffect(() => {
+    setIsHydrated(true)
+  }, [])
+
+  // Close mobile menu on route change
+  useEffect(() => {
+    setMobileOpen(false)
+  }, [pathname])
 
   const [piIp, setPiIp] = useState<string>("—")
   const [piOk, setPiOk] = useState<boolean>(false)
@@ -152,10 +179,33 @@ export function Sidebar() {
   })
 
   return (
-    <aside className="fixed left-0 top-0 z-40 h-screen w-64 border-r border-sidebar-border bg-sidebar">
-      <div className="flex h-full flex-col">
-        {/* Logo */}
-        <div className="flex h-16 items-center gap-3 border-b border-sidebar-border px-6">
+    <>
+      {/* Mobile menu button */}
+      <Button
+        variant="ghost"
+        size="icon"
+        className="fixed left-4 top-4 z-50 lg:hidden"
+        onClick={() => setMobileOpen(!mobileOpen)}
+      >
+        {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+      </Button>
+
+      {/* Overlay for mobile */}
+      {mobileOpen && (
+        <div 
+          className="fixed inset-0 z-40 bg-black/50 lg:hidden" 
+          onClick={() => setMobileOpen(false)}
+        />
+      )}
+
+      <aside className={cn(
+        "fixed left-0 top-0 z-40 h-screen w-64 border-r border-sidebar-border bg-sidebar transition-transform duration-300",
+        "lg:translate-x-0",
+        mobileOpen ? "translate-x-0" : "-translate-x-full"
+      )}>
+        <div className="flex h-full flex-col">
+          {/* Logo */}
+          <div className="flex h-16 items-center gap-3 border-b border-sidebar-border px-6">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary">
             <Radio className="h-5 w-5 text-primary-foreground" />
           </div>
@@ -170,9 +220,9 @@ export function Sidebar() {
         {/* Navigation */}
         <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
           {navigation.map((section) => {
-            // Skip Analyse section if no current mission
-            if (section.showMission && !currentMission) return null
-
+            // Skip Analyse section if no current mission (only after hydration)
+            if (section.showMission && isHydrated && !currentMission) return null
+            
             return (
               <div key={section.title} className="mb-4">
                 <button
@@ -196,16 +246,17 @@ export function Sidebar() {
                         (item.href !== "/" && pathname.startsWith(item.href))
 
                       return (
-                        <Link
-                          key={item.name}
-                          href={item.href}
-                          className={cn(
-                            "group relative flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-all",
-                            isActive
-                              ? "bg-sidebar-accent text-sidebar-primary shadow-[inset_0_0_0_1px_rgba(99,102,241,0.3)]"
-                              : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
-                          )}
-                        >
+<Link
+                                          key={item.name}
+                                          href={item.href}
+                                          onClick={() => setMobileOpen(false)}
+                                          className={cn(
+                                            "group relative flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-all",
+                                            isActive
+                                              ? "bg-sidebar-accent text-sidebar-primary shadow-[inset_0_0_0_1px_rgba(99,102,241,0.3)]"
+                                              : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+                                          )}
+                                        >
                           <item.icon
                             className={cn(
                               "h-4 w-4 flex-shrink-0",
@@ -250,14 +301,13 @@ export function Sidebar() {
               )}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-medium text-sidebar-foreground">
-                Raspberry Pi
-              </p>
-              <p className="text-[10px] text-muted-foreground truncate">{piIp}</p>
+              <p className="text-xs font-medium text-sidebar-foreground">Raspberry Pi</p>
+              <p className="text-[10px] text-muted-foreground truncate">{isHydrated ? getApiHost() : "..."}</p>
             </div>
           </div>
+</div>
         </div>
-      </div>
-    </aside>
+      </aside>
+    </>
   )
 }

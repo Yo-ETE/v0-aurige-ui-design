@@ -1,6 +1,17 @@
 "use client"
 
+/**
+ * Mission Store
+ * 
+ * All mission data is stored on the Raspberry Pi filesystem.
+ * This store communicates ONLY with the FastAPI backend.
+ * 
+ * Note: currentMissionId is persisted in sessionStorage to survive page navigation.
+ */
+
 import { create } from "zustand"
+import { persist, createJSONStorage } from "zustand/middleware"
+import { getApiBaseUrl } from "./api-config"
 
 export interface Vehicle {
   brand: string
@@ -12,152 +23,182 @@ export interface Vehicle {
   trim?: string
 }
 
+export interface CANConfig {
+  interface: "can0" | "can1"
+  bitrate: number
+}
+
 export interface Mission {
   id: string
   name: string
   notes?: string
   vehicle: Vehicle
-  canInterface: "can0" | "can1"
-  bitrate: number
-  createdAt: Date
-  updatedAt: Date
-  lastActivity: Date
+  canConfig: CANConfig
+  createdAt: string
+  updatedAt: string
   logsCount: number
   framesCount: number
-  lastCaptureDate?: Date
 }
 
 export interface MissionCreateInput {
   name: string
   notes?: string
   vehicle: Vehicle
-  canInterface?: "can0" | "can1"
-  bitrate?: number
+  canConfig?: CANConfig
 }
 
 interface MissionStore {
   missions: Mission[]
   currentMissionId: string | null
-  addMission: (mission: MissionCreateInput) => Mission
-  updateMission: (id: string, updates: Partial<Omit<Mission, "id" | "createdAt">>) => void
-  updateMissionVehicle: (id: string, vehicle: Vehicle) => void
-  deleteMission: (id: string) => void
+  isLoading: boolean
+  error: string | null
+  
+  // CRUD operations - all go to API
+  fetchMissions: () => Promise<void>
+  addMission: (mission: MissionCreateInput) => Promise<Mission | null>
+  updateMission: (id: string, updates: Partial<MissionCreateInput>) => Promise<void>
+  updateMissionVehicle: (id: string, vehicle: Vehicle) => Promise<void>
+  deleteMission: (id: string) => Promise<void>
+  duplicateMission: (id: string) => Promise<Mission | null>
+  
+  // Local state only
   setCurrentMission: (id: string | null) => void
   getCurrentMission: () => Mission | null
-  duplicateMission: (id: string) => Mission | null
   getMissionById: (id: string) => Mission | undefined
 }
 
-// Initial mock missions
-const initialMissions: Mission[] = [
-  {
-    id: "1",
-    name: "BMW Série 1 - Diagnostic ABS",
-    notes: "Véhicule client - diagnostic ABS",
-    vehicle: {
-      brand: "BMW",
-      model: "Série 1",
-      year: 2019,
-      vin: "WBA1234567890ABCD",
-      fuel: "Diesel",
-      engine: "2.0L 150ch",
-    },
-    canInterface: "can0",
-    bitrate: 500000,
-    createdAt: new Date("2025-01-15"),
-    updatedAt: new Date("2025-01-27"),
-    lastActivity: new Date("2025-01-27"),
-    logsCount: 12,
-    framesCount: 847,
-    lastCaptureDate: new Date("2025-01-26"),
-  },
-  {
-    id: "2",
-    name: "Peugeot 308 - Analyse BSI",
-    vehicle: {
-      brand: "Peugeot",
-      model: "308",
-      year: 2021,
-      fuel: "Essence",
-    },
-    canInterface: "can0",
-    bitrate: 500000,
-    createdAt: new Date("2025-01-20"),
-    updatedAt: new Date("2025-01-22"),
-    lastActivity: new Date("2025-01-22"),
-    logsCount: 3,
-    framesCount: 234,
-  },
-  {
-    id: "3",
-    name: "Renault Clio V - Test ECU",
-    notes: "Test communication ECU moteur",
-    vehicle: {
-      brand: "Renault",
-      model: "Clio V",
-      year: 2022,
-      vin: "VF1RJA00067890123",
-      fuel: "Essence",
-      engine: "1.0L TCe 100ch",
-      trim: "Intens",
-    },
-    canInterface: "can1",
-    bitrate: 250000,
-    createdAt: new Date("2025-01-10"),
-    updatedAt: new Date("2025-01-12"),
-    lastActivity: new Date("2025-01-12"),
-    logsCount: 5,
-    framesCount: 412,
-    lastCaptureDate: new Date("2025-01-11"),
-  },
-]
-
-export const useMissionStore = create<MissionStore>((set, get) => ({
-  missions: initialMissions,
+export const useMissionStore = create<MissionStore>()(
+  persist(
+    (set, get) => ({
+  missions: [],
   currentMissionId: null,
+  isLoading: false,
+  error: null,
 
-  addMission: (missionData) => {
-    const now = new Date()
-    const newMission: Mission = {
-      id: crypto.randomUUID(),
-      name: missionData.name,
-      notes: missionData.notes,
-      vehicle: missionData.vehicle,
-      canInterface: missionData.canInterface ?? "can0",
-      bitrate: missionData.bitrate ?? 500000,
-      createdAt: now,
-      updatedAt: now,
-      lastActivity: now,
-      logsCount: 0,
-      framesCount: 0,
+  fetchMissions: async () => {
+    set({ isLoading: true, error: null })
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/api/missions`, {
+        signal: AbortSignal.timeout(5000),
+      })
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+      }
+      
+      const data = await response.json()
+      set({ missions: data.missions || [], isLoading: false })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Erreur de connexion"
+      set({ 
+        error: `Impossible de récupérer les missions: ${message}`, 
+        isLoading: false,
+        missions: [],
+      })
     }
-    set((state) => ({
-      missions: [newMission, ...state.missions],
-    }))
-    return newMission
   },
 
-  updateMission: (id, updates) => {
-    set((state) => ({
-      missions: state.missions.map((m) =>
-        m.id === id ? { ...m, ...updates, updatedAt: new Date(), lastActivity: new Date() } : m
-      ),
-    }))
+  addMission: async (missionData) => {
+    set({ isLoading: true, error: null })
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/api/missions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: missionData.name,
+          notes: missionData.notes,
+          vehicle: missionData.vehicle,
+          canConfig: missionData.canConfig || { interface: "can0", bitrate: 500000 },
+        }),
+      })
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+      }
+      
+      const newMission = await response.json()
+      set((state) => ({
+        missions: [newMission, ...state.missions],
+        isLoading: false,
+      }))
+      return newMission
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Erreur de connexion"
+      set({ error: `Impossible de créer la mission: ${message}`, isLoading: false })
+      return null
+    }
   },
 
-  updateMissionVehicle: (id, vehicle) => {
-    set((state) => ({
-      missions: state.missions.map((m) =>
-        m.id === id ? { ...m, vehicle, updatedAt: new Date(), lastActivity: new Date() } : m
-      ),
-    }))
+  updateMission: async (id, updates) => {
+    set({ error: null })
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/api/missions/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      })
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+      }
+      
+      const updatedMission = await response.json()
+      set((state) => ({
+        missions: state.missions.map((m) => (m.id === id ? updatedMission : m)),
+      }))
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Erreur de connexion"
+      set({ error: `Impossible de mettre à jour la mission: ${message}` })
+    }
   },
 
-  deleteMission: (id) => {
-    set((state) => ({
-      missions: state.missions.filter((m) => m.id !== id),
-      currentMissionId: state.currentMissionId === id ? null : state.currentMissionId,
-    }))
+  updateMissionVehicle: async (id, vehicle) => {
+    await get().updateMission(id, { vehicle })
+  },
+
+  deleteMission: async (id) => {
+    set({ error: null })
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/api/missions/${id}`, {
+        method: "DELETE",
+      })
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+      }
+      
+      set((state) => ({
+        missions: state.missions.filter((m) => m.id !== id),
+        currentMissionId: state.currentMissionId === id ? null : state.currentMissionId,
+      }))
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Erreur de connexion"
+      set({ error: `Impossible de supprimer la mission: ${message}` })
+    }
+  },
+
+  duplicateMission: async (id) => {
+    set({ isLoading: true, error: null })
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/api/missions/${id}/duplicate`, {
+        method: "POST",
+      })
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+      }
+      
+      const newMission = await response.json()
+      set((state) => ({
+        missions: [newMission, ...state.missions],
+        isLoading: false,
+      }))
+      return newMission
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Erreur de connexion"
+      set({ error: `Impossible de dupliquer la mission: ${message}`, isLoading: false })
+      return null
+    }
   },
 
   setCurrentMission: (id) => {
@@ -173,18 +214,12 @@ export const useMissionStore = create<MissionStore>((set, get) => ({
     const { missions } = get()
     return missions.find((m) => m.id === id)
   },
-
-  duplicateMission: (id) => {
-    const { missions, addMission } = get()
-    const mission = missions.find((m) => m.id === id)
-    if (!mission) return null
-    
-    return addMission({
-      name: `${mission.name} (copie)`,
-      notes: mission.notes,
-      vehicle: { ...mission.vehicle },
-      canInterface: mission.canInterface,
-      bitrate: mission.bitrate,
-    })
-  },
-}))
+}),
+    {
+      name: "aurige-mission-session",
+      storage: createJSONStorage(() => sessionStorage),
+      // Only persist currentMissionId, not the full missions array (that comes from API)
+      partialize: (state) => ({ currentMissionId: state.currentMissionId }),
+    }
+  )
+)

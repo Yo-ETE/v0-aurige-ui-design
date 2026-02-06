@@ -3,7 +3,6 @@
 import React from "react"
 
 import { Sidebar } from "@/components/sidebar"
-import { FloatingTerminal } from "@/components/floating-terminal"
 
 interface AppShellProps {
   children: React.ReactNode
@@ -15,18 +14,17 @@ export function AppShell({ children, title, description }: AppShellProps) {
   return (
     <div className="min-h-screen bg-background">
       <Sidebar />
-      <main className="ml-64 min-h-screen">
-        <div className="border-b border-border bg-card/30 px-8 py-6">
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+      <main className="min-h-screen lg:ml-64">
+        <div className="border-b border-border bg-card/30 px-4 py-4 pl-16 lg:px-8 lg:py-6 lg:pl-8">
+          <h1 className="text-xl lg:text-2xl font-semibold tracking-tight text-foreground">
             {title}
           </h1>
           {description && (
-            <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+            <p className="mt-1 text-xs lg:text-sm text-muted-foreground">{description}</p>
           )}
         </div>
-        <div className="p-8 pb-96">{children}</div>
+        <div className="p-4 lg:p-8 pb-96">{children}</div>
       </main>
-      <FloatingTerminal />
     </div>
   )
 }
