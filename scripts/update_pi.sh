@@ -53,6 +53,13 @@ if [ -f "$AURIGE_DIR/branch.txt" ]; then
     SAVED_BRANCH=$(cat "$AURIGE_DIR/branch.txt")
 fi
 
+# If saved branch is an old v0 branch, reset to main
+if [[ "$SAVED_BRANCH" == v0/* ]]; then
+    log_warn "Old v0 branch detected ($SAVED_BRANCH), resetting to main"
+    SAVED_BRANCH="main"
+    echo "main" > "$AURIGE_DIR/branch.txt" 2>/dev/null || true
+fi
+
 BRANCH_TO_USE="${SAVED_BRANCH:-$TARGET_BRANCH}"
 log_info "Using branch: $BRANCH_TO_USE"
 
