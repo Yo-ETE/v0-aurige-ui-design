@@ -62,6 +62,8 @@ import {
   AlertCircle,
   Search,
   FileText,
+  FolderOpen,
+  ArrowLeft,
 } from "lucide-react"
 
 export default function DBCPage() {
@@ -255,15 +257,16 @@ export default function DBCPage() {
     return (
       <AppShell>
         <div className="p-6">
-          <Card>
-            <CardContent className="flex flex-col items-center justify-center py-12">
-              <AlertCircle className="h-12 w-12 text-muted-foreground mb-4" />
-              <h3 className="text-lg font-medium mb-2">Aucune mission selectionnee</h3>
-              <p className="text-sm text-muted-foreground mb-4">
-                Selectionnez une mission depuis le Dashboard pour acceder au DBC.
+          <Card className="border-border bg-card">
+            <CardContent className="flex flex-col items-center justify-center py-16">
+              <FolderOpen className="h-16 w-16 text-muted-foreground/30 mb-4" />
+              <h2 className="text-xl font-semibold text-foreground mb-2">Aucune mission selectionnee</h2>
+              <p className="text-muted-foreground text-center max-w-md mb-6">
+                Selectionnez ou creez une mission depuis le Dashboard pour acceder a l&apos;editeur DBC.
               </p>
-              <Button onClick={() => router.push("/")}>
-                Aller au Dashboard
+              <Button onClick={() => router.push("/")} className="gap-2">
+                <ArrowLeft className="h-4 w-4" />
+                Ouvrir le Dashboard
               </Button>
             </CardContent>
           </Card>

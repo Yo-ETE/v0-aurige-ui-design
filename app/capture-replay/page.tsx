@@ -256,11 +256,11 @@ const handleDeleteLog = async (logId: string) => {
               Aucune mission selectionnee
             </h2>
             <p className="text-muted-foreground text-center max-w-md mb-6">
-              Vous devez d'abord selectionner ou creer une mission pour pouvoir capturer et rejouer des logs CAN.
+              Selectionnez ou creez une mission depuis le Dashboard pour capturer et rejouer des logs CAN.
             </p>
             <Button onClick={() => router.push("/")} className="gap-2">
               <ArrowLeft className="h-4 w-4" />
-              Retour a l'accueil
+              Ouvrir le Dashboard
             </Button>
           </CardContent>
         </Card>

@@ -4191,6 +4191,13 @@ class CompareFrameDiff(BaseModel):
     bytes_changed: list[int]  # Indices of bytes that changed
     classification: str  # "differential", "only_a", "only_b", "identical"
     confidence: float
+    # New: stability & variance metrics for smarter reverse engineering
+    unique_payloads_a: int = 0   # How many distinct payloads in log A
+    unique_payloads_b: int = 0   # How many distinct payloads in log B
+    stability_score: float = 0.0  # 0-100: higher = more stable (fewer variations, better for reverse)
+    dominant_ratio_a: float = 0.0 # % of frames matching the most common payload in A
+    dominant_ratio_b: float = 0.0 # % of frames matching the most common payload in B
+    byte_change_detail: list[dict] = []  # Per changed byte: {index, val_a, val_b, hex_diff}
 
 class CompareLogsResponse(BaseModel):
     log_a_name: str
@@ -4261,6 +4268,20 @@ async def compare_logs(mission_id: str, request: CompareLogsRequest):
         payload_a = get_most_common(payloads_a)
         payload_b = get_most_common(payloads_b)
         
+        # Count unique payloads in each log
+        unique_a = len(set(payloads_a)) if payloads_a else 0
+        unique_b = len(set(payloads_b)) if payloads_b else 0
+        
+        # Dominant ratio: how much the most common payload dominates
+        dominant_a = 0.0
+        dominant_b = 0.0
+        if payloads_a:
+            counter_a = Counter(payloads_a)
+            dominant_a = round(counter_a.most_common(1)[0][1] / len(payloads_a) * 100, 1)
+        if payloads_b:
+            counter_b = Counter(payloads_b)
+            dominant_b = round(counter_b.most_common(1)[0][1] / len(payloads_b) * 100, 1)
+        
         # Determine classification
         if not payloads_a:
             classification = "only_b"
@@ -4280,8 +4301,9 @@ async def compare_logs(mission_id: str, request: CompareLogsRequest):
             # Higher confidence if more samples
             confidence = min(95.0, 60.0 + min(len(payloads_a), len(payloads_b)) * 2)
         
-        # Find changed bytes
+        # Find changed bytes with detail
         bytes_changed = []
+        byte_change_detail = []
         if payload_a and payload_b:
             max_len = max(len(payload_a), len(payload_b))
             pa = payload_a.ljust(max_len, "0")
@@ -4290,7 +4312,92 @@ async def compare_logs(mission_id: str, request: CompareLogsRequest):
                 byte_a = pa[i:i+2]
                 byte_b = pb[i:i+2]
                 if byte_a != byte_b:
-                    bytes_changed.append(i // 2)
+                    byte_idx = i // 2
+                    bytes_changed.append(byte_idx)
+                    try:
+                        val_a = int(byte_a, 16)
+                        val_b = int(byte_b, 16)
+                        byte_change_detail.append({
+                            "index": byte_idx,
+                            "val_a": byte_a,
+                            "val_b": byte_b,
+                            "hex_diff": f"{abs(val_a - val_b):02X}",
+                            "decimal_diff": abs(val_a - val_b),
+                        })
+                    except ValueError:
+                        byte_change_detail.append({
+                            "index": byte_idx,
+                            "val_a": byte_a,
+                            "val_b": byte_b,
+                            "hex_diff": "??",
+                            "decimal_diff": 0,
+                        })
+        
+        # ============================================================
+        # STABILITY SCORE (0-100)
+        # Higher = more stable = better candidate for reverse engineering
+        #
+        # A perfect candidate for reverse:
+        #   - Has very few unique payloads in each log (stable signal)
+        #   - The dominant payload in each log is >90% (consistent)
+        #   - Only 1-2 bytes change between A and B (targeted change)
+        #   - Both logs have enough samples (reliable)
+        # ============================================================
+        stability = 0.0
+        
+        if classification == "differential":
+            # 1. Payload consistency (40 pts max)
+            #    Higher dominant ratio = more stable signal
+            avg_dominant = (dominant_a + dominant_b) / 2
+            stability += min(40.0, avg_dominant * 0.4)
+            
+            # 2. Low variation (30 pts max)
+            #    Fewer unique payloads = cleaner signal
+            avg_unique = (unique_a + unique_b) / 2
+            if avg_unique <= 1:
+                stability += 30.0  # Perfect: one payload per log
+            elif avg_unique <= 2:
+                stability += 25.0
+            elif avg_unique <= 5:
+                stability += 15.0
+            elif avg_unique <= 10:
+                stability += 5.0
+            
+            # 3. Targeted change (20 pts max)
+            #    Fewer bytes changed = more precise signal
+            n_bytes_changed = len(bytes_changed)
+            if n_bytes_changed == 1:
+                stability += 20.0  # Perfect: single byte toggle
+            elif n_bytes_changed == 2:
+                stability += 15.0
+            elif n_bytes_changed <= 4:
+                stability += 8.0
+            
+            # 4. Sample count (10 pts max)
+            #    More frames = more reliable
+            min_count = min(len(payloads_a), len(payloads_b))
+            if min_count >= 50:
+                stability += 10.0
+            elif min_count >= 20:
+                stability += 7.0
+            elif min_count >= 5:
+                stability += 4.0
+            
+            stability = min(100.0, round(stability, 1))
+        
+        elif classification in ("only_a", "only_b"):
+            # Frames only in one log: could be interesting if very stable
+            payloads = payloads_a if classification == "only_a" else payloads_b
+            dominant = dominant_a if classification == "only_a" else dominant_b
+            unique = unique_a if classification == "only_a" else unique_b
+            
+            if unique <= 1:
+                stability = 70.0
+            elif unique <= 3:
+                stability = 50.0
+            else:
+                stability = max(10.0, dominant * 0.3)
+            stability = round(stability, 1)
         
         # Only include interesting frames (not identical unless few)
         if classification != "identical" or len(all_ids) < 50:
@@ -4302,12 +4409,18 @@ async def compare_logs(mission_id: str, request: CompareLogsRequest):
                 count_b=len(payloads_b),
                 bytes_changed=bytes_changed,
                 classification=classification,
-                confidence=confidence
+                confidence=confidence,
+                unique_payloads_a=unique_a,
+                unique_payloads_b=unique_b,
+                stability_score=stability,
+                dominant_ratio_a=dominant_a,
+                dominant_ratio_b=dominant_b,
+                byte_change_detail=byte_change_detail,
             ))
     
-    # Sort by classification priority: differential > only_a > only_b > identical
+    # Sort: differential first, then by stability_score DESC (most stable = best for reverse)
     priority = {"differential": 0, "only_a": 1, "only_b": 2, "identical": 3}
-    results.sort(key=lambda x: (priority.get(x.classification, 4), -x.confidence))
+    results.sort(key=lambda x: (priority.get(x.classification, 4), -x.stability_score, -x.confidence))
     
     return CompareLogsResponse(
         log_a_name=request.log_a_id,

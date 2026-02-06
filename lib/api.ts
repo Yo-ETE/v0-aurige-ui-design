@@ -8,6 +8,7 @@
 
 import { getApiBaseUrl, getWsBaseUrl } from "./api-config"
 
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -1008,6 +1009,21 @@ export async function deleteComparison(missionId: string, comparisonId: string):
   })
 }
 
+export interface DBCSignal {
+  id: string
+  can_id: string
+  name: string
+  start_bit: number
+  length: number
+  byte_order: "little_endian" | "big_endian"
+  is_signed: boolean
+  scale: number
+  offset: number
+  min_val: number
+  max_val: number
+  unit: string
+  comment: string
+}
 
 export interface DBCMessage {
   can_id: string
@@ -1053,6 +1069,14 @@ export function getMissionExportUrl(missionId: string): string {
 // Log Comparison API
 // =============================================================================
 
+export interface ByteChangeDetail {
+  index: number
+  val_a: string
+  val_b: string
+  hex_diff: string
+  decimal_diff: number
+}
+
 export interface CompareFrameDiff {
   can_id: string
   payload_a: string
@@ -1062,6 +1086,13 @@ export interface CompareFrameDiff {
   bytes_changed: number[]
   classification: "differential" | "only_a" | "only_b" | "identical"
   confidence: number
+  // Stability & variance metrics
+  unique_payloads_a: number
+  unique_payloads_b: number
+  stability_score: number       // 0-100: higher = more stable = better for reverse
+  dominant_ratio_a: number      // % of frames matching most common payload in A
+  dominant_ratio_b: number      // % of frames matching most common payload in B
+  byte_change_detail: ByteChangeDetail[]
 }
 
 export interface CompareLogsResponse {

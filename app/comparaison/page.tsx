@@ -33,6 +33,10 @@ import {
   Plus,
   ArrowLeft,
   Clock,
+  Shield,
+  TrendingUp,
+  ArrowUpDown,
+  Info,
 } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -136,6 +140,9 @@ export default function ComparaisonPage() {
 
   // Actions
   const [sendingFrame, setSendingFrame] = useState<string | null>(null)
+
+  // Sort mode for results
+  const [sortMode, setSortMode] = useState<"stability" | "confidence" | "classification">("stability")
 
   const logTree = buildLogTree(missionLogs)
 
@@ -384,8 +391,16 @@ export default function ComparaisonPage() {
     return (
       <AppShell title="Comparaison de Logs" description="Comparez deux logs pour identifier les trames differentielles">
         <Card className="border-border bg-card">
-          <CardContent className="py-12 text-center">
-            <p className="text-muted-foreground">Selectionnez une mission dans le Dashboard pour commencer.</p>
+          <CardContent className="flex flex-col items-center justify-center py-16">
+            <FolderOpen className="h-16 w-16 text-muted-foreground/30 mb-4" />
+            <h2 className="text-xl font-semibold text-foreground mb-2">Aucune mission selectionnee</h2>
+            <p className="text-muted-foreground text-center max-w-md mb-6">
+              Selectionnez ou creez une mission depuis le Dashboard pour comparer des logs CAN.
+            </p>
+            <Button onClick={() => router.push("/")} className="gap-2">
+              <ArrowLeft className="h-4 w-4" />
+              Ouvrir le Dashboard
+            </Button>
           </CardContent>
         </Card>
       </AppShell>
@@ -463,10 +478,55 @@ export default function ComparaisonPage() {
             </div>
           </div>
 
+          {/* Sort controls */}
+          <div className="flex items-center gap-2 text-sm">
+            <ArrowUpDown className="h-4 w-4 text-muted-foreground" />
+            <span className="text-muted-foreground">Trier par:</span>
+            <div className="flex gap-1">
+              <Button
+                size="sm"
+                variant={sortMode === "stability" ? "default" : "outline"}
+                className={`h-7 text-xs gap-1 ${sortMode !== "stability" ? "bg-transparent" : ""}`}
+                onClick={() => setSortMode("stability")}
+              >
+                <Shield className="h-3 w-3" />
+                Stabilite (reverse)
+              </Button>
+              <Button
+                size="sm"
+                variant={sortMode === "confidence" ? "default" : "outline"}
+                className={`h-7 text-xs gap-1 ${sortMode !== "confidence" ? "bg-transparent" : ""}`}
+                onClick={() => setSortMode("confidence")}
+              >
+                <TrendingUp className="h-3 w-3" />
+                Confiance
+              </Button>
+              <Button
+                size="sm"
+                variant={sortMode === "classification" ? "default" : "outline"}
+                className={`h-7 text-xs gap-1 ${sortMode !== "classification" ? "bg-transparent" : ""}`}
+                onClick={() => setSortMode("classification")}
+              >
+                <Info className="h-3 w-3" />
+                Type
+              </Button>
+            </div>
+          </div>
+
           {/* Frame list */}
           <ScrollArea className="h-[500px] rounded-lg border border-border">
             <div className="p-2 space-y-1">
-              {comparisonResult.frames.map((frame) => {
+              {[...comparisonResult.frames].sort((a, b) => {
+                if (sortMode === "stability") {
+                  const priorityA = a.classification === "differential" ? 0 : a.classification === "only_a" ? 1 : a.classification === "only_b" ? 2 : 3
+                  const priorityB = b.classification === "differential" ? 0 : b.classification === "only_a" ? 1 : b.classification === "only_b" ? 2 : 3
+                  if (priorityA !== priorityB) return priorityA - priorityB
+                  return (b.stability_score ?? 0) - (a.stability_score ?? 0)
+                }
+                if (sortMode === "confidence") return b.confidence - a.confidence
+                const prio = { differential: 0, only_a: 1, only_b: 2, identical: 3 }
+                return (prio[a.classification] ?? 4) - (prio[b.classification] ?? 4)
+              }).map((frame) => {
                 const isExpanded = expandedFrames.has(frame.can_id)
                 return (
                   <div key={frame.can_id} className="rounded-lg border border-border bg-card overflow-hidden">
@@ -488,13 +548,67 @@ export default function ComparaisonPage() {
                       >
                         {getClassificationLabel(frame.classification)}
                       </Badge>
-                      <span className="text-xs text-muted-foreground ml-auto">
-                        {frame.confidence.toFixed(0)}% confiance
+                      {frame.classification !== "identical" && (frame.stability_score ?? 0) > 0 && (
+                        <div className="flex items-center gap-1.5 ml-auto" title={`Score de stabilite: ${(frame.stability_score ?? 0).toFixed(0)}% - Plus le score est eleve, plus la trame est un bon candidat pour le reverse`}>
+                          <Shield className={`h-3.5 w-3.5 ${
+                            (frame.stability_score ?? 0) >= 70 ? "text-emerald-500" 
+                            : (frame.stability_score ?? 0) >= 40 ? "text-amber-500" 
+                            : "text-muted-foreground"
+                          }`} />
+                          <div className="w-16 h-1.5 rounded-full bg-secondary overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all ${
+                                (frame.stability_score ?? 0) >= 70 ? "bg-emerald-500"
+                                : (frame.stability_score ?? 0) >= 40 ? "bg-amber-500"
+                                : "bg-muted-foreground"
+                              }`}
+                              style={{ width: `${frame.stability_score ?? 0}%` }}
+                            />
+                          </div>
+                          <span className={`text-xs font-medium tabular-nums ${
+                            (frame.stability_score ?? 0) >= 70 ? "text-emerald-500"
+                            : (frame.stability_score ?? 0) >= 40 ? "text-amber-500"
+                            : "text-muted-foreground"
+                          }`}>
+                            {(frame.stability_score ?? 0).toFixed(0)}
+                          </span>
+                        </div>
+                      )}
+                      <span className="text-xs text-muted-foreground shrink-0">
+                        {frame.confidence.toFixed(0)}%
                       </span>
                     </div>
 
                     {isExpanded && (
                       <div className="px-3 pb-3 pt-1 border-t border-border bg-secondary/20 space-y-3">
+                        {/* Stability detail for differential */}
+                        {frame.classification === "differential" && (frame.stability_score ?? 0) > 0 && (
+                          <div className="flex flex-wrap items-center gap-3 p-2 rounded-lg bg-card border border-border text-xs">
+                            <div className="flex items-center gap-1">
+                              <Shield className={`h-3.5 w-3.5 ${
+                                (frame.stability_score ?? 0) >= 70 ? "text-emerald-500" : (frame.stability_score ?? 0) >= 40 ? "text-amber-500" : "text-muted-foreground"
+                              }`} />
+                              <span className="font-medium">Stabilite: {(frame.stability_score ?? 0).toFixed(0)}/100</span>
+                            </div>
+                            <span className="text-muted-foreground">|</span>
+                            <span className="text-muted-foreground">
+                              Payloads uniques: A={frame.unique_payloads_a ?? "?"} B={frame.unique_payloads_b ?? "?"}
+                            </span>
+                            <span className="text-muted-foreground">|</span>
+                            <span className="text-muted-foreground">
+                              Dominance: A={frame.dominant_ratio_a?.toFixed(0) ?? "?"}% B={frame.dominant_ratio_b?.toFixed(0) ?? "?"}%
+                            </span>
+                            <span className="text-muted-foreground">|</span>
+                            <span className="text-muted-foreground">
+                              {frame.bytes_changed.length} octet{frame.bytes_changed.length > 1 ? "s" : ""} modifie{frame.bytes_changed.length > 1 ? "s" : ""}
+                            </span>
+                            {(frame.stability_score ?? 0) >= 70 && (
+                              <Badge variant="secondary" className="bg-emerald-500/20 text-emerald-500 text-[10px] h-5">
+                                Bon candidat reverse
+                              </Badge>
+                            )}
+                          </div>
+                        )}
                         <div className="grid gap-2 sm:grid-cols-2">
                           <div className="p-2 rounded bg-card border border-border">
                             <div className="flex items-center justify-between mb-1">
@@ -530,8 +644,23 @@ export default function ComparaisonPage() {
                           </div>
                         </div>
                         {frame.bytes_changed.length > 0 && (
-                          <div className="text-xs text-muted-foreground">
-                            Octets modifies: {frame.bytes_changed.map(b => `#${b}`).join(", ")}
+                          <div className="space-y-1">
+                            <div className="text-xs text-muted-foreground">
+                              Octets modifies: {frame.bytes_changed.map(b => `#${b}`).join(", ")}
+                            </div>
+                            {frame.byte_change_detail && frame.byte_change_detail.length > 0 && (
+                              <div className="flex flex-wrap gap-1.5">
+                                {frame.byte_change_detail.map((bd) => (
+                                  <span key={bd.index} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-[10px] font-mono">
+                                    <span className="text-muted-foreground">#{bd.index}:</span>
+                                    <span className="text-red-400">{bd.val_a}</span>
+                                    <span className="text-muted-foreground">{">"}</span>
+                                    <span className="text-emerald-400">{bd.val_b}</span>
+                                    <span className="text-amber-500/70">(+/-{bd.hex_diff})</span>
+                                  </span>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         )}
                         <div className="flex gap-2">

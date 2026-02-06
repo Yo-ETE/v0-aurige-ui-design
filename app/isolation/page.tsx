@@ -1001,14 +1001,15 @@ export default function Isolation() {
           </CardHeader>
           <CardContent>
             {!missionId ? (
-              <div className="flex flex-col items-center justify-center py-12 text-center">
-                <FolderOpen className="mb-3 h-12 w-12 text-muted-foreground/50" />
-                <p className="text-sm text-muted-foreground mb-4">
-                  Aucune mission selectionnee
+              <div className="flex flex-col items-center justify-center py-16 text-center">
+                <FolderOpen className="h-16 w-16 text-muted-foreground/30 mb-4" />
+                <h2 className="text-xl font-semibold text-foreground mb-2">Aucune mission selectionnee</h2>
+                <p className="text-muted-foreground text-center max-w-md mb-6">
+                  Selectionnez ou creez une mission depuis le Dashboard pour analyser des trames CAN.
                 </p>
-                <Button onClick={() => router.push("/")} variant="outline" size="sm">
-                  <ArrowLeft className="h-4 w-4 mr-2" />
-                  Retour a l&apos;accueil
+                <Button onClick={() => router.push("/")} className="gap-2">
+                  <ArrowLeft className="h-4 w-4" />
+                  Ouvrir le Dashboard
                 </Button>
               </div>
             ) : logs.length === 0 ? (
