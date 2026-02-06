@@ -3701,9 +3701,11 @@ async def start_update():
             update_output_store["lines"].append("[OK] Depot clone")
             
             # Step 3: Checkout the target branch
+            # After a fresh clone, remote branches are origin/<name>
+            # Use -B to create/force local branch tracking the remote
             update_output_store["lines"].append(f">>> Checkout de la branche {TARGET_BRANCH}...")
             checkout_proc = await asyncio.create_subprocess_exec(
-                "sudo", "git", "-C", GIT_REPO_PATH, "checkout", TARGET_BRANCH,
+                "sudo", "git", "-C", GIT_REPO_PATH, "checkout", "-B", TARGET_BRANCH, f"origin/{TARGET_BRANCH}",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
             )
@@ -3717,15 +3719,35 @@ async def start_update():
             await checkout_proc.wait()
             
             if checkout_proc.returncode != 0:
-                update_output_store["lines"].append(f">>> Branche {TARGET_BRANCH} non trouvee, utilisation de main")
-                fallback_proc = await asyncio.create_subprocess_exec(
-                    "sudo", "git", "-C", GIT_REPO_PATH, "checkout", "main",
+                # Try direct checkout (works for branches like main)
+                update_output_store["lines"].append(f">>> -B echoue, essai checkout direct {TARGET_BRANCH}...")
+                checkout2_proc = await asyncio.create_subprocess_exec(
+                    "sudo", "git", "-C", GIT_REPO_PATH, "checkout", TARGET_BRANCH,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.STDOUT,
                 )
-                await fallback_proc.wait()
+                await checkout2_proc.wait()
+                if checkout2_proc.returncode != 0:
+                    update_output_store["lines"].append(f">>> Branche {TARGET_BRANCH} non trouvee, utilisation de main")
+                    fallback_proc = await asyncio.create_subprocess_exec(
+                        "sudo", "git", "-C", GIT_REPO_PATH, "checkout", "main",
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.STDOUT,
+                    )
+                    await fallback_proc.wait()
+                else:
+                    update_output_store["lines"].append(f"[OK] Branche {TARGET_BRANCH}")
             else:
                 update_output_store["lines"].append(f"[OK] Branche {TARGET_BRANCH}")
+            
+            # Save branch preference to branch.txt before install_pi.sh runs
+            save_branch_proc = await asyncio.create_subprocess_exec(
+                "sudo", "bash", "-c", f"echo '{TARGET_BRANCH}' > /opt/aurige/branch.txt",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            await save_branch_proc.wait()
+            update_output_store["lines"].append(f"[OK] branch.txt sauvegarde: {TARGET_BRANCH}")
             
             # Step 4: Run install script (this will stop/restart services at the end)
             update_output_store["lines"].append(">>> Execution du script d'installation...")
