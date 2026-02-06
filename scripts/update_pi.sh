@@ -17,7 +17,7 @@ AURIGE_DIR="/opt/aurige"
 GITHUB_REPO="https://github.com/Yo-ETE/v0-aurige-ui-design.git"
 TEMP_DIR="/tmp/aurige-update"
 # Branch to use - change this if needed
-TARGET_BRANCH="main"
+TARGET_BRANCH="v0/yo-ete-5c91d9cb"
 
 log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 log_success() { echo -e "${GREEN}[OK]${NC} $1"; }
@@ -51,13 +51,6 @@ cd "$TEMP_DIR"
 SAVED_BRANCH=""
 if [ -f "$AURIGE_DIR/branch.txt" ]; then
     SAVED_BRANCH=$(cat "$AURIGE_DIR/branch.txt")
-fi
-
-# If saved branch is an old v0 branch, reset to main
-if [[ "$SAVED_BRANCH" == v0/* ]]; then
-    log_warn "Old v0 branch detected ($SAVED_BRANCH), resetting to main"
-    SAVED_BRANCH="main"
-    echo "main" > "$AURIGE_DIR/branch.txt" 2>/dev/null || true
 fi
 
 BRANCH_TO_USE="${SAVED_BRANCH:-$TARGET_BRANCH}"

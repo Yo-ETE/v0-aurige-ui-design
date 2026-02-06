@@ -352,11 +352,8 @@ setup_git_repo() {
         CURRENT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
         log_success "Git repository set up at $AURIGE_DIR/repo (commit: $CURRENT_COMMIT)"
         
-        # Save current branch for future updates (force main if old v0 branch)
-        CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "main")
-        if [[ "$CURRENT_BRANCH" == v0/* ]]; then
-            CURRENT_BRANCH="main"
-        fi
+        # Save current branch for future updates
+        CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "v0/yo-ete-5c91d9cb")
         echo "$CURRENT_BRANCH" > "$AURIGE_DIR/branch.txt"
         log_info "Saved branch for updates: $CURRENT_BRANCH"
     else

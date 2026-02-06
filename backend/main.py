@@ -3652,19 +3652,13 @@ async def start_update():
     
     # GitHub repo URL and target branch
     GITHUB_REPO = "https://github.com/Yo-ETE/v0-aurige-ui-design.git"
-    TARGET_BRANCH = "main"
+    TARGET_BRANCH = "v0/yo-ete-5c91d9cb"
     
-    # Force branch.txt to main (cleanup old v0 branches)
+    # Check for saved branch preference
     saved_branch_file = Path("/opt/aurige/branch.txt")
     if saved_branch_file.exists():
         saved = saved_branch_file.read_text().strip()
-        if saved and saved.startswith("v0/"):
-            # Old v0 branch detected, reset to main
-            try:
-                saved_branch_file.write_text("main")
-            except Exception:
-                pass
-        elif saved:
+        if saved:
             TARGET_BRANCH = saved
     
     async def run_update():
