@@ -570,8 +570,16 @@ async def broadcast_to_websockets(message: str):
 
 
 # =============================================================================
-# System Status Endpoints
+# CAN dump WebSocket Manager
 # =============================================================================
+
+class CandumpManager:
+    def __init__(self):
+        self.process: Optional[asyncio.subprocess.Process] = None
+        self.task: Optional[asyncio.Task] = None
+        self.interface: Optional[str] = None
+        self.clients: List[WebSocket] = []
+        self.lock = asyncio.Lock()
 
     async def _stop_process(self):
         if self.task and not self.task.done():
