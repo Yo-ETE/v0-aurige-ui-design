@@ -24,7 +24,7 @@ import signal
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 from uuid import uuid4
 from contextlib import asynccontextmanager
 
@@ -40,7 +40,6 @@ from pydantic import BaseModel, Field
 DATA_DIR = Path(os.getenv("AURIGE_DATA_DIR", "/opt/aurige/data"))
 MISSIONS_DIR = DATA_DIR / "missions"
 
-# Ensure directories exist
 MISSIONS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Global state for running processes
@@ -574,7 +573,112 @@ async def broadcast_to_websockets(message: str):
 # System Status Endpoints
 # =============================================================================
 
-@app.get("/api/status", response_model=SystemStatus)
+    async def _stop_process(self):
+        if self.task and not self.task.done():
+            self.task.cancel()
+        self.task = None
+
+        if self.process and self.process.returncode is None:
+            self.process.terminate()
+            try:
+                await asyncio.wait_for(self.process.wait(), timeout=2.0)
+            except asyncio.TimeoutError:
+                self.process.kill()
+        self.process = None
+        self.interface = None
+
+    async def ensure_running(self, interface: str):
+        async with self.lock:
+            if (
+                self.process
+                and self.process.returncode is None
+                and self.interface == interface
+                and self.task
+                and not self.task.done()
+            ):
+                return
+
+            await self._stop_process()
+
+            self.process = await asyncio.create_subprocess_exec(
+                "candump", "-ta", interface,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            self.interface = interface
+
+            async def reader_loop():
+                try:
+                    assert self.process and self.process.stdout
+                    while True:
+                        line = await self.process.stdout.readline()
+                        if not line:
+                            break
+
+                        decoded = line.decode(errors="ignore").strip()
+                        if not decoded:
+                            continue
+
+                        parts = decoded.split()
+                        if len(parts) < 3:
+                            continue
+
+                        timestamp = parts[0].strip("()")
+                        iface = parts[1]
+                        frame_parts = parts[2].split("#")
+                        if len(frame_parts) != 2:
+                            continue
+
+                        can_id, data = frame_parts
+                        data_formatted = " ".join(data[i:i+2] for i in range(0, len(data), 2))
+
+                        payload = json.dumps({
+                            "timestamp": timestamp,
+                            "interface": iface,
+                            "canId": can_id,
+                            "data": data_formatted,
+                        })
+
+                        await self.broadcast(payload)
+
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    pass
+
+            self.task = asyncio.create_task(reader_loop())
+
+    async def broadcast(self, message: str):
+        dead: List[WebSocket] = []
+        for ws in self.clients:
+            try:
+                await ws.send_text(message)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            if ws in self.clients:
+                self.clients.remove(ws)
+
+    async def add_client(self, ws: WebSocket):
+        self.clients.append(ws)
+
+    async def remove_client(self, ws: WebSocket):
+        if ws in self.clients:
+            self.clients.remove(ws)
+        if not self.clients:
+            async with self.lock:
+                await self._stop_process()
+
+
+candump_mgr = CandumpManager()
+
+
+# =============================================================================
+# System Status
+# =============================================================================
+
+@app.get("/status", response_model=SystemStatus)
+@app.get("/api/status", response_model=SystemStatus)  # alias
 async def get_system_status():
     """
     Get complete Raspberry Pi system status.
@@ -604,14 +708,14 @@ async def get_system_status():
             cpu_usage = 100.0 * (1 - idle / total) if total > 0 else 0.0
     except Exception:
         cpu_usage = 0.0
-    
-    # Temperature
+
+    # Temp
     try:
         with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
             temperature = int(f.read().strip()) / 1000.0
     except Exception:
         temperature = 0.0
-    
+
     # Memory
     try:
         with open("/proc/meminfo", "r") as f:
@@ -626,7 +730,7 @@ async def get_system_status():
     except Exception:
         memory_total = 8192.0
         memory_used = 4096.0
-    
+
     # Storage
     try:
         statvfs = os.statvfs("/")
@@ -1532,21 +1636,21 @@ async def list_mission_logs(mission_id: str):
             parentId=parent_id,
             isOrigin=is_origin,
         ))
-    
+
     return sorted(logs, key=lambda x: x.created_at, reverse=True)
 
 
-@app.get("/api/missions/{mission_id}/logs/{log_id}/download")
+@app.get("/missions/{mission_id}/logs/{log_id}/download")
+@app.get("/api/missions/{mission_id}/logs/{log_id}/download")  # alias
 async def download_log(mission_id: str, log_id: str):
-    """Download a log file"""
     load_mission(mission_id)
-    
+
     logs_dir = get_mission_logs_dir(mission_id)
     log_file = logs_dir / f"{log_id}.log"
-    
+
     if not log_file.exists():
         raise HTTPException(status_code=404, detail="Log not found")
-    
+
     return FileResponse(
         path=str(log_file),
         filename=f"{log_id}.log",
@@ -1655,16 +1759,15 @@ async def get_log_content(mission_id: str, log_id: str, limit: int = 500, offset
 
 @app.delete("/api/missions/{mission_id}/logs/{log_id}")
 async def delete_log(mission_id: str, log_id: str):
-    """Delete a log file"""
     load_mission(mission_id)
-    
+
     logs_dir = get_mission_logs_dir(mission_id)
     log_file = logs_dir / f"{log_id}.log"
     meta_file = logs_dir / f"{log_id}.meta.json"
-    
+
     if not log_file.exists():
         raise HTTPException(status_code=404, detail="Log not found")
-    
+
     log_file.unlink()
     if meta_file.exists():
         meta_file.unlink()
