@@ -205,21 +205,16 @@ export function Sidebar() {
       )}>
         <div className="flex h-full flex-col">
           {/* Logo */}
-          <div className="flex h-16 items-center gap-3 border-b border-sidebar-border px-6">
-          <Image
-            src="/images/aurige.png"
-            alt="AURIGE Logo"
-            width={36}
-            height={36}
-            className="rounded-lg"
-          />
-          <div>
-            <h1 className="text-lg font-semibold tracking-tight text-sidebar-foreground">
-              AURIGE
-            </h1>
-            <p className="text-xs text-muted-foreground">CAN Bus Analysis</p>
+          <div className="flex h-20 items-center justify-center border-b border-sidebar-border px-4">
+            <Image
+              src="/images/aurige.png"
+              alt="AURIGE Logo"
+              width={120}
+              height={120}
+              className="object-contain"
+              priority
+            />
           </div>
-        </div>
 
         {/* Navigation */}
         <nav className="flex-1 space-y-0.5 overflow-y-auto px-3 py-4">
@@ -234,10 +229,10 @@ export function Sidebar() {
                 )}
                 <button
                   onClick={() => toggleSection(section.title)}
-                  className="flex w-full items-center justify-between rounded-md px-3 py-2 text-[11px] font-semibold uppercase tracking-widest text-primary/80 hover:text-primary hover:bg-sidebar-accent/50 transition-colors"
+                  className="flex w-full items-center justify-between rounded-md px-3 py-2 text-[11px] font-semibold uppercase tracking-widest text-sidebar-section hover:text-sidebar-active transition-colors"
                 >
                   <span className="flex items-center gap-2">
-                    <span className="h-px w-3 bg-primary/40" />
+                    <span className="h-px w-3 bg-sidebar-section/60" />
                     {section.title}
                   </span>
                   <ChevronDown
@@ -257,34 +252,34 @@ export function Sidebar() {
 
                       return (
 <Link
-                                          key={item.name}
-                                          href={item.href}
-                                          onClick={() => setMobileOpen(false)}
-                                          className={cn(
-                                            "group relative flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-all",
-                                            isActive
-                                              ? "bg-sidebar-accent text-sidebar-primary shadow-[inset_0_0_0_1px_rgba(99,102,241,0.3)]"
-                                              : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
-                                          )}
-                                        >
+                          key={item.name}
+                          href={item.href}
+                          onClick={() => setMobileOpen(false)}
+                          className={cn(
+                            "group relative flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-all",
+                            isActive
+                              ? "bg-sidebar-active/15 text-sidebar-active"
+                              : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+                          )}
+                        >
                           <item.icon
                             className={cn(
                               "h-4 w-4 flex-shrink-0",
                               isActive
-                                ? "text-primary"
+                                ? "text-sidebar-active"
                                 : "text-muted-foreground group-hover:text-sidebar-foreground"
                             )}
                           />
                           <span className="truncate">{item.name}</span>
 
                           {item.badge && (
-                            <span className="ml-auto rounded bg-primary/20 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+                            <span className="ml-auto rounded bg-sidebar-active/20 px-1.5 py-0.5 text-[10px] font-medium text-sidebar-active">
                               {item.badge}
                             </span>
                           )}
 
                           {isActive && (
-                            <span className="absolute left-0 h-8 w-1 rounded-r-full bg-primary" />
+                            <span className="absolute left-0 h-8 w-1 rounded-r-full bg-sidebar-active" />
                           )}
                         </Link>
                       )

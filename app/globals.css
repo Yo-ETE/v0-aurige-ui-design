@@ -42,6 +42,9 @@
   --sidebar-accent-foreground: oklch(0.95 0.01 260);
   --sidebar-border: oklch(0.22 0.02 260);
   --sidebar-ring: oklch(0.65 0.18 250);
+  --sidebar-active: oklch(0.72 0.15 210);
+  --sidebar-active-foreground: oklch(0.98 0 0);
+  --sidebar-section: oklch(0.55 0.12 230);
   --terminal: oklch(0.08 0.01 260);
   --terminal-foreground: oklch(0.65 0.2 145);
 }
@@ -89,6 +92,9 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-active: var(--sidebar-active);
+  --color-sidebar-active-foreground: var(--sidebar-active-foreground);
+  --color-sidebar-section: var(--sidebar-section);
   --color-terminal: var(--terminal);
   --color-terminal-foreground: var(--terminal-foreground);
 }
