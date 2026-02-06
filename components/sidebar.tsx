@@ -205,15 +205,21 @@ export function Sidebar() {
       )}>
         <div className="flex h-full flex-col">
           {/* Logo */}
-          <div className="flex h-20 items-center justify-center border-b border-sidebar-border px-4">
-            <Image
-              src="/images/aurige.png"
-              alt="AURIGE Logo"
-              width={120}
-              height={120}
-              className="object-contain"
-              priority
-            />
+          <div className="flex h-14 items-center gap-3 border-b border-sidebar-border px-5">
+            <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-lg bg-white/10 p-0.5">
+              <Image
+                src="/images/aurige.png"
+                alt="AURIGE Logo"
+                width={28}
+                height={28}
+                className="object-contain"
+                priority
+              />
+            </div>
+            <div className="flex flex-col">
+              <span className="text-sm font-bold tracking-wide text-sidebar-active">AURIGE</span>
+              <span className="text-[10px] text-sidebar-section">Mastery of CAN</span>
+            </div>
           </div>
 
         {/* Navigation */}
