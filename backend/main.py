@@ -3221,9 +3221,37 @@ async def get_saved_networks():
 
 @app.post("/api/network/wifi/connect")
 async def connect_to_wifi(request: WifiConnectRequest):
-    """Connect to a Wi-Fi network"""
+    """Connect to a Wi-Fi network, handling hotspot->client transition safely"""
     try:
-        # First check if this network is already saved
+        # Detect if currently in hotspot mode
+        was_hotspot = False
+        active_result = run_command(["nmcli", "-t", "-f", "NAME,TYPE,DEVICE", "connection", "show", "--active"], check=False)
+        hotspot_conn_name = None
+        if active_result.returncode == 0:
+            for line in active_result.stdout.strip().split("\n"):
+                parts = line.split(":")
+                if len(parts) >= 3 and parts[2] == "wlan0":
+                    conn_name = parts[0]
+                    if "hotspot" in conn_name.lower() or "aurige" in conn_name.lower():
+                        was_hotspot = True
+                        hotspot_conn_name = conn_name
+                    # Also check if in AP mode
+                    mode_check = run_command(["nmcli", "-t", "-f", "GENERAL.MODE", "connection", "show", conn_name], check=False)
+                    if mode_check.returncode == 0 and "ap" in mode_check.stdout.lower():
+                        was_hotspot = True
+                        hotspot_conn_name = conn_name
+        
+        # If in hotspot mode, disable it first to free wlan0
+        if was_hotspot and hotspot_conn_name:
+            run_command(["nmcli", "connection", "down", hotspot_conn_name], check=False, timeout=10)
+            # Wait for interface to be released
+            import time
+            time.sleep(2)
+            # Rescan wifi networks after disabling hotspot
+            run_command(["nmcli", "device", "wifi", "rescan"], check=False, timeout=10)
+            time.sleep(2)
+        
+        # Check if this network is already saved
         saved_result = run_command(["nmcli", "-t", "-f", "NAME,TYPE", "connection", "show"], check=False)
         is_saved = False
         if saved_result.returncode == 0:
@@ -3234,24 +3262,21 @@ async def connect_to_wifi(request: WifiConnectRequest):
                     break
         
         if is_saved:
-            # Network is saved, just activate it (no password needed)
             result = run_command([
                 "nmcli", "connection", "up", request.ssid
             ], check=False, timeout=30)
         elif request.password:
-            # New network with password - nmcli auto-detects security type
             result = run_command([
                 "nmcli", "device", "wifi", "connect", request.ssid,
                 "password", request.password
             ], check=False, timeout=30)
         else:
-            # Try to connect to open network
             result = run_command([
                 "nmcli", "device", "wifi", "connect", request.ssid
             ], check=False, timeout=30)
         
         if result.returncode == 0:
-            # Enable autoconnect for this network
+            # Enable autoconnect with high priority for this network
             run_command([
                 "nmcli", "connection", "modify", request.ssid,
                 "connection.autoconnect", "yes",
@@ -3260,8 +3285,20 @@ async def connect_to_wifi(request: WifiConnectRequest):
             return {"status": "success", "message": f"Connecte a {request.ssid}"}
         else:
             error_msg = result.stderr.strip() if result.stderr else result.stdout.strip() if result.stdout else "Connexion echouee"
+            
+            # FALLBACK: If connection failed and we disabled hotspot, re-enable it
+            if was_hotspot and hotspot_conn_name:
+                run_command(["nmcli", "connection", "up", hotspot_conn_name], check=False, timeout=15)
+                error_msg += " (Hotspot reactive)"
+            
             return {"status": "error", "message": error_msg}
     except Exception as e:
+        # FALLBACK: Re-enable hotspot on any exception
+        if was_hotspot and hotspot_conn_name:
+            try:
+                run_command(["nmcli", "connection", "up", hotspot_conn_name], check=False, timeout=15)
+            except Exception:
+                pass
         return {"status": "error", "message": str(e)}
 
 
