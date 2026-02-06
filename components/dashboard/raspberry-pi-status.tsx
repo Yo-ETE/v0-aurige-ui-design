@@ -228,7 +228,8 @@ function StatusTileComponent({ tile }: { tile: StatusTile }) {
         >
           <Icon className="h-4 w-4" />
         </div>
-        {tile.id === "wifi" && tile.subvalue && (tile.status === "ok" || tile.status === "warning") && tile.value !== "Déconnecté" && (
+        {/* Badge debit TX - masque en mode Hotspot */}
+        {tile.id === "wifi" && tile.subvalue && (tile.status === "ok" || tile.status === "warning") && tile.value !== "Déconnecté" && !tile.value.startsWith("Hotspot") && (
           <span className={cn(
             "absolute -bottom-1.5 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full px-1.5 py-px text-[9px] font-bold leading-tight",
             tile.status === "ok" ? "bg-success/90 text-success-foreground" : "bg-warning/90 text-warning-foreground"
