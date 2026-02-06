@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { AppShell } from "@/components/app-shell"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -145,6 +145,21 @@ export default function ComparaisonPage() {
   const [sortMode, setSortMode] = useState<"stability" | "confidence" | "classification">("stability")
 
   const logTree = buildLogTree(missionLogs)
+
+  const sortedFrames = useMemo(() => {
+    if (!comparisonResult) return []
+    return [...comparisonResult.frames].sort((a, b) => {
+      if (sortMode === "stability") {
+        const priorityA = a.classification === "differential" ? 0 : a.classification === "only_a" ? 1 : a.classification === "only_b" ? 2 : 3
+        const priorityB = b.classification === "differential" ? 0 : b.classification === "only_a" ? 1 : b.classification === "only_b" ? 2 : 3
+        if (priorityA !== priorityB) return priorityA - priorityB
+        return (b.stability_score ?? 0) - (a.stability_score ?? 0)
+      }
+      if (sortMode === "confidence") return b.confidence - a.confidence
+      const prio: Record<string, number> = { differential: 0, only_a: 1, only_b: 2, identical: 3 }
+      return (prio[a.classification] ?? 4) - (prio[b.classification] ?? 4)
+    })
+  }, [comparisonResult, sortMode])
 
   useEffect(() => {
     const localId = sessionStorage.getItem("activeMissionId")
@@ -516,17 +531,7 @@ export default function ComparaisonPage() {
           {/* Frame list */}
           <ScrollArea className="h-[500px] rounded-lg border border-border">
             <div className="p-2 space-y-1">
-              {[...comparisonResult.frames].sort((a, b) => {
-                if (sortMode === "stability") {
-                  const priorityA = a.classification === "differential" ? 0 : a.classification === "only_a" ? 1 : a.classification === "only_b" ? 2 : 3
-                  const priorityB = b.classification === "differential" ? 0 : b.classification === "only_a" ? 1 : b.classification === "only_b" ? 2 : 3
-                  if (priorityA !== priorityB) return priorityA - priorityB
-                  return (b.stability_score ?? 0) - (a.stability_score ?? 0)
-                }
-                if (sortMode === "confidence") return b.confidence - a.confidence
-                const prio = { differential: 0, only_a: 1, only_b: 2, identical: 3 }
-                return (prio[a.classification] ?? 4) - (prio[b.classification] ?? 4)
-              }).map((frame) => {
+              {sortedFrames.map((frame) => {
                 const isExpanded = expandedFrames.has(frame.can_id)
                 return (
                   <div key={frame.can_id} className="rounded-lg border border-border bg-card overflow-hidden">

@@ -17,7 +17,7 @@ AURIGE_DIR="/opt/aurige"
 GITHUB_REPO="https://github.com/Yo-ETE/v0-aurige-ui-design.git"
 TEMP_DIR="/tmp/aurige-update"
 # Branch to use - change this if needed
-TARGET_BRANCH="v0/main-37135798"
+TARGET_BRANCH="main"
 
 log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 log_success() { echo -e "${GREEN}[OK]${NC} $1"; }

@@ -56,14 +56,18 @@ function mapStatusToTiles(status: SystemStatus): StatusTile[] {
       icon: Wifi,
       title: "Wi-Fi",
       value: status.wifiConnected 
-        ? (status.wifiIsHotspot ? `Hotspot: ${status.wifiHotspotSsid || "Aurige"}` : (status.wifiSsid || "Connecté"))
+        ? (status.wifiIsHotspot 
+            ? `Hotspot: ${status.wifiHotspotSsid || "Aurige"}` 
+            : `${status.wifiSsid || "Connecté"}${status.wifiSignal != null ? ` (${status.wifiSignal} dBm)` : ""}`)
         : "Déconnecté",
       subvalue: status.wifiConnected 
         ? (status.wifiIsHotspot 
             ? `Internet: ${status.wifiInternetSource || "?"}${status.wifiInternetVia ? ` (${status.wifiInternetVia})` : ""}`
-            : `${status.wifiTxRate || "-"} / ${status.wifiRxRate || "-"}`)
+            : `TX ${status.wifiTxRate || "-"} / RX ${status.wifiRxRate || "-"}`)
         : "Aucune connexion",
-      status: status.wifiConnected ? "ok" : "warning",
+      status: status.wifiConnected 
+        ? (status.wifiSignal != null && status.wifiSignal < -75 ? "warning" : "ok") 
+        : "warning",
     },
     {
       id: "ethernet",
@@ -224,9 +228,12 @@ function StatusTileComponent({ tile }: { tile: StatusTile }) {
         >
           <Icon className="h-4 w-4" />
         </div>
-        {tile.id === "wifi" && tile.subvalue && tile.status === "ok" && (
-          <span className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-success/90 px-1.5 py-px text-[9px] font-bold leading-tight text-success-foreground">
-            {tile.subvalue.split(" / ")[0] || tile.subvalue}
+        {tile.id === "wifi" && tile.subvalue && (tile.status === "ok" || tile.status === "warning") && tile.value !== "Déconnecté" && (
+          <span className={cn(
+            "absolute -bottom-1.5 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full px-1.5 py-px text-[9px] font-bold leading-tight",
+            tile.status === "ok" ? "bg-success/90 text-success-foreground" : "bg-warning/90 text-warning-foreground"
+          )}>
+            {tile.subvalue.replace("TX ", "").split(" / ")[0]}
           </span>
         )}
       </div>

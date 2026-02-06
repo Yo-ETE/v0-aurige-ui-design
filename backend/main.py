@@ -3652,7 +3652,7 @@ async def start_update():
     
     # GitHub repo URL and target branch
     GITHUB_REPO = "https://github.com/Yo-ETE/v0-aurige-ui-design.git"
-    TARGET_BRANCH = "v0/main-37135798"
+    TARGET_BRANCH = "main"
     
     # Check for saved branch preference
     saved_branch_file = Path("/opt/aurige/branch.txt")
