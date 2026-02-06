@@ -757,15 +757,6 @@ export default function Isolation() {
     }
     
     const t0 = coOccurrenceResult.targetFrame.timestamp
-    console.log("[v0] Running family diff analysis with:", {
-      mission_id: missionId,
-      log_id: originLogId,
-      family_ids: selectedFamilyIds,
-      t0_timestamp: t0,
-      before_offset_ms: beforeOffsetMs,
-      ack_offset_ms: ackOffsetMs,
-      status_offset_ms: statusOffsetMs,
-    })
     
     setIsAnalyzingFamily(true)
     try {

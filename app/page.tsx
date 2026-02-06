@@ -1,6 +1,5 @@
 "use client"
 
-import { useState } from "react"
 import { AppShell } from "@/components/app-shell"
 import { RaspberryPiStatus } from "@/components/dashboard/raspberry-pi-status"
 import { MissionCreate } from "@/components/dashboard/mission-create"

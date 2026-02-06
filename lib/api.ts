@@ -934,7 +934,6 @@ export interface AnalyzeFamilyRequest {
 
 export async function analyzeFamilyDiff(request: AnalyzeFamilyRequest): Promise<FamilyAnalysisResponse> {
   const body = JSON.stringify(request)
-  console.log("[v0] analyzeFamilyDiff request body:", body)
   
   const response = await fetch(`${getApiBaseUrl()}/api/analysis/family-diff`, {
     method: "POST",
