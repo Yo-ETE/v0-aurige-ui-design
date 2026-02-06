@@ -1,6 +1,5 @@
 "use client"
 
-import { useRef, useEffect } from "react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import {
@@ -15,18 +14,69 @@ import {
   AlertCircle,
   Pause,
 } from "lucide-react"
-import { useSnifferStore } from "@/lib/sniffer-store"
+import { useSnifferStore, type SnifferFrame } from "@/lib/sniffer-store"
+
+/**
+ * Renders a single byte with color based on change state.
+ * Red = byte just changed, green = stable, dim = never changed.
+ */
+function ColoredByte({ value, changed }: { value: string; changed: boolean }) {
+  return (
+    <span
+      className={cn(
+        "inline-block w-[2ch] text-center font-mono transition-colors duration-300",
+        changed
+          ? "text-red-400 font-bold"
+          : "text-emerald-400"
+      )}
+    >
+      {value}
+    </span>
+  )
+}
+
+function SnifferRow({ frame }: { frame: SnifferFrame }) {
+  return (
+    <div className="flex items-center gap-3 px-2 py-px hover:bg-accent/20 rounded">
+      {/* CAN ID */}
+      <span className="w-12 flex-shrink-0 text-cyan-400 font-bold text-right">
+        {frame.canId}
+      </span>
+      {/* DLC */}
+      <span className="w-4 flex-shrink-0 text-muted-foreground text-center">
+        {frame.dlc}
+      </span>
+      {/* Data bytes with change coloring */}
+      <span className="flex gap-1 flex-1">
+        {frame.bytes.map((byte, i) => (
+          <ColoredByte
+            key={i}
+            value={byte.toUpperCase()}
+            changed={frame.changedIndices.has(i)}
+          />
+        ))}
+      </span>
+      {/* Cycle time */}
+      <span className="w-16 flex-shrink-0 text-right text-muted-foreground/70">
+        {frame.cycleMs > 0 ? `${frame.cycleMs}ms` : ""}
+      </span>
+      {/* Count */}
+      <span className="w-12 flex-shrink-0 text-right text-muted-foreground/50">
+        {frame.count}
+      </span>
+    </div>
+  )
+}
 
 export function FloatingTerminal() {
-  const terminalRef = useRef<HTMLDivElement>(null)
-  
-  // Use global store for persistence across page navigation
   const {
     isRunning,
     isConnecting,
     selectedInterface,
     error,
-    lines,
+    frameMap,
+    sortedIds,
+    totalMessages,
     isPaused,
     isMinimized,
     isExpanded,
@@ -36,15 +86,8 @@ export function FloatingTerminal() {
     togglePause,
     toggleMinimize,
     toggleExpand,
-    clearLines,
+    clearFrames,
   } = useSnifferStore()
-
-  // Auto-scroll to bottom when new lines arrive
-  useEffect(() => {
-    if (terminalRef.current && !isPaused) {
-      terminalRef.current.scrollTop = terminalRef.current.scrollHeight
-    }
-  }, [lines, isPaused])
 
   if (isMinimized) {
     return (
@@ -70,7 +113,7 @@ export function FloatingTerminal() {
         "fixed z-50 flex flex-col rounded-lg border border-border bg-terminal shadow-2xl transition-all",
         isExpanded
           ? "bottom-4 right-4 left-72 top-20"
-          : "bottom-4 right-4 h-80 w-[500px]"
+          : "bottom-4 right-4 h-96 w-[600px]"
       )}
     >
       {/* Header */}
@@ -128,12 +171,20 @@ export function FloatingTerminal() {
         </div>
       )}
 
-      {/* Terminal content */}
-      <div
-        ref={terminalRef}
-        className="flex-1 overflow-auto p-3 font-mono text-xs"
-      >
-        {lines.length === 0 ? (
+      {/* Column headers */}
+      {sortedIds.length > 0 && (
+        <div className="flex items-center gap-3 border-b border-border/50 bg-card/30 px-2 py-1 font-mono text-[10px] text-muted-foreground/60 uppercase">
+          <span className="w-12 flex-shrink-0 text-right">ID</span>
+          <span className="w-4 flex-shrink-0 text-center">L</span>
+          <span className="flex-1">Data</span>
+          <span className="w-16 flex-shrink-0 text-right">Cycle</span>
+          <span className="w-12 flex-shrink-0 text-right">Count</span>
+        </div>
+      )}
+
+      {/* Terminal content - cansniffer mode: fixed rows per ID */}
+      <div className="flex-1 overflow-auto p-1 font-mono text-xs">
+        {sortedIds.length === 0 ? (
           <div className="flex h-full items-center justify-center text-muted-foreground">
             <p>
               {isConnecting 
@@ -142,18 +193,12 @@ export function FloatingTerminal() {
             </p>
           </div>
         ) : (
-          <div className="space-y-0.5">
-            {lines.map((line) => (
-              <div key={line.id} className="flex gap-4 hover:bg-accent/30 px-1 rounded">
-                <span className="text-muted-foreground w-24 flex-shrink-0">{line.timestamp}</span>
-                <span className="text-primary w-16 flex-shrink-0">0x{line.canId}</span>
-                <span className="text-terminal-foreground flex-1">{line.data}</span>
-                <span className="text-muted-foreground/60 w-8 text-right">[{line.dlc}]</span>
-                {line.delta !== undefined && (
-                  <span className="text-muted-foreground/50 w-16 text-right">+{line.delta}ms</span>
-                )}
-              </div>
-            ))}
+          <div>
+            {sortedIds.map((id) => {
+              const frame = frameMap.get(id)
+              if (!frame) return null
+              return <SnifferRow key={id} frame={frame} />
+            })}
           </div>
         )}
       </div>
@@ -198,14 +243,15 @@ export function FloatingTerminal() {
         <Button
           size="sm"
           variant="outline"
-          onClick={clearLines}
+          onClick={clearFrames}
           className="gap-2 bg-transparent"
         >
           <Trash2 className="h-3 w-3" />
           Clear
         </Button>
-        <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
-          <span>{lines.length} trames</span>
+        <div className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
+          <span>{sortedIds.length} IDs</span>
+          <span>{totalMessages} msg</span>
           {isRunning && !isPaused && (
             <span className="flex items-center gap-1">
               <span className="h-2 w-2 animate-pulse rounded-full bg-success" />

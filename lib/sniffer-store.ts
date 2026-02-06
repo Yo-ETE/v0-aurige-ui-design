@@ -5,18 +5,33 @@
  * 
  * Global state for the CAN sniffer terminal.
  * Persists WebSocket connection across page navigation.
+ * 
+ * Mode cansniffer: one fixed row per CAN ID, colored changing bytes.
  */
 
 import { create } from "zustand"
 import { createSnifferWebSocket, getCANStatus, type CANMessage } from "./api"
 
-export interface SnifferLine {
-  id: number
-  timestamp: string
+export interface SnifferFrame {
   canId: string
-  data: string
+  /** Current data bytes as hex string array, e.g. ["0A","FF","00",...] */
+  bytes: string[]
+  /** Previous data bytes for change detection */
+  prevBytes: string[]
+  /** Which byte indices changed on last update */
+  changedIndices: Set<number>
+  /** Timestamp of last reception */
+  lastTimestamp: string
+  /** Reception count */
+  count: number
+  /** Delta ms between last two receptions */
+  deltaMs: number
+  /** DLC */
   dlc: number
-  delta?: number
+  /** Cycle time (ms) - rolling average */
+  cycleMs: number
+  /** Last raw timestamp for delta calculation */
+  _lastRawTs: number
 }
 
 interface SnifferState {
@@ -26,16 +41,19 @@ interface SnifferState {
   selectedInterface: "can0" | "can1" | "vcan0"
   error: string | null
   
+  // Frame map keyed by CAN ID (cansniffer mode)
+  frameMap: Map<string, SnifferFrame>
+  /** Sorted IDs cache for rendering */
+  sortedIds: string[]
+  
   // Terminal state
-  lines: SnifferLine[]
   isPaused: boolean
   isMinimized: boolean
   isExpanded: boolean
+  totalMessages: number
   
   // WebSocket reference (not serialized)
   ws: WebSocket | null
-  lineCounter: number
-  lastTimestamp: number
   
   // Actions
   setInterface: (iface: "can0" | "can1" | "vcan0") => void
@@ -44,23 +62,21 @@ interface SnifferState {
   togglePause: () => void
   toggleMinimize: () => void
   toggleExpand: () => void
-  clearLines: () => void
+  clearFrames: () => void
 }
-
-const MAX_LINES = 500
 
 export const useSnifferStore = create<SnifferState>((set, get) => ({
   isRunning: false,
   isConnecting: false,
   selectedInterface: "can1",
   error: null,
-  lines: [],
+  frameMap: new Map(),
+  sortedIds: [],
   isPaused: false,
   isMinimized: false,
   isExpanded: false,
+  totalMessages: 0,
   ws: null,
-  lineCounter: 0,
-  lastTimestamp: 0,
   
   setInterface: (iface) => {
     const { isRunning, stop } = get()
@@ -73,24 +89,15 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
   start: async () => {
     const { selectedInterface, ws: existingWs, isRunning, isConnecting } = get()
     
-    // Prevent multiple starts
-    if (isRunning || isConnecting) {
-      return
-    }
+    if (isRunning || isConnecting) return
     
-    // Close existing connection if any
     if (existingWs) {
-      try {
-        existingWs.close()
-      } catch {
-        // Ignore close errors on already closed socket
-      }
+      try { existingWs.close() } catch { /* ignore */ }
       set({ ws: null })
     }
     
     set({ isConnecting: true, error: null })
     
-    // Check if interface is up before trying to connect
     try {
       const status = await getCANStatus(selectedInterface)
       if (!status.up) {
@@ -112,27 +119,66 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
       const ws = createSnifferWebSocket(
         selectedInterface,
         (msg: CANMessage) => {
-          const { isPaused, lines, lineCounter, lastTimestamp } = get()
+          const { isPaused, frameMap, sortedIds, totalMessages } = get()
           if (isPaused) return
           
-          const now = msg.timestamp || Date.now() / 1000
-          const delta = lastTimestamp > 0 ? Math.round((now - lastTimestamp) * 1000) : undefined
+          const id = msg.canId.toUpperCase()
+          const newBytes = (msg.data || "").match(/.{1,2}/g) || []
+          const now = typeof msg.timestamp === "number" 
+            ? msg.timestamp 
+            : Date.now() / 1000
+          const ts = new Date(now * 1000).toISOString().substr(11, 12)
           
-          const newLine: SnifferLine = {
-            id: lineCounter + 1,
-            timestamp: new Date(now * 1000).toISOString().substr(11, 12),
-            canId: msg.canId,
-            data: msg.data,
-            dlc: msg.dlc,
-            delta,
+          const existing = frameMap.get(id)
+          
+          const changedIndices = new Set<number>()
+          if (existing) {
+            for (let i = 0; i < newBytes.length; i++) {
+              if (existing.bytes[i] !== newBytes[i]) {
+                changedIndices.add(i)
+              }
+            }
           }
           
-          const newLines = [...lines, newLine].slice(-MAX_LINES)
+          const deltaMs = existing && existing._lastRawTs > 0
+            ? Math.round((now - existing._lastRawTs) * 1000)
+            : 0
+          
+          const prevCycle = existing?.cycleMs || 0
+          const cycleMs = prevCycle > 0
+            ? Math.round(prevCycle * 0.7 + deltaMs * 0.3)
+            : deltaMs
+          
+          const newFrame: SnifferFrame = {
+            canId: id,
+            bytes: newBytes,
+            prevBytes: existing ? existing.bytes : newBytes,
+            changedIndices,
+            lastTimestamp: ts,
+            count: (existing?.count || 0) + 1,
+            deltaMs,
+            dlc: newBytes.length,
+            cycleMs,
+            _lastRawTs: now,
+          }
+          
+          const newMap = new Map(frameMap)
+          newMap.set(id, newFrame)
+          
+          // Only re-sort if new ID appeared
+          let newSortedIds = sortedIds
+          if (!existing) {
+            newSortedIds = Array.from(newMap.keys()).sort((a, b) => {
+              const numA = parseInt(a, 16)
+              const numB = parseInt(b, 16)
+              return numA - numB
+            })
+          }
           
           set({
-            lines: newLines,
-            lineCounter: lineCounter + 1,
-            lastTimestamp: now,
+            frameMap: newMap,
+            sortedIds: newSortedIds,
+            totalMessages: totalMessages + 1,
           })
         },
         () => {
@@ -154,11 +200,9 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
           isConnecting: false,
           error: null,
           ws,
-          lastTimestamp: 0,
         })
       }
       
-      // Also handle onerror in case connection fails immediately
       ws.onerror = () => {
         set({
           error: "Impossible de se connecter au Raspberry Pi",
@@ -180,11 +224,7 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
   stop: () => {
     const { ws } = get()
     if (ws) {
-      try {
-        ws.close()
-      } catch {
-        // Ignore close errors
-      }
+      try { ws.close() } catch { /* ignore */ }
     }
     set({ ws: null, isRunning: false, isConnecting: false })
   },
@@ -195,5 +235,5 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
   
   toggleExpand: () => set((state) => ({ isExpanded: !state.isExpanded })),
   
-  clearLines: () => set({ lines: [], lineCounter: 0, lastTimestamp: 0 }),
+  clearFrames: () => set({ frameMap: new Map(), sortedIds: [], totalMessages: 0 }),
 }))
