@@ -1617,9 +1617,11 @@ async def list_mission_logs(mission_id: str):
         is_origin = False
         
         # First check metadata for parent info (most reliable)
-        if meta.get("parentId"):
-            # parentId from metadata (set by split or updated by rename)
-            pid = meta.get("parentId")
+        # Check parentId, parentLog, and splitFrom in order of priority
+        meta_parent_ref = meta.get("parentId") or meta.get("parentLog") or meta.get("splitFrom")
+        if meta_parent_ref:
+            # parentId/parentLog from metadata (set by split or updated by rename)
+            pid = meta_parent_ref
             if pid in log_names:
                 parent_id = pid
             else:
@@ -1648,10 +1650,31 @@ async def list_mission_logs(mission_id: str):
             if potential_parent in log_names:
                 parent_id = potential_parent
         
-        # Check if this log has children (is an origin) - check naming and metadata
+        # Check if this log has children (is an origin) - check naming, metadata, and oldId
         if (f"{log_stem}_A" in log_names or f"{log_stem}_B" in log_names or
             f"{log_stem}_a" in log_names or f"{log_stem}_b" in log_names):
             is_origin = True
+        
+        # Also check via metadata: if any other log references this as parent
+        if not is_origin:
+            for other_stem in log_names:
+                if other_stem == log_stem:
+                    continue
+                other_meta_path = logs_dir / f"{other_stem}.meta.json"
+                if other_meta_path.exists():
+                    try:
+                        with open(other_meta_path, "r") as omf:
+                            other_m = json.load(omf)
+                        other_parent = other_m.get("parentId") or other_m.get("parentLog") or other_m.get("splitFrom")
+                        if other_parent == log_stem:
+                            is_origin = True
+                            break
+                        # Also check if other_parent matches our oldId
+                        if meta.get("oldId") and other_parent == meta.get("oldId"):
+                            is_origin = True
+                            break
+                    except Exception:
+                        pass
         
         logs.append(LogEntry(
             id=log_stem,
@@ -1714,10 +1737,12 @@ async def download_log_family(mission_id: str, log_id: str):
         except Exception:
             pass
     
-    # Find all children recursively using parentId metadata
+    # Find all children recursively using parentId/parentLog/splitFrom metadata
     def find_children_by_meta(parent_id: str):
         for stem, meta in all_metas.items():
-            if meta.get("parentId") == parent_id:
+            # Check all possible parent reference fields
+            meta_parent = meta.get("parentId") or meta.get("parentLog") or meta.get("splitFrom")
+            if meta_parent == parent_id:
                 child_file = logs_dir / f"{stem}.log"
                 if child_file.exists() and child_file not in family_files:
                     family_files.append(child_file)
@@ -1885,13 +1910,17 @@ async def rename_log(mission_id: str, log_id: str, request: RenameLogRequest):
             pass
         old_meta_file.rename(new_meta_file)
     
-    # Update children metadata: any log with parentId == log_id should now reference new_id
+    # Update children metadata: any log referencing log_id as parent should now reference new_id
     for meta_file in logs_dir.glob("*.meta.json"):
         try:
             with open(meta_file, "r") as f:
                 meta = json.load(f)
-            if meta.get("parentId") == log_id:
-                meta["parentId"] = new_id
+            changed = False
+            for key in ["parentId", "parentLog", "splitFrom"]:
+                if meta.get(key) == log_id:
+                    meta[key] = new_id
+                    changed = True
+            if changed:
                 with open(meta_file, "w") as f:
                     json.dump(meta, f, indent=2)
         except Exception:
@@ -1963,11 +1992,12 @@ async def split_log(mission_id: str, log_id: str):
     with open(file_b, "w") as f:
         f.writelines(lines_b)
     
-    # Save metadata
+    # Save metadata - include parentId for ZIP/rename compatibility
     now = datetime.now().isoformat()
     for log_new_id, parent in [(log_a_id, log_id), (log_b_id, log_id)]:
         meta = {
             "createdAt": now,
+            "parentId": parent,
             "parentLog": parent,
             "splitFrom": log_id,
         }
@@ -4443,6 +4473,17 @@ async def get_mission_dbc(mission_id: str) -> MissionDBC:
     with open(dbc_file, "r") as f:
         data = json.load(f)
     
+    # Migrate: ensure all signals have unique IDs
+    migrated = False
+    for msg in data.get("messages", []):
+        for idx, s in enumerate(msg.get("signals", [])):
+            if not s.get("id"):
+                s["id"] = f"{s.get('can_id', msg.get('can_id', 'UNK'))}_{s.get('name', 'SIG')}_{idx}_{int(time.time())}"
+                migrated = True
+    if migrated:
+        with open(dbc_file, "w") as f:
+            json.dump(data, f, indent=2)
+    
     return MissionDBC(**data)
 
 @app.post("/api/missions/{mission_id}/dbc/signal")
@@ -4488,12 +4529,17 @@ async def add_dbc_signal(mission_id: str, signal: DBCSignal):
         unique_suffix = datetime.now().strftime("%H%M%S") + str(int(time.time() * 1000) % 1000)
         signal.id = f"{signal.can_id}_{signal.name}_{unique_suffix}"
     
+    # Migrate: assign unique IDs to any existing signals that don't have one
+    for idx, s in enumerate(message["signals"]):
+        if not s.get("id"):
+            s["id"] = f"{s.get('can_id', signal.can_id)}_{s.get('name', 'SIG')}_{idx}_{int(time.time())}"
+    
     # Add or update signal - only update if EXACT same id, never match by (can_id, start_bit)
     # This allows multiple signals on the same byte (e.g. ouverture + fermeture)
     signal_dict = signal.model_dump()
     existing_idx = None
     for idx, s in enumerate(message["signals"]):
-        if s.get("id") == signal.id:
+        if s.get("id") and s.get("id") == signal.id:
             existing_idx = idx
             break
     

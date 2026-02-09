@@ -1382,6 +1382,18 @@ export default function Isolation() {
               <Send className="h-3 w-3" />
               <span className="hidden sm:inline">Exporter vers</span> Replay
             </Button>
+            <div className="flex items-center gap-1 ml-auto">
+              <Label className="text-xs whitespace-nowrap text-muted-foreground">Replay CAN:</Label>
+              <select
+                value={replayCanInterface}
+                onChange={(e) => setReplayCanInterface(e.target.value as "can0" | "can1" | "vcan0")}
+                className="rounded border border-border bg-secondary px-2 py-1 text-xs text-foreground h-7"
+              >
+                <option value="can0">can0</option>
+                <option value="can1">can1</option>
+                <option value="vcan0">vcan0</option>
+              </select>
+            </div>
           </div>
           
           {/* Analysis parameters - responsive grid */}
@@ -1431,18 +1443,6 @@ export default function Isolation() {
                     ))}
                   </SelectContent>
                 </Select>
-              </div>
-              <div className="flex items-center gap-1">
-                <Label className="text-xs whitespace-nowrap">Replay:</Label>
-                <select
-                  value={replayCanInterface}
-                  onChange={(e) => setReplayCanInterface(e.target.value as "can0" | "can1" | "vcan0")}
-                  className="rounded border border-border bg-secondary px-2 py-1 text-xs text-foreground h-7"
-                >
-                  <option value="can0">can0</option>
-                  <option value="can1">can1</option>
-                  <option value="vcan0">vcan0</option>
-                </select>
               </div>
               {selectedFrame && (
                 <div className="flex items-center gap-1 col-span-2 sm:col-span-1">
@@ -1506,8 +1506,9 @@ export default function Isolation() {
                                       await sendCANFrame({ interface: replayCanInterface, canId: frame.canId, data: frame.data || frame.raw || "" })
                                       setReplayedFrameIdx(index)
                                       setTimeout(() => setReplayedFrameIdx((prev) => prev === index ? null : prev), 2000)
-                                    } catch {
-                                      // show brief error
+                                    } catch (err) {
+                                      console.error("[v0] sendCANFrame error:", err, "interface:", replayCanInterface, "canId:", frame.canId, "data:", frame.data || frame.raw)
+                                      setReplayedFrameIdx(null)
                                     } finally {
                                       setReplayingFrameIdx(null)
                                     }

@@ -97,10 +97,17 @@ export const useIsolationStore = create<IsolationStore>()(
 
       setMission: (missionId) => {
         const current = get().currentMissionId
-        // Always update mission and clear logs when mission changes or is null
-        if (current !== missionId || missionId === null) {
+        if (missionId === null) {
+          // Explicit clear
+          set({ currentMissionId: null, logs: [] })
+        } else if (current !== null && current !== missionId) {
+          // Mission actually changed (both non-null, different) - clear logs
           set({ currentMissionId: missionId, logs: [] })
+        } else if (current !== missionId) {
+          // First call after hydration (current=null, missionId set) - keep persisted logs
+          set({ currentMissionId: missionId })
         }
+        // If current === missionId, do nothing (already set)
       },
       
       clearMission: () => {
