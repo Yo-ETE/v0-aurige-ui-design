@@ -1299,8 +1299,9 @@ async def start_replay(request: ReplayRequest):
     if not log_file.exists():
         raise HTTPException(status_code=404, detail="Log file not found")
     
-    # Read all unique source interfaces from the log file
-    source_ifaces = set()
+    # Parse log file and build a bash script using cansend (like fuzzing does)
+    # canplayer is unreliable, cansend works everywhere in the app
+    frames = []
     try:
         with open(log_file, "r") as f:
             for line in f:
@@ -1310,28 +1311,40 @@ async def start_replay(request: ReplayRequest):
                 # Format: (1234.567890) can0 123#DEADBEEF
                 parts = line.split()
                 if len(parts) >= 3 and '#' in parts[2]:
-                    source_ifaces.add(parts[1])
-    except Exception:
-        pass
+                    ts_str = parts[0].strip('()')
+                    frame_data = parts[2]  # ID#DATA - exact cansend format
+                    try:
+                        ts = float(ts_str)
+                    except ValueError:
+                        ts = 0.0
+                    frames.append((ts, frame_data))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Cannot parse log: {e}")
     
-    # Build canplayer command
-    cmd = ["canplayer", "-I", str(log_file)]
+    if not frames:
+        raise HTTPException(status_code=400, detail="Log file contains no frames")
     
-    if request.speed != 1.0:
-        gap = int(1000 / request.speed)
-        cmd.extend(["-g", str(gap)])
+    # Build bash script - same pattern as fuzzing which works reliably
+    iface = request.interface
+    speed = request.speed if request.speed > 0 else 1.0
     
-    # Map each source interface found in the log to the target interface
-    # e.g. if log has "can0" frames and user wants vcan0: can0=vcan0
-    if source_ifaces:
-        for src in source_ifaces:
-            cmd.append(f"{src}={request.interface}")
-    else:
-        # Fallback: direct mapping
-        cmd.append(f"{request.interface}={request.interface}")
+    lines = [f"#!/bin/bash", f"# Replay {len(frames)} frames on {iface}"]
+    prev_ts = frames[0][0]
+    for i, (ts, frame) in enumerate(frames):
+        if i > 0:
+            delay = (ts - prev_ts) / speed
+            if 0 < delay < 10:
+                lines.append(f"sleep {delay:.6f}")
+        lines.append(f"cansend {iface} {frame}")
+        prev_ts = ts
     
-    print(f"[REPLAY] cmd: {' '.join(cmd)}")
-    state.canplayer_process = await run_command_async(cmd)
+    script_path = Path("/tmp/aurige_replay.sh")
+    with open(script_path, "w") as f:
+        f.write("\n".join(lines) + "\n")
+    script_path.chmod(0o755)
+    
+    print(f"[REPLAY] {len(frames)} frames on {iface} (speed={speed})")
+    state.canplayer_process = await run_command_async(["bash", str(script_path)])
     
     return {
         "status": "started",
