@@ -1,9 +1,8 @@
 "use client"
 
 import { cn } from "@/lib/utils"
-import { useState, useRef, useCallback, useMemo } from "react"
+import { useState, useRef, useCallback, useMemo, useEffect } from "react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import {
   Play,
   Square,
@@ -17,8 +16,11 @@ import {
   Pause,
   Filter,
   GripHorizontal,
+  FileCode,
+  ChevronRight,
 } from "lucide-react"
-import { useSnifferStore, type SnifferFrame } from "@/lib/sniffer-store"
+import { useSnifferStore, type SnifferFrame, type DecodedSignal } from "@/lib/sniffer-store"
+import { useMissionStore } from "@/lib/mission-store"
 
 /**
  * Renders a single byte with color based on change state.
@@ -39,35 +41,103 @@ function ColoredByte({ value, changed }: { value: string; changed: boolean }) {
   )
 }
 
-function SnifferRow({ frame }: { frame: SnifferFrame }) {
+function SnifferRow({ 
+  frame, 
+  dbcEntry, 
+  dbcEnabled,
+  decodeSignals,
+}: { 
+  frame: SnifferFrame
+  dbcEntry?: { messageName: string } | null
+  dbcEnabled: boolean
+  decodeSignals: (canId: string, bytes: string[]) => DecodedSignal[]
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const isKnown = !!dbcEntry
+  const decoded = expanded && dbcEnabled && isKnown ? decodeSignals(frame.canId, frame.bytes) : []
+
   return (
-    <div className="flex items-center gap-3 px-2 py-px hover:bg-accent/20 rounded">
-      {/* CAN ID */}
-      <span className="w-12 flex-shrink-0 text-cyan-400 font-bold text-right">
-        {frame.canId}
-      </span>
-      {/* DLC */}
-      <span className="w-4 flex-shrink-0 text-muted-foreground text-center">
-        {frame.dlc}
-      </span>
-      {/* Data bytes with change coloring */}
-      <span className="flex gap-1 flex-1">
-        {frame.bytes.map((byte, i) => (
-          <ColoredByte
-            key={i}
-            value={byte.toUpperCase()}
-            changed={frame.changedIndices.has(i)}
-          />
-        ))}
-      </span>
-      {/* Cycle time */}
-      <span className="w-16 flex-shrink-0 text-right text-muted-foreground/70">
-        {frame.cycleMs > 0 ? `${frame.cycleMs}ms` : ""}
-      </span>
-      {/* Count */}
-      <span className="w-12 flex-shrink-0 text-right text-muted-foreground/50">
-        {frame.count}
-      </span>
+    <div>
+      <div 
+        className={cn(
+          "flex items-center gap-3 px-2 py-px rounded transition-colors",
+          dbcEnabled && isKnown && "bg-success/5 hover:bg-success/10",
+          dbcEnabled && !isKnown && "bg-warning/5 hover:bg-warning/10",
+          !dbcEnabled && "hover:bg-accent/20",
+        )}
+        onClick={dbcEnabled && isKnown ? () => setExpanded(!expanded) : undefined}
+        style={dbcEnabled && isKnown ? { cursor: "pointer" } : undefined}
+      >
+        {/* Expand arrow for DBC entries */}
+        {dbcEnabled && isKnown ? (
+          <ChevronRight className={cn(
+            "h-3 w-3 flex-shrink-0 text-muted-foreground/50 transition-transform",
+            expanded && "rotate-90"
+          )} />
+        ) : (
+          <span className="w-3 flex-shrink-0" />
+        )}
+        {/* CAN ID */}
+        <span className={cn(
+          "w-12 flex-shrink-0 font-bold text-right",
+          dbcEnabled && isKnown ? "text-success" : dbcEnabled ? "text-warning" : "text-cyan-400"
+        )}>
+          {frame.canId}
+        </span>
+        {/* DBC badge + message name */}
+        {dbcEnabled && isKnown && (
+          <span className="flex items-center gap-1.5 w-28 flex-shrink-0 truncate">
+            <span className="inline-flex items-center rounded bg-success/20 px-1 py-px text-[9px] font-bold text-success leading-tight">
+              DBC
+            </span>
+            <span className="text-[10px] text-success/80 truncate font-medium">
+              {dbcEntry.messageName}
+            </span>
+          </span>
+        )}
+        {dbcEnabled && !isKnown && (
+          <span className="w-28 flex-shrink-0">
+            <span className="inline-flex items-center rounded bg-warning/20 px-1 py-px text-[9px] font-bold text-warning leading-tight">
+              ???
+            </span>
+          </span>
+        )}
+        {/* DLC */}
+        <span className="w-4 flex-shrink-0 text-muted-foreground text-center">
+          {frame.dlc}
+        </span>
+        {/* Data bytes with change coloring */}
+        <span className="flex gap-1 flex-1">
+          {frame.bytes.map((byte, i) => (
+            <ColoredByte
+              key={i}
+              value={byte.toUpperCase()}
+              changed={frame.changedIndices.has(i)}
+            />
+          ))}
+        </span>
+        {/* Cycle time */}
+        <span className="w-16 flex-shrink-0 text-right text-muted-foreground/70">
+          {frame.cycleMs > 0 ? `${frame.cycleMs}ms` : ""}
+        </span>
+        {/* Count */}
+        <span className="w-12 flex-shrink-0 text-right text-muted-foreground/50">
+          {frame.count}
+        </span>
+      </div>
+      {/* Expanded signal decode view */}
+      {expanded && decoded.length > 0 && (
+        <div className="ml-8 mr-2 mb-1 rounded bg-card/50 border border-border/50 px-3 py-1.5">
+          {decoded.map((sig, i) => (
+            <div key={i} className="flex items-center gap-3 text-[10px] py-0.5">
+              <span className="text-primary font-medium w-28 truncate">{sig.name}</span>
+              <span className="text-foreground font-mono font-bold">{sig.value}</span>
+              {sig.unit && <span className="text-muted-foreground">{sig.unit}</span>}
+              <span className="text-muted-foreground/50 font-mono ml-auto">0x{sig.rawHex}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -85,6 +155,10 @@ export function FloatingTerminal() {
     isMinimized,
     isExpanded,
     idFilter,
+    dbcEnabled,
+    dbcLookup,
+    dbcLoading,
+    dbcFilter,
     setInterface,
     setIdFilter,
     start,
@@ -93,7 +167,20 @@ export function FloatingTerminal() {
     toggleMinimize,
     toggleExpand,
     clearFrames,
+    toggleDbcOverlay,
+    loadDbc,
+    setDbcFilter,
+    decodeSignals,
   } = useSnifferStore()
+
+  const currentMission = useMissionStore((state) => state.getCurrentMission())
+
+  // Auto-load DBC when overlay is enabled and mission is available
+  useEffect(() => {
+    if (dbcEnabled && currentMission?.id) {
+      loadDbc(currentMission.id)
+    }
+  }, [dbcEnabled, currentMission?.id, loadDbc])
 
   // Drag state
   const [position, setPosition] = useState<{ x: number; y: number } | null>(null)
@@ -146,12 +233,34 @@ export function FloatingTerminal() {
     window.addEventListener("mouseup", handleUp)
   }, [size])
 
+  // DBC stats
+  const dbcStats = useMemo(() => {
+    if (!dbcEnabled || dbcLookup.size === 0) return null
+    const known = sortedIds.filter(id => dbcLookup.has(id.toUpperCase())).length
+    const total = sortedIds.length
+    const percent = total > 0 ? Math.round((known / total) * 100) : 0
+    return { known, unknown: total - known, total, percent }
+  }, [dbcEnabled, dbcLookup, sortedIds])
+
   // Filtered IDs
   const filteredIds = useMemo(() => {
-    if (!idFilter.trim()) return sortedIds
-    const filters = idFilter.toUpperCase().split(",").map(f => f.trim()).filter(Boolean)
-    return sortedIds.filter(id => filters.some(f => id.includes(f)))
-  }, [sortedIds, idFilter])
+    let ids = sortedIds
+    
+    // Apply DBC filter
+    if (dbcEnabled && dbcFilter === "dbc") {
+      ids = ids.filter(id => dbcLookup.has(id.toUpperCase()))
+    } else if (dbcEnabled && dbcFilter === "unknown") {
+      ids = ids.filter(id => !dbcLookup.has(id.toUpperCase()))
+    }
+    
+    // Apply text filter
+    if (idFilter.trim()) {
+      const filters = idFilter.toUpperCase().split(",").map(f => f.trim()).filter(Boolean)
+      ids = ids.filter(id => filters.some(f => id.includes(f)))
+    }
+    
+    return ids
+  }, [sortedIds, idFilter, dbcEnabled, dbcFilter, dbcLookup])
 
   if (isMinimized) {
     return (
@@ -208,6 +317,21 @@ export function FloatingTerminal() {
           )}
         </div>
         <div className="flex items-center gap-1">
+          <Button
+            size="icon"
+            variant="ghost"
+            className={cn(
+              "h-7 w-7",
+              dbcEnabled 
+                ? "text-success hover:text-success/80" 
+                : "text-muted-foreground hover:text-foreground"
+            )}
+            onClick={toggleDbcOverlay}
+            onMouseDown={(e) => e.stopPropagation()}
+            title={dbcEnabled ? "Desactiver overlay DBC" : "Activer overlay DBC"}
+          >
+            <FileCode className="h-4 w-4" />
+          </Button>
           <select
             value={selectedInterface}
             onChange={(e) => setInterface(e.target.value as "can0" | "can1" | "vcan0")}
@@ -246,6 +370,39 @@ export function FloatingTerminal() {
         </div>
       )}
 
+      {/* DBC overlay status bar */}
+      {dbcEnabled && sortedIds.length > 0 && dbcStats && (
+        <div className="flex items-center gap-2 border-b border-border/50 bg-success/5 px-3 py-1">
+          <FileCode className="h-3 w-3 text-success flex-shrink-0" />
+          <span className="text-[10px] text-success font-medium">
+            DBC: {dbcStats.percent}% connu
+          </span>
+          <span className="text-[10px] text-muted-foreground">
+            ({dbcStats.known} / {dbcStats.total} IDs)
+          </span>
+          {dbcLoading && <span className="text-[10px] text-muted-foreground animate-pulse">chargement...</span>}
+          <div className="ml-auto flex items-center gap-1">
+            {(["all", "dbc", "unknown"] as const).map((f) => (
+              <button
+                key={f}
+                onClick={() => setDbcFilter(f)}
+                onMouseDown={(e) => e.stopPropagation()}
+                className={cn(
+                  "rounded px-1.5 py-0.5 text-[9px] font-medium transition-colors",
+                  dbcFilter === f
+                    ? f === "dbc" ? "bg-success/20 text-success"
+                      : f === "unknown" ? "bg-warning/20 text-warning"
+                      : "bg-primary/20 text-primary"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {f === "all" ? "Tout" : f === "dbc" ? "Connu" : "Inconnu"}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* ID Filter bar */}
       {sortedIds.length > 0 && (
         <div className="flex items-center gap-2 border-b border-border/50 bg-card/30 px-3 py-1.5">
@@ -269,7 +426,9 @@ export function FloatingTerminal() {
       {/* Column headers */}
       {sortedIds.length > 0 && (
         <div className="flex items-center gap-3 border-b border-border/50 bg-card/30 px-2 py-1 font-mono text-[10px] text-muted-foreground/60 uppercase">
+          {dbcEnabled && <span className="w-3 flex-shrink-0" />}
           <span className="w-12 flex-shrink-0 text-right">ID</span>
+          {dbcEnabled && <span className="w-28 flex-shrink-0">Message</span>}
           <span className="w-4 flex-shrink-0 text-center">L</span>
           <span className="flex-1">Data</span>
           <span className="w-16 flex-shrink-0 text-right">Cycle</span>
@@ -292,7 +451,16 @@ export function FloatingTerminal() {
             {filteredIds.map((id) => {
               const frame = frameMap.get(id)
               if (!frame) return null
-              return <SnifferRow key={id} frame={frame} />
+              const dbcEntry = dbcEnabled ? dbcLookup.get(id.toUpperCase()) || null : null
+              return (
+                <SnifferRow 
+                  key={id} 
+                  frame={frame} 
+                  dbcEntry={dbcEntry}
+                  dbcEnabled={dbcEnabled}
+                  decodeSignals={decodeSignals}
+                />
+              )
             })}
           </div>
         )}
@@ -345,6 +513,14 @@ export function FloatingTerminal() {
           Clear
         </Button>
         <div className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
+          {dbcEnabled && dbcStats && (
+            <span className={cn(
+              "font-medium",
+              dbcStats.percent >= 50 ? "text-success" : "text-warning"
+            )}>
+              {dbcStats.percent}% DBC
+            </span>
+          )}
           <span>{filteredIds.length !== sortedIds.length ? `${filteredIds.length}/` : ""}{sortedIds.length} IDs</span>
           <span>{totalMessages} msg</span>
           {isRunning && !isPaused && (

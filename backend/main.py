@@ -4744,6 +4744,39 @@ async def export_dbc(mission_id: str):
     )
 
 
+@app.get("/api/missions/{mission_id}/dbc/active")
+async def get_active_dbc_ids(mission_id: str):
+    """
+    Get lightweight list of known CAN IDs from DBC for sniffer overlay.
+    Returns message IDs and names for quick lookup, without full signal details.
+    """
+    dbc_file = Path(MISSIONS_DIR) / mission_id / "dbc.json"
+    
+    if not dbc_file.exists():
+        return {"mission_id": mission_id, "known_ids": [], "total_signals": 0}
+    
+    with open(dbc_file, "r") as f:
+        data = json.load(f)
+    
+    known_ids = []
+    total_signals = 0
+    for msg in data.get("messages", []):
+        sig_count = len(msg.get("signals", []))
+        total_signals += sig_count
+        known_ids.append({
+            "can_id": msg["can_id"],
+            "name": msg.get("name", f"MSG_{msg['can_id']}"),
+            "dlc": msg.get("dlc", 8),
+            "signal_count": sig_count,
+        })
+    
+    return {
+        "mission_id": mission_id,
+        "known_ids": known_ids,
+        "total_signals": total_signals,
+    }
+
+
 # =============================================================================
 # LOG COMPARISON - Compare two logs to find differential frames
 # =============================================================================

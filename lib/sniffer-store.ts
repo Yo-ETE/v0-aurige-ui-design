@@ -10,7 +10,22 @@
  */
 
 import { create } from "zustand"
-import { createSnifferWebSocket, getCANStatus, type CANMessage } from "./api"
+import { createSnifferWebSocket, getCANStatus, getMissionDBC, type CANMessage, type DBCSignal } from "./api"
+
+/** A signal decoded from raw bytes using DBC definition */
+export interface DecodedSignal {
+  name: string
+  value: number
+  unit: string
+  rawHex: string
+}
+
+/** DBC message info cached for fast lookup */
+export interface DbcLookupEntry {
+  messageName: string
+  dlc: number
+  signals: DBCSignal[]
+}
 
 export interface SnifferFrame {
   canId: string
@@ -49,6 +64,13 @@ interface SnifferState {
   // Filter
   idFilter: string
   
+  // DBC overlay
+  dbcEnabled: boolean
+  dbcLookup: Map<string, DbcLookupEntry>
+  dbcMissionId: string | null
+  dbcLoading: boolean
+  dbcFilter: "all" | "dbc" | "unknown"
+  
   // Terminal state
   isPaused: boolean
   isMinimized: boolean
@@ -67,6 +89,10 @@ interface SnifferState {
   toggleMinimize: () => void
   toggleExpand: () => void
   clearFrames: () => void
+  toggleDbcOverlay: () => void
+  loadDbc: (missionId: string) => Promise<void>
+  setDbcFilter: (filter: "all" | "dbc" | "unknown") => void
+  decodeSignals: (canId: string, bytes: string[]) => DecodedSignal[]
 }
 
 export const useSnifferStore = create<SnifferState>((set, get) => ({
@@ -77,6 +103,11 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
   frameMap: new Map(),
   sortedIds: [],
   idFilter: "",
+  dbcEnabled: false,
+  dbcLookup: new Map(),
+  dbcMissionId: null,
+  dbcLoading: false,
+  dbcFilter: "all",
   isPaused: false,
   isMinimized: false,
   isExpanded: false,
@@ -243,4 +274,83 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
   toggleExpand: () => set((state) => ({ isExpanded: !state.isExpanded })),
   
   clearFrames: () => set({ frameMap: new Map(), sortedIds: [], totalMessages: 0 }),
+  
+  toggleDbcOverlay: () => set((state) => ({ dbcEnabled: !state.dbcEnabled })),
+  
+  setDbcFilter: (filter) => set({ dbcFilter: filter }),
+  
+  loadDbc: async (missionId: string) => {
+    if (get().dbcMissionId === missionId && get().dbcLookup.size > 0) return
+    set({ dbcLoading: true })
+    try {
+      const data = await getMissionDBC(missionId)
+      const lookup = new Map<string, DbcLookupEntry>()
+      for (const msg of data.messages) {
+        const normalizedId = msg.can_id.toUpperCase()
+        lookup.set(normalizedId, {
+          messageName: msg.name || `MSG_${msg.can_id}`,
+          dlc: msg.dlc || 8,
+          signals: msg.signals || [],
+        })
+      }
+      set({ dbcLookup: lookup, dbcMissionId: missionId, dbcLoading: false })
+    } catch (err) {
+      console.error("Failed to load DBC for sniffer:", err)
+      set({ dbcLoading: false })
+    }
+  },
+  
+  decodeSignals: (canId: string, bytes: string[]): DecodedSignal[] => {
+    const { dbcLookup } = get()
+    const entry = dbcLookup.get(canId.toUpperCase())
+    if (!entry || !entry.signals.length) return []
+    
+    // Build a numeric value from the bytes for signal extraction
+    const decoded: DecodedSignal[] = []
+    for (const sig of entry.signals) {
+      try {
+        // Simple extraction: little-endian, bit-level
+        const startByte = Math.floor(sig.start_bit / 8)
+        const startBitInByte = sig.start_bit % 8
+        
+        let rawValue = 0
+        if (sig.byte_order === "little_endian") {
+          // Extract bits from LSB
+          let bitsRead = 0
+          let bitPos = sig.start_bit
+          while (bitsRead < sig.length && Math.floor(bitPos / 8) < bytes.length) {
+            const byteIdx = Math.floor(bitPos / 8)
+            const bitIdx = bitPos % 8
+            const byteVal = parseInt(bytes[byteIdx] || "0", 16)
+            const bit = (byteVal >> bitIdx) & 1
+            rawValue |= (bit << bitsRead)
+            bitsRead++
+            bitPos++
+          }
+        } else {
+          // Big-endian (Motorola) - simplified
+          const byteVal = parseInt(bytes[startByte] || "0", 16)
+          rawValue = (byteVal >> startBitInByte) & ((1 << sig.length) - 1)
+        }
+        
+        // Handle signed values
+        if (sig.is_signed && rawValue >= (1 << (sig.length - 1))) {
+          rawValue -= (1 << sig.length)
+        }
+        
+        const physValue = rawValue * sig.scale + sig.offset
+        const rawHex = bytes.slice(startByte, startByte + Math.ceil(sig.length / 8)).join("")
+        
+        decoded.push({
+          name: sig.name,
+          value: Math.round(physValue * 1000) / 1000,
+          unit: sig.unit || "",
+          rawHex,
+        })
+      } catch {
+        // Skip signals that fail to decode
+      }
+    }
+    return decoded
+  },
 }))
