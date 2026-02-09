@@ -143,6 +143,10 @@ export default function ComparaisonPage() {
   // Actions
   const [sendingFrame, setSendingFrame] = useState<string | null>(null)
   const [canInterface, setCanInterface] = useState<"can0" | "can1" | "vcan0">("can0")
+  // Replay rare exclusifs
+  const [sendingRareKey, setSendingRareKey] = useState<string | null>(null)
+  const [sentRareKey, setSentRareKey] = useState<string | null>(null)
+  const [replayingAllKey, setReplayingAllKey] = useState<string | null>(null)
 
   // Sort mode for results
   const [sortMode, setSortMode] = useState<"stability" | "confidence" | "classification" | "command">("stability")
@@ -314,6 +318,41 @@ export default function ComparaisonPage() {
     setCurrentComparisonName("")
     setExpandedFrames(new Set())
     setViewMode("new")
+  }
+
+  // Envoyer une trame rare individuelle sur le CAN
+  const handleSendRarePayload = async (canId: string, payload: string, key: string) => {
+    setSendingRareKey(key)
+    setSentRareKey(null)
+    try {
+      await sendCANFrame({ interface: canInterface, canId, data: payload.replace(/\s/g, "") })
+      setSentRareKey(key)
+      setTimeout(() => setSentRareKey(prev => prev === key ? null : prev), 2000)
+    } catch {
+      toast({ title: "Erreur", description: `Echec envoi ${canId}#${payload}`, variant: "destructive" })
+    } finally {
+      setSendingRareKey(null)
+    }
+  }
+
+  // Rejouer toutes les trames rares d'un log (A ou B) sequentiellement avec 50ms de delai
+  const handleReplayAllRare = async (canId: string, rares: Array<{payload: string, count: number}>, logLabel: string) => {
+    const key = `all-${canId}-${logLabel}`
+    setReplayingAllKey(key)
+    let sent = 0
+    try {
+      for (const rp of rares) {
+        await sendCANFrame({ interface: canInterface, canId, data: rp.payload.replace(/\s/g, "") })
+        sent++
+        // Petit delai entre chaque trame
+        await new Promise(r => setTimeout(r, 50))
+      }
+      toast({ title: "Replay termine", description: `${sent}/${rares.length} trames ${logLabel} envoyees sur ${canInterface}` })
+    } catch {
+      toast({ title: "Erreur", description: `Arret apres ${sent}/${rares.length} trames`, variant: "destructive" })
+    } finally {
+      setReplayingAllKey(null)
+    }
   }
 
   const handleSendFrame = async (frame: CompareFrameDiff, usePayloadA: boolean) => {
@@ -698,35 +737,91 @@ export default function ComparaisonPage() {
                             <div className="grid gap-2 sm:grid-cols-2">
                               {/* Exclusifs A */}
                               <div className="space-y-1">
-                                <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Log A</span>
-                                {(frame.exclusive_rare_a?.length ?? 0) > 0 ? frame.exclusive_rare_a.map((rp, i) => (
-                                  <div key={i} className="flex items-center gap-2 p-1.5 rounded bg-card border border-border">
-                                    <code className="text-xs font-mono text-red-400 break-all">{frame.can_id}#{rp.payload}</code>
-                                    <Badge variant="outline" className="text-[10px] h-4 shrink-0">x{rp.count}</Badge>
-                                    {rp.ts_preview.length > 0 && (
-                                      <span className="text-[10px] text-muted-foreground shrink-0" title={`Timestamps: ${rp.ts_preview.join(", ")}`}>
-                                        <Clock className="h-2.5 w-2.5 inline mr-0.5" />
-                                        {rp.ts_preview[0].toFixed(2)}s
-                                      </span>
-                                    )}
-                                  </div>
-                                )) : <span className="text-[10px] text-muted-foreground italic">Aucun</span>}
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Log A ({frame.exclusive_rare_a?.length ?? 0} trames)</span>
+                                  {(frame.exclusive_rare_a?.length ?? 0) > 0 && (
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-5 px-1.5 text-[10px] gap-1"
+                                      disabled={replayingAllKey === `all-${frame.can_id}-A`}
+                                      onClick={(e) => { e.stopPropagation(); handleReplayAllRare(frame.can_id, frame.exclusive_rare_a, "A") }}
+                                      title={`Rejouer les ${frame.exclusive_rare_a.length} trames Log A sur ${canInterface}`}
+                                    >
+                                      {replayingAllKey === `all-${frame.can_id}-A` ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Play className="h-2.5 w-2.5" />}
+                                      Tout rejouer
+                                    </Button>
+                                  )}
+                                </div>
+                                {(frame.exclusive_rare_a?.length ?? 0) > 0 ? frame.exclusive_rare_a.map((rp, i) => {
+                                  const rareKey = `a-${frame.can_id}-${rp.payload}`
+                                  return (
+                                    <div key={i} className="flex items-center gap-1 p-1.5 rounded bg-card border border-border group">
+                                      <Button
+                                        size="icon"
+                                        variant="ghost"
+                                        className={`h-5 w-5 shrink-0 ${sentRareKey === rareKey ? "text-success" : ""}`}
+                                        disabled={sendingRareKey === rareKey}
+                                        onClick={(e) => { e.stopPropagation(); handleSendRarePayload(frame.can_id, rp.payload, rareKey) }}
+                                        title={`Envoyer ${frame.can_id}#${rp.payload} sur ${canInterface}`}
+                                      >
+                                        {sendingRareKey === rareKey ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : sentRareKey === rareKey ? <CheckCircle2 className="h-2.5 w-2.5" /> : <Play className="h-2.5 w-2.5" />}
+                                      </Button>
+                                      <code className="text-xs font-mono text-red-400 break-all min-w-0 truncate">{frame.can_id}#{rp.payload}</code>
+                                      <Badge variant="outline" className="text-[10px] h-4 shrink-0">x{rp.count}</Badge>
+                                      {rp.ts_preview.length > 0 && (
+                                        <span className="text-[10px] text-muted-foreground shrink-0" title={`Timestamps: ${rp.ts_preview.join(", ")}`}>
+                                          <Clock className="h-2.5 w-2.5 inline mr-0.5" />
+                                          {rp.ts_preview[0].toFixed(2)}s
+                                        </span>
+                                      )}
+                                    </div>
+                                  )
+                                }) : <span className="text-[10px] text-muted-foreground italic">Aucun</span>}
                               </div>
                               {/* Exclusifs B */}
                               <div className="space-y-1">
-                                <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Log B</span>
-                                {(frame.exclusive_rare_b?.length ?? 0) > 0 ? frame.exclusive_rare_b.map((rp, i) => (
-                                  <div key={i} className="flex items-center gap-2 p-1.5 rounded bg-card border border-border">
-                                    <code className="text-xs font-mono text-emerald-400 break-all">{frame.can_id}#{rp.payload}</code>
-                                    <Badge variant="outline" className="text-[10px] h-4 shrink-0">x{rp.count}</Badge>
-                                    {rp.ts_preview.length > 0 && (
-                                      <span className="text-[10px] text-muted-foreground shrink-0" title={`Timestamps: ${rp.ts_preview.join(", ")}`}>
-                                        <Clock className="h-2.5 w-2.5 inline mr-0.5" />
-                                        {rp.ts_preview[0].toFixed(2)}s
-                                      </span>
-                                    )}
-                                  </div>
-                                )) : <span className="text-[10px] text-muted-foreground italic">Aucun</span>}
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Log B ({frame.exclusive_rare_b?.length ?? 0} trames)</span>
+                                  {(frame.exclusive_rare_b?.length ?? 0) > 0 && (
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-5 px-1.5 text-[10px] gap-1"
+                                      disabled={replayingAllKey === `all-${frame.can_id}-B`}
+                                      onClick={(e) => { e.stopPropagation(); handleReplayAllRare(frame.can_id, frame.exclusive_rare_b, "B") }}
+                                      title={`Rejouer les ${frame.exclusive_rare_b.length} trames Log B sur ${canInterface}`}
+                                    >
+                                      {replayingAllKey === `all-${frame.can_id}-B` ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Play className="h-2.5 w-2.5" />}
+                                      Tout rejouer
+                                    </Button>
+                                  )}
+                                </div>
+                                {(frame.exclusive_rare_b?.length ?? 0) > 0 ? frame.exclusive_rare_b.map((rp, i) => {
+                                  const rareKey = `b-${frame.can_id}-${rp.payload}`
+                                  return (
+                                    <div key={i} className="flex items-center gap-1 p-1.5 rounded bg-card border border-border group">
+                                      <Button
+                                        size="icon"
+                                        variant="ghost"
+                                        className={`h-5 w-5 shrink-0 ${sentRareKey === rareKey ? "text-success" : ""}`}
+                                        disabled={sendingRareKey === rareKey}
+                                        onClick={(e) => { e.stopPropagation(); handleSendRarePayload(frame.can_id, rp.payload, rareKey) }}
+                                        title={`Envoyer ${frame.can_id}#${rp.payload} sur ${canInterface}`}
+                                      >
+                                        {sendingRareKey === rareKey ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : sentRareKey === rareKey ? <CheckCircle2 className="h-2.5 w-2.5" /> : <Play className="h-2.5 w-2.5" />}
+                                      </Button>
+                                      <code className="text-xs font-mono text-emerald-400 break-all min-w-0 truncate">{frame.can_id}#{rp.payload}</code>
+                                      <Badge variant="outline" className="text-[10px] h-4 shrink-0">x{rp.count}</Badge>
+                                      {rp.ts_preview.length > 0 && (
+                                        <span className="text-[10px] text-muted-foreground shrink-0" title={`Timestamps: ${rp.ts_preview.join(", ")}`}>
+                                          <Clock className="h-2.5 w-2.5 inline mr-0.5" />
+                                          {rp.ts_preview[0].toFixed(2)}s
+                                        </span>
+                                      )}
+                                    </div>
+                                  )
+                                }) : <span className="text-[10px] text-muted-foreground italic">Aucun</span>}
                               </div>
                             </div>
                           </div>
