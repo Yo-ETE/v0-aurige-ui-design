@@ -334,24 +334,27 @@ export async function getGeneratorStatus(): Promise<ProcessStatus> {
 // Fuzzing
 // =============================================================================
 
-export async function startFuzzing(
-  iface: CANInterface,
-  idStart: string,
-  idEnd: string,
-  dataTemplate: string,
-  iterations: number,
+export type FuzzDataMode = "static" | "random" | "range" | "logs"
+
+export interface FuzzingParams {
+  interface: CANInterface
+  idStart: string
+  idEnd: string
+  dataTemplate?: string
+  iterations: number
   delayMs: number
-): Promise<{ status: string }> {
+  dataMode: FuzzDataMode
+  byteRanges?: { index: number; min: number; max: number }[]
+  missionId?: string
+  logId?: string
+  targetIds?: string[]
+  dlc?: number
+}
+
+export async function startFuzzing(params: FuzzingParams): Promise<{ status: string }> {
   return fetchApi("/fuzzing/start", {
     method: "POST",
-    body: JSON.stringify({
-      interface: iface,
-      idStart,
-      idEnd,
-      dataTemplate,
-      iterations,
-      delayMs,
-    }),
+    body: JSON.stringify(params),
   })
 }
 
@@ -363,6 +366,38 @@ export async function stopFuzzing(): Promise<{ status: string }> {
 
 export async function getFuzzingStatus(): Promise<ProcessStatus> {
   return fetchApi<ProcessStatus>("/fuzzing/status")
+}
+
+// =============================================================================
+// Logs Analysis (for intelligent fuzzing)
+// =============================================================================
+
+export interface LogByteRange {
+  index: number
+  min: number
+  max: number
+  unique: number
+}
+
+export interface LogIdAnalysis {
+  canId: string
+  count: number
+  sampleCount: number
+  samples: string[]
+  dlcs: number[]
+  byteRanges: LogByteRange[]
+}
+
+export interface LogsAnalysis {
+  mission_id: string
+  ids: LogIdAnalysis[]
+  totalFrames: number
+  totalUniqueIds: number
+}
+
+export async function getLogsAnalysis(missionId: string, logId?: string): Promise<LogsAnalysis> {
+  const params = logId ? `?log_id=${logId}` : ""
+  return fetchApi(`/missions/${missionId}/logs-analysis${params}`)
 }
 
 // =============================================================================

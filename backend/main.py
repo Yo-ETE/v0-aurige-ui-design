@@ -198,9 +198,25 @@ class FuzzingRequest(BaseModel):
     interface: str = "can0"
     id_start: str = Field(alias="idStart")  # Hex
     id_end: str = Field(alias="idEnd")  # Hex
-    data_template: str = Field(alias="dataTemplate")  # Hex
+    data_template: str = Field(alias="dataTemplate", default="")  # Hex (used in static mode)
     iterations: int = 100
-    delay_ms: int = Field(alias="delayMs", default=10)
+    delay_ms: float = Field(alias="delayMs", default=10)
+    
+    # Data generation mode: "static" | "random" | "range" | "logs"
+    data_mode: str = Field(alias="dataMode", default="random")
+    
+    # For "range" mode: per-byte min/max constraints
+    byte_ranges: Optional[list] = Field(alias="byteRanges", default=None)
+    
+    # For "logs" mode: replay observed data from mission logs
+    mission_id: Optional[str] = Field(alias="missionId", default=None)
+    log_id: Optional[str] = Field(alias="logId", default=None)
+    
+    # For single-ID targeted fuzzing
+    target_ids: Optional[list] = Field(alias="targetIds", default=None)
+    
+    # DLC (data length code)
+    dlc: int = 8
 
     class Config:
         populate_by_name = True
@@ -1439,19 +1455,21 @@ async def get_generator_status():
 @app.post("/api/fuzzing/start")
 async def start_fuzzing(request: FuzzingRequest):
     """
-    Start fuzzing - sends frames with incrementing IDs.
-    This uses a Python loop with cansend for precise control.
+    Start fuzzing with smart data generation modes:
+    - static: send same data_template for all frames
+    - random: random bytes for each frame (true fuzzing)
+    - range: random bytes within per-byte min/max from log analysis
+    - logs: replay actual observed data from mission logs, varying byte by byte
     """
     if state.fuzzing_process and state.fuzzing_process.returncode is None:
         raise HTTPException(status_code=409, detail="Fuzzing already running")
     
-    # Create a temporary script for fuzzing
-    # Validate all inputs before writing to script to prevent injection
+    # Validate inputs
     if not re.match(r'^[0-9A-Fa-f]{1,8}$', request.id_start):
         raise HTTPException(status_code=400, detail=f"ID start invalide: {request.id_start}")
     if not re.match(r'^[0-9A-Fa-f]{1,8}$', request.id_end):
         raise HTTPException(status_code=400, detail=f"ID end invalide: {request.id_end}")
-    if not re.match(r'^[0-9A-Fa-f]*$', request.data_template):
+    if request.data_template and not re.match(r'^[0-9A-Fa-f]*$', request.data_template):
         raise HTTPException(status_code=400, detail=f"Data template invalide: {request.data_template}")
     if request.interface not in ["can0", "can1", "vcan0"]:
         raise HTTPException(status_code=400, detail="Invalid interface")
@@ -1460,32 +1478,197 @@ async def start_fuzzing(request: FuzzingRequest):
     if not (0.1 <= request.delay_ms <= 10000):
         raise HTTPException(status_code=400, detail="Delay must be between 0.1ms and 10000ms")
     
-    script_content = f'''#!/bin/bash
-start_id=$((16#{request.id_start}))
-end_id=$((16#{request.id_end}))
-data="{request.data_template}"
-delay_sec=$(echo "scale=6; {request.delay_ms}/1000" | bc)
+    dlc = max(1, min(request.dlc, 8))
+    mode = request.data_mode
+    
+    # Build Python fuzzing script (more flexible than bash for data generation)
+    # Pre-compute data based on mode
+    
+    # For "logs" mode, extract real samples from mission logs
+    log_samples_code = ""
+    if mode == "logs" and request.mission_id:
+        logs_dir = get_mission_logs_dir(request.mission_id)
+        id_samples: dict = {}  # canId -> [data_hex, ...]
+        
+        log_files = []
+        if request.log_id:
+            target = logs_dir / f"{request.log_id}.log"
+            if target.exists():
+                log_files = [target]
+        else:
+            log_files = list(logs_dir.glob("*.log"))
+        
+        for log_file in log_files:
+            if log_file.name.endswith(".meta.json"):
+                continue
+            try:
+                with open(log_file, "r") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line or line.startswith("#"):
+                            continue
+                        try:
+                            parts = line.split()
+                            if len(parts) >= 3:
+                                frame_parts = parts[2].split("#")
+                                if len(frame_parts) == 2:
+                                    cid = frame_parts[0].upper()
+                                    dhex = frame_parts[1].upper()
+                                    if cid not in id_samples:
+                                        id_samples[cid] = []
+                                    if len(id_samples[cid]) < 200:
+                                        id_samples[cid].append(dhex)
+                        except:
+                            continue
+            except:
+                continue
+        
+        # Serialize samples into the script
+        log_samples_code = f"LOG_SAMPLES = {json.dumps(id_samples)}\n"
+    
+    # For "range" mode, build per-byte constraints
+    byte_ranges_code = ""
+    if mode == "range" and request.byte_ranges:
+        byte_ranges_code = f"BYTE_RANGES = {json.dumps(request.byte_ranges)}\n"
+    
+    # For "target_ids" mode with specific IDs
+    target_ids = request.target_ids or []
+    
+    script_content = f'''#!/usr/bin/env python3
+import subprocess
+import time
+import random
+import sys
 
-for ((i=0; i<{request.iterations}; i++)); do
-    current_id=$((start_id + (end_id - start_id) * i / {request.iterations}))
-    hex_id=$(printf "%03X" $current_id)
-    cansend {request.interface} "${{hex_id}}#${{data}}"
-    sleep $delay_sec
-done
+INTERFACE = "{request.interface}"
+ID_START = 0x{request.id_start}
+ID_END = 0x{request.id_end}
+ITERATIONS = {request.iterations}
+DELAY_SEC = {request.delay_ms} / 1000.0
+DLC = {dlc}
+MODE = "{mode}"
+DATA_TEMPLATE = "{request.data_template or ''}"
+TARGET_IDS = {json.dumps(target_ids)}
+{log_samples_code}
+{byte_ranges_code}
+
+def generate_data_static():
+    """Same static data for every frame"""
+    tpl = DATA_TEMPLATE if DATA_TEMPLATE else "00" * DLC
+    # Pad or truncate to DLC
+    tpl = tpl.ljust(DLC * 2, "0")[:DLC * 2]
+    return tpl.upper()
+
+def generate_data_random():
+    """Fully random bytes"""
+    return "".join(f"{{random.randint(0, 255):02X}}" for _ in range(DLC))
+
+def generate_data_range():
+    """Random bytes within per-byte min/max constraints"""
+    data = []
+    for i in range(DLC):
+        found = False
+        if "BYTE_RANGES" in dir() or "BYTE_RANGES" in globals():
+            for br in BYTE_RANGES:
+                if br.get("index") == i:
+                    bmin = br.get("min", 0)
+                    bmax = br.get("max", 255)
+                    data.append(f"{{random.randint(bmin, bmax):02X}}")
+                    found = True
+                    break
+        if not found:
+            data.append(f"{{random.randint(0, 255):02X}}")
+    return "".join(data)
+
+def generate_data_logs(can_id_hex):
+    """Pick from real observed data, with random mutation on 1-2 bytes"""
+    if "LOG_SAMPLES" not in dir() and "LOG_SAMPLES" not in globals():
+        return generate_data_random()
+    samples = LOG_SAMPLES.get(can_id_hex, [])
+    if not samples:
+        return generate_data_random()
+    base = random.choice(samples)
+    # Mutate 1-2 random bytes while keeping the structure
+    base_bytes = [base[i:i+2] for i in range(0, len(base), 2)]
+    if len(base_bytes) == 0:
+        return generate_data_random()
+    # Mutate 1-2 bytes
+    n_mutate = random.randint(1, min(2, len(base_bytes)))
+    indices = random.sample(range(len(base_bytes)), n_mutate)
+    for idx in indices:
+        original = int(base_bytes[idx], 16)
+        # Mutate within +/- 30% of original range, or random
+        delta = random.randint(-40, 40)
+        new_val = max(0, min(255, original + delta))
+        base_bytes[idx] = f"{{new_val:02X}}"
+    return "".join(base_bytes).upper()
+
+def main():
+    sent = 0
+    
+    if TARGET_IDS:
+        # Targeted mode: cycle through specific IDs
+        for i in range(ITERATIONS):
+            can_id_hex = TARGET_IDS[i % len(TARGET_IDS)]
+            if MODE == "static":
+                data = generate_data_static()
+            elif MODE == "range":
+                data = generate_data_range()
+            elif MODE == "logs":
+                data = generate_data_logs(can_id_hex)
+            else:
+                data = generate_data_random()
+            
+            frame = f"{{can_id_hex}}#{{data}}"
+            subprocess.run(["cansend", INTERFACE, frame], capture_output=True)
+            sent += 1
+            if sent % 50 == 0:
+                sys.stdout.write(f"\\rSent {{sent}}/{{ITERATIONS}} frames")
+                sys.stdout.flush()
+            time.sleep(DELAY_SEC)
+    else:
+        # Sweep mode: increment through ID range
+        id_range = max(1, ID_END - ID_START + 1)
+        for i in range(ITERATIONS):
+            current_id = ID_START + (i % id_range)
+            can_id_hex = f"{{current_id:03X}}"
+            
+            if MODE == "static":
+                data = generate_data_static()
+            elif MODE == "range":
+                data = generate_data_range()
+            elif MODE == "logs":
+                data = generate_data_logs(can_id_hex)
+            else:
+                data = generate_data_random()
+            
+            frame = f"{{can_id_hex}}#{{data}}"
+            subprocess.run(["cansend", INTERFACE, frame], capture_output=True)
+            sent += 1
+            if sent % 50 == 0:
+                sys.stdout.write(f"\\rSent {{sent}}/{{ITERATIONS}} frames")
+                sys.stdout.flush()
+            time.sleep(DELAY_SEC)
+    
+    print(f"\\nFuzzing complete: {{sent}} frames sent")
+
+if __name__ == "__main__":
+    main()
 '''
     
-    script_path = Path("/tmp/aurige_fuzz.sh")
+    script_path = Path("/tmp/aurige_fuzz.py")
     with open(script_path, "w") as f:
         f.write(script_content)
     script_path.chmod(0o755)
     
-    state.fuzzing_process = await run_command_async(["bash", str(script_path)])
+    state.fuzzing_process = await run_command_async(["python3", str(script_path)])
     
     return {
         "status": "started",
         "interface": request.interface,
         "idRange": f"{request.id_start}-{request.id_end}",
         "iterations": request.iterations,
+        "dataMode": mode,
     }
 
 
@@ -1512,6 +1695,109 @@ async def get_fuzzing_status():
     """Get fuzzing status"""
     is_running = state.fuzzing_process and state.fuzzing_process.returncode is None
     return {"running": is_running}
+
+
+@app.get("/api/missions/{mission_id}/logs-analysis")
+async def analyze_mission_logs(mission_id: str, log_id: Optional[str] = None):
+    """
+    Analyze mission logs to extract CAN ID + data patterns for intelligent fuzzing.
+    Returns unique IDs with their observed data values, byte ranges, and frequencies.
+    Optionally filter by a specific log_id.
+    """
+    load_mission(mission_id)
+    logs_dir = get_mission_logs_dir(mission_id)
+    
+    if not logs_dir.exists():
+        return {"mission_id": mission_id, "ids": [], "totalFrames": 0}
+    
+    # Collect data per CAN ID
+    id_data: dict = {}  # canId -> { "samples": [data_hex_list], "count": int }
+    total_frames = 0
+    
+    log_files = []
+    if log_id:
+        target = logs_dir / f"{log_id}.log"
+        if target.exists():
+            log_files = [target]
+        else:
+            raise HTTPException(status_code=404, detail=f"Log not found: {log_id}")
+    else:
+        log_files = list(logs_dir.glob("*.log"))
+    
+    for log_file in log_files:
+        if log_file.name.endswith(".meta.json"):
+            continue
+        try:
+            with open(log_file, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    total_frames += 1
+                    
+                    # Parse candump format: (timestamp) interface canid#data
+                    try:
+                        parts = line.split()
+                        if len(parts) >= 3:
+                            frame_parts = parts[2].split("#")
+                            if len(frame_parts) == 2:
+                                can_id = frame_parts[0].upper()
+                                data_hex = frame_parts[1].upper()
+                                
+                                if can_id not in id_data:
+                                    id_data[can_id] = {
+                                        "count": 0,
+                                        "samples": [],
+                                        "dlc_set": set(),
+                                    }
+                                
+                                entry = id_data[can_id]
+                                entry["count"] += 1
+                                entry["dlc_set"].add(len(data_hex) // 2)
+                                
+                                # Keep up to 50 unique data samples per ID
+                                if data_hex not in entry["samples"] and len(entry["samples"]) < 50:
+                                    entry["samples"].append(data_hex)
+                    except Exception:
+                        continue
+        except Exception:
+            continue
+    
+    # Build byte-range analysis per ID
+    result_ids = []
+    for can_id, entry in sorted(id_data.items(), key=lambda x: x[1]["count"], reverse=True):
+        # Analyze byte ranges from samples
+        byte_ranges = []
+        if entry["samples"]:
+            max_bytes = max(len(s) // 2 for s in entry["samples"])
+            for byte_idx in range(max_bytes):
+                byte_values = set()
+                for sample in entry["samples"]:
+                    if byte_idx * 2 + 2 <= len(sample):
+                        byte_values.add(int(sample[byte_idx * 2:byte_idx * 2 + 2], 16))
+                if byte_values:
+                    byte_ranges.append({
+                        "index": byte_idx,
+                        "min": min(byte_values),
+                        "max": max(byte_values),
+                        "unique": len(byte_values),
+                    })
+        
+        result_ids.append({
+            "canId": can_id,
+            "count": entry["count"],
+            "sampleCount": len(entry["samples"]),
+            "samples": entry["samples"][:10],  # Return top 10 for UI preview
+            "dlcs": sorted(entry["dlc_set"]),
+            "byteRanges": byte_ranges,
+        })
+    
+    return {
+        "mission_id": mission_id,
+        "ids": result_ids,
+        "totalFrames": total_frames,
+        "totalUniqueIds": len(result_ids),
+    }
 
 
 # =============================================================================
