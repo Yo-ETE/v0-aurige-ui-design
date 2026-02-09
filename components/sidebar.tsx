@@ -206,14 +206,12 @@ export function Sidebar() {
         <div className="flex h-full flex-col">
           {/* Logo */}
           <div className="flex h-14 items-center gap-3 border-b border-sidebar-border px-5">
-            <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-lg bg-white/10 p-0.5">
+            <div className="relative h-8 w-8 flex-shrink-0 overflow-hidden rounded-lg bg-white/10">
               <Image
                 src="/images/aurige.png"
                 alt="AURIGE Logo"
-                width={28}
-                height={28}
-                className="object-contain"
-                style={{ width: "auto", height: "auto" }}
+                fill
+                className="object-contain p-0.5"
                 priority
               />
             </div>
