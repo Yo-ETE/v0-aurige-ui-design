@@ -282,20 +282,25 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
   loadDbc: async (missionId: string) => {
     if (get().dbcMissionId === missionId && get().dbcLookup.size > 0) return
     set({ dbcLoading: true })
+    console.log("[v0] loadDbc called with missionId:", missionId)
     try {
       const data = await getMissionDBC(missionId)
+      console.log("[v0] DBC data received:", data.messages.length, "messages")
       const lookup = new Map<string, DbcLookupEntry>()
       for (const msg of data.messages) {
-        const normalizedId = msg.can_id.toUpperCase()
+        // Strip "0x" or "0X" prefix and normalize to uppercase
+        const normalizedId = msg.can_id.replace(/^0[xX]/, "").toUpperCase()
+        console.log("[v0] DBC map entry:", msg.can_id, "->", normalizedId, "name:", msg.name, "signals:", msg.signals?.length)
         lookup.set(normalizedId, {
           messageName: msg.name || `MSG_${msg.can_id}`,
           dlc: msg.dlc || 8,
           signals: msg.signals || [],
         })
       }
+      console.log("[v0] DBC lookup built with", lookup.size, "entries. Keys:", Array.from(lookup.keys()))
       set({ dbcLookup: lookup, dbcMissionId: missionId, dbcLoading: false })
     } catch (err) {
-      console.error("Failed to load DBC for sniffer:", err)
+      console.error("[v0] Failed to load DBC for sniffer:", err)
       set({ dbcLoading: false })
     }
   },
