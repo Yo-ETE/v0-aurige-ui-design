@@ -4571,6 +4571,51 @@ async def compare_logs(mission_id: str, request: CompareLogsRequest):
             return ""
         return Counter(data_list).most_common(1)[0][0]
     
+    def analyze_byte_stability(payloads: list[str]) -> list[dict]:
+        """
+        Analyze each byte position across all payloads.
+        Returns per-byte: unique values, most common value, stability ratio.
+        
+        A byte is 'stable' if it has the same value in >80% of payloads.
+        A byte is 'variable' (counter/timestamp) if it has many unique values.
+        """
+        if not payloads:
+            return []
+        
+        # Normalize payload length
+        max_bytes = max(len(p) // 2 for p in payloads) if payloads else 0
+        result = []
+        
+        for byte_idx in range(max_bytes):
+            values = []
+            for p in payloads:
+                start = byte_idx * 2
+                if start + 2 <= len(p):
+                    values.append(p[start:start+2])
+                else:
+                    values.append("00")
+            
+            counter = Counter(values)
+            most_common_val = counter.most_common(1)[0][0]
+            most_common_count = counter.most_common(1)[0][1]
+            unique_count = len(counter)
+            stability = round(most_common_count / len(values) * 100, 1) if values else 0
+            
+            result.append({
+                "index": byte_idx,
+                "most_common": most_common_val,
+                "unique_count": unique_count,
+                "stability": stability,
+                "is_stable": stability >= 70,  # >70% = stable byte
+                "is_counter": unique_count > len(values) * 0.3,  # Many unique = counter
+            })
+        
+        return result
+    
+    def build_representative_payload(byte_analysis: list[dict]) -> str:
+        """Build a representative payload from per-byte analysis."""
+        return "".join(b["most_common"] for b in byte_analysis)
+    
     # Parse both logs
     frames_a = parse_log(log_a_file)
     frames_b = parse_log(log_b_file)
@@ -4589,8 +4634,13 @@ async def compare_logs(mission_id: str, request: CompareLogsRequest):
         payloads_a = frames_a.get(can_id, [])
         payloads_b = frames_b.get(can_id, [])
         
-        payload_a = get_most_common(payloads_a)
-        payload_b = get_most_common(payloads_b)
+        # Per-byte stability analysis (key improvement)
+        bytes_analysis_a = analyze_byte_stability(payloads_a)
+        bytes_analysis_b = analyze_byte_stability(payloads_b)
+        
+        # Build representative payloads from most common byte values
+        payload_a = build_representative_payload(bytes_analysis_a) if bytes_analysis_a else ""
+        payload_b = build_representative_payload(bytes_analysis_b) if bytes_analysis_b else ""
         
         # Count unique payloads in each log
         unique_a = len(set(payloads_a)) if payloads_a else 0
@@ -4606,7 +4656,11 @@ async def compare_logs(mission_id: str, request: CompareLogsRequest):
             counter_b = Counter(payloads_b)
             dominant_b = round(counter_b.most_common(1)[0][1] / len(payloads_b) * 100, 1)
         
-        # Determine classification
+        # ============================================================
+        # SMART CLASSIFICATION
+        # Compare per-byte: only flag bytes that are STABLE in both
+        # logs but DIFFERENT between them. Ignore counter/variable bytes.
+        # ============================================================
         if not payloads_a:
             classification = "only_b"
             only_b_count += 1
@@ -4615,17 +4669,39 @@ async def compare_logs(mission_id: str, request: CompareLogsRequest):
             classification = "only_a"
             only_a_count += 1
             confidence = 80.0
-        elif payload_a == payload_b:
-            classification = "identical"
-            identical_count += 1
-            confidence = 95.0
         else:
-            classification = "differential"
-            differential_count += 1
-            # Higher confidence if more samples
-            confidence = min(95.0, 60.0 + min(len(payloads_a), len(payloads_b)) * 2)
+            # Per-byte comparison: only consider stable bytes
+            max_bytes = max(len(bytes_analysis_a), len(bytes_analysis_b))
+            stable_diff_count = 0
+            any_stable_diff = False
+            
+            for i in range(max_bytes):
+                ba = bytes_analysis_a[i] if i < len(bytes_analysis_a) else None
+                bb = bytes_analysis_b[i] if i < len(bytes_analysis_b) else None
+                
+                if ba and bb:
+                    both_stable = ba["is_stable"] and bb["is_stable"]
+                    values_differ = ba["most_common"] != bb["most_common"]
+                    
+                    if both_stable and values_differ:
+                        stable_diff_count += 1
+                        any_stable_diff = True
+            
+            if any_stable_diff:
+                classification = "differential"
+                differential_count += 1
+                confidence = min(95.0, 60.0 + stable_diff_count * 10 + min(len(payloads_a), len(payloads_b)) * 0.5)
+            elif payload_a == payload_b:
+                classification = "identical"
+                identical_count += 1
+                confidence = 95.0
+            else:
+                # Payloads differ but only on counter/variable bytes -> treat as identical
+                classification = "identical"
+                identical_count += 1
+                confidence = 70.0
         
-        # Find changed bytes with detail
+        # Find changed bytes with detail - only flag STABLE bytes that differ
         bytes_changed = []
         byte_change_detail = []
         if payload_a and payload_b:
@@ -4635,8 +4711,16 @@ async def compare_logs(mission_id: str, request: CompareLogsRequest):
             for i in range(0, max_len, 2):
                 byte_a = pa[i:i+2]
                 byte_b = pb[i:i+2]
-                if byte_a != byte_b:
-                    byte_idx = i // 2
+                byte_idx = i // 2
+                
+                # Check if this byte is stable in both logs (not a counter)
+                ba = bytes_analysis_a[byte_idx] if byte_idx < len(bytes_analysis_a) else None
+                bb = bytes_analysis_b[byte_idx] if byte_idx < len(bytes_analysis_b) else None
+                is_noise = False
+                if ba and bb:
+                    is_noise = ba.get("is_counter", False) or bb.get("is_counter", False)
+                
+                if byte_a != byte_b and not is_noise:
                     bytes_changed.append(byte_idx)
                     try:
                         val_a = int(byte_a, 16)
@@ -4659,53 +4743,70 @@ async def compare_logs(mission_id: str, request: CompareLogsRequest):
         
         # ============================================================
         # STABILITY SCORE (0-100)
-        # Higher = more stable = better candidate for reverse engineering
+        # Higher = better candidate for reverse engineering
         #
-        # A perfect candidate for reverse:
-        #   - Has very few unique payloads in each log (stable signal)
-        #   - The dominant payload in each log is >90% (consistent)
-        #   - Only 1-2 bytes change between A and B (targeted change)
-        #   - Both logs have enough samples (reliable)
+        # Uses per-byte analysis: a perfect candidate has
+        #   - Stable bytes that differ cleanly between A and B
+        #   - Few bytes changed (targeted signal)
+        #   - High sample count for confidence
         # ============================================================
         stability = 0.0
         
         if classification == "differential":
-            # 1. Payload consistency (40 pts max)
-            #    Higher dominant ratio = more stable signal
-            avg_dominant = (dominant_a + dominant_b) / 2
-            stability += min(40.0, avg_dominant * 0.4)
+            # 1. Byte-level stability (40 pts max)
+            #    Average stability of the CHANGED bytes
+            if bytes_changed:
+                changed_stabilities = []
+                for bi in bytes_changed:
+                    sa = bytes_analysis_a[bi]["stability"] if bi < len(bytes_analysis_a) else 0
+                    sb = bytes_analysis_b[bi]["stability"] if bi < len(bytes_analysis_b) else 0
+                    changed_stabilities.append((sa + sb) / 2)
+                avg_stability = sum(changed_stabilities) / len(changed_stabilities)
+                stability += min(40.0, avg_stability * 0.4)
             
-            # 2. Low variation (30 pts max)
-            #    Fewer unique payloads = cleaner signal
-            avg_unique = (unique_a + unique_b) / 2
-            if avg_unique <= 1:
-                stability += 30.0  # Perfect: one payload per log
-            elif avg_unique <= 2:
-                stability += 25.0
-            elif avg_unique <= 5:
-                stability += 15.0
-            elif avg_unique <= 10:
-                stability += 5.0
-            
-            # 3. Targeted change (20 pts max)
-            #    Fewer bytes changed = more precise signal
+            # 2. Targeted change (30 pts max)
+            #    Fewer stable bytes changed = more precise signal
             n_bytes_changed = len(bytes_changed)
             if n_bytes_changed == 1:
-                stability += 20.0  # Perfect: single byte toggle
+                stability += 30.0  # Perfect: single byte toggle
             elif n_bytes_changed == 2:
-                stability += 15.0
+                stability += 22.0
             elif n_bytes_changed <= 4:
-                stability += 8.0
+                stability += 12.0
+            elif n_bytes_changed <= 6:
+                stability += 5.0
             
-            # 4. Sample count (10 pts max)
-            #    More frames = more reliable
+            # 3. Sample count (20 pts max)
             min_count = min(len(payloads_a), len(payloads_b))
             if min_count >= 50:
-                stability += 10.0
+                stability += 20.0
             elif min_count >= 20:
-                stability += 7.0
+                stability += 14.0
+            elif min_count >= 10:
+                stability += 8.0
             elif min_count >= 5:
                 stability += 4.0
+            
+            # 4. Clean separation bonus (10 pts max)
+            #    If changed bytes have no overlap in values between A and B
+            if bytes_changed and len(payloads_a) >= 3 and len(payloads_b) >= 3:
+                clean_separation = True
+                for bi in bytes_changed:
+                    vals_a = set()
+                    vals_b = set()
+                    for p in payloads_a:
+                        start = bi * 2
+                        if start + 2 <= len(p):
+                            vals_a.add(p[start:start+2])
+                    for p in payloads_b:
+                        start = bi * 2
+                        if start + 2 <= len(p):
+                            vals_b.add(p[start:start+2])
+                    if vals_a & vals_b:  # Overlap
+                        clean_separation = False
+                        break
+                if clean_separation:
+                    stability += 10.0
             
             stability = min(100.0, round(stability, 1))
         

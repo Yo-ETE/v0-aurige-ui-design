@@ -46,6 +46,9 @@ interface SnifferState {
   /** Sorted IDs cache for rendering */
   sortedIds: string[]
   
+  // Filter
+  idFilter: string
+  
   // Terminal state
   isPaused: boolean
   isMinimized: boolean
@@ -57,6 +60,7 @@ interface SnifferState {
   
   // Actions
   setInterface: (iface: "can0" | "can1" | "vcan0") => void
+  setIdFilter: (filter: string) => void
   start: () => Promise<void>
   stop: () => void
   togglePause: () => void
@@ -72,6 +76,7 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
   error: null,
   frameMap: new Map(),
   sortedIds: [],
+  idFilter: "",
   isPaused: false,
   isMinimized: false,
   isExpanded: false,
@@ -85,6 +90,8 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
     }
     set({ selectedInterface: iface })
   },
+  
+  setIdFilter: (filter) => set({ idFilter: filter }),
   
   start: async () => {
     const { selectedInterface, ws: existingWs, isRunning, isConnecting } = get()

@@ -1,7 +1,9 @@
 "use client"
 
 import { cn } from "@/lib/utils"
+import { useState, useRef, useCallback, useMemo } from "react"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import {
   Play,
   Square,
@@ -13,6 +15,8 @@ import {
   Terminal,
   AlertCircle,
   Pause,
+  Filter,
+  GripHorizontal,
 } from "lucide-react"
 import { useSnifferStore, type SnifferFrame } from "@/lib/sniffer-store"
 
@@ -80,7 +84,9 @@ export function FloatingTerminal() {
     isPaused,
     isMinimized,
     isExpanded,
+    idFilter,
     setInterface,
+    setIdFilter,
     start,
     stop,
     togglePause,
@@ -88,6 +94,64 @@ export function FloatingTerminal() {
     toggleExpand,
     clearFrames,
   } = useSnifferStore()
+
+  // Drag state
+  const [position, setPosition] = useState<{ x: number; y: number } | null>(null)
+  const [size, setSize] = useState<{ w: number; h: number }>({ w: 600, h: 384 })
+  const dragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null)
+  const resizeRef = useRef<{ startX: number; startY: number; origW: number; origH: number } | null>(null)
+
+  const handleDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    const rect = (e.currentTarget.closest("[data-sniffer-window]") as HTMLElement)?.getBoundingClientRect()
+    if (!rect) return
+    const pos = position || { x: rect.left, y: rect.top }
+    dragRef.current = { startX: e.clientX, startY: e.clientY, origX: pos.x, origY: pos.y }
+
+    const handleMove = (ev: MouseEvent) => {
+      if (!dragRef.current) return
+      const dx = ev.clientX - dragRef.current.startX
+      const dy = ev.clientY - dragRef.current.startY
+      setPosition({ x: dragRef.current.origX + dx, y: dragRef.current.origY + dy })
+    }
+    const handleUp = () => {
+      dragRef.current = null
+      window.removeEventListener("mousemove", handleMove)
+      window.removeEventListener("mouseup", handleUp)
+    }
+    window.addEventListener("mousemove", handleMove)
+    window.addEventListener("mouseup", handleUp)
+  }, [position])
+
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    resizeRef.current = { startX: e.clientX, startY: e.clientY, origW: size.w, origH: size.h }
+
+    const handleMove = (ev: MouseEvent) => {
+      if (!resizeRef.current) return
+      const dw = ev.clientX - resizeRef.current.startX
+      const dh = ev.clientY - resizeRef.current.startY
+      setSize({
+        w: Math.max(400, resizeRef.current.origW + dw),
+        h: Math.max(250, resizeRef.current.origH + dh),
+      })
+    }
+    const handleUp = () => {
+      resizeRef.current = null
+      window.removeEventListener("mousemove", handleMove)
+      window.removeEventListener("mouseup", handleUp)
+    }
+    window.addEventListener("mousemove", handleMove)
+    window.addEventListener("mouseup", handleUp)
+  }, [size])
+
+  // Filtered IDs
+  const filteredIds = useMemo(() => {
+    if (!idFilter.trim()) return sortedIds
+    const filters = idFilter.toUpperCase().split(",").map(f => f.trim()).filter(Boolean)
+    return sortedIds.filter(id => filters.some(f => id.includes(f)))
+  }, [sortedIds, idFilter])
 
   if (isMinimized) {
     return (
