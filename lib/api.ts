@@ -824,6 +824,16 @@ export interface UpdateOutput {
   error?: string
 }
 
+export interface GitBranches {
+  branches: string[]
+  current: string
+  error?: string
+}
+
+export async function getGitBranches(): Promise<GitBranches> {
+  return fetchApi("/system/branches")
+}
+
 export async function getVersionInfo(): Promise<VersionInfo> {
   return fetchApi("/system/version")
 }
@@ -844,8 +854,11 @@ export async function restoreBackup(filename: string): Promise<{ status: string;
   return fetchApi(`/system/backups/${filename}/restore`, { method: "POST" })
 }
 
-export async function startUpdate(): Promise<{ status: string; message: string }> {
-  return fetchApi("/system/update", { method: "POST" })
+export async function startUpdate(branch?: string): Promise<{ status: string; message: string }> {
+  return fetchApi("/system/update", { 
+    method: "POST",
+    ...(branch ? { body: JSON.stringify({ branch }) } : {}),
+  })
 }
 
 export async function getUpdateOutput(): Promise<UpdateOutput> {

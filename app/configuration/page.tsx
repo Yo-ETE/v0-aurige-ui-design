@@ -27,6 +27,7 @@ import {
   Terminal,
   ArrowUpCircle,
   GitBranch,
+  ChevronDown,
   HardDrive,
   Trash2,
   Archive,
@@ -66,6 +67,7 @@ import {
   restoreBackup,
   startUpdate,
   getUpdateOutput,
+  getGitBranches,
   restartServices,
   getTailscaleStatus,
   tailscaleUp,
@@ -81,6 +83,7 @@ import {
   type VersionInfo,
   type BackupInfo,
   type UpdateOutput,
+  type GitBranches,
 } from "@/lib/api"
 
 export default function ConfigurationPage() {
@@ -107,6 +110,11 @@ export default function ConfigurationPage() {
   const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null)
   const [updateOutput, setUpdateOutput] = useState<UpdateOutput>({ running: false, lines: [] })
   const [isCheckingVersion, setIsCheckingVersion] = useState(false)
+  
+  // Git branches state
+  const [gitBranches, setGitBranches] = useState<GitBranches | null>(null)
+  const [selectedBranch, setSelectedBranch] = useState<string>("")
+  const [isFetchingBranches, setIsFetchingBranches] = useState(false)
 
   // Backup state
   const [backups, setBackups] = useState<BackupInfo[]>([])
@@ -250,6 +258,23 @@ export default function ConfigurationPage() {
     }
   }
 
+  // Fetch git branches
+  const fetchBranches = useCallback(async () => {
+    setIsFetchingBranches(true)
+    try {
+      const data = await getGitBranches()
+      setGitBranches(data)
+      // Set selected branch to current if not already set
+      if (!selectedBranch && data.current) {
+        setSelectedBranch(data.current)
+      }
+    } catch {
+      setGitBranches(null)
+    } finally {
+      setIsFetchingBranches(false)
+    }
+  }, [selectedBranch])
+  
   // Fetch version info
   const fetchVersionInfo = useCallback(async () => {
     setIsCheckingVersion(true)
@@ -275,10 +300,14 @@ export default function ConfigurationPage() {
 
   // Handle update
   const handleStartUpdate = async () => {
-    if (!confirm("Voulez-vous mettre a jour Aurige ? Les services seront redemarres.")) return
+    const branchToUse = selectedBranch || gitBranches?.current || ""
+    const msg = branchToUse 
+      ? `Mettre a jour Aurige depuis la branche "${branchToUse}" ? Les services seront redemarres.`
+      : "Voulez-vous mettre a jour Aurige ? Les services seront redemarres."
+    if (!confirm(msg)) return
     setBackupMessage(null)
     try {
-      await startUpdate()
+      await startUpdate(branchToUse || undefined)
     } catch {
       setBackupMessage("Erreur lors du lancement de la mise a jour")
     }
@@ -490,9 +519,10 @@ export default function ConfigurationPage() {
     fetchConnectionStatus()
     handleScan()
     fetchVersionInfo()
+    fetchBranches()
     fetchBackups()
     fetchTailscale()
-  }, [fetchConnectionStatus, fetchVersionInfo, fetchBackups, fetchTailscale])
+  }, [fetchConnectionStatus, fetchVersionInfo, fetchBranches, fetchBackups, fetchTailscale])
 
   // Signal strength helper
   const getSignalIcon = (signal: number) => {
@@ -1171,7 +1201,7 @@ export default function ConfigurationPage() {
               <div className="space-y-3">
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   <div>
-                    <p className="text-xs text-muted-foreground">Branche</p>
+                    <p className="text-xs text-muted-foreground">Branche actuelle</p>
                     <p className="font-mono">{versionInfo.branch}</p>
                   </div>
                   <div>
@@ -1185,6 +1215,53 @@ export default function ConfigurationPage() {
                     </div>
                   )}
                 </div>
+                
+                {/* Branch selector */}
+                <div className="space-y-2 rounded-lg border border-border/50 bg-secondary/20 p-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <GitBranch className="h-3.5 w-3.5 text-primary" />
+                      <p className="text-xs font-medium">Branche cible</p>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={fetchBranches}
+                      disabled={isFetchingBranches}
+                      className="h-6 px-2 text-xs"
+                    >
+                      <RefreshCw className={`h-3 w-3 mr-1 ${isFetchingBranches ? "animate-spin" : ""}`} />
+                      Actualiser
+                    </Button>
+                  </div>
+                  <div className="relative">
+                    <select
+                      value={selectedBranch}
+                      onChange={(e) => setSelectedBranch(e.target.value)}
+                      disabled={updateOutput.running || isFetchingBranches}
+                      className="w-full appearance-none rounded-md border border-border bg-background px-3 py-2 pr-8 text-sm font-mono text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-50"
+                    >
+                      {!gitBranches && (
+                        <option value="">Chargement des branches...</option>
+                      )}
+                      {gitBranches?.branches.map((branch) => (
+                        <option key={branch} value={branch}>
+                          {branch}
+                          {branch === versionInfo.branch ? " (actuelle)" : ""}
+                          {branch === gitBranches.current && branch !== versionInfo.branch ? " (sauvegardee)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown className="absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                  </div>
+                  {selectedBranch && selectedBranch !== versionInfo.branch && (
+                    <p className="text-[11px] text-warning flex items-center gap-1">
+                      <AlertTriangle className="h-3 w-3" />
+                      Changement de branche : {versionInfo.branch} → {selectedBranch}
+                    </p>
+                  )}
+                </div>
+                
                 {versionInfo.updateAvailable && (
                   <Alert className="border-success/50 bg-success/10">
                     <ArrowUpCircle className="h-4 w-4 text-success" />

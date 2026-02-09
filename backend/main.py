@@ -3860,6 +3860,67 @@ update_output_store: dict = {"lines": [], "running": False, "command": ""}
 GIT_REPO_PATH = "/opt/aurige/repo"
 
 
+@app.get("/api/system/branches")
+async def get_git_branches():
+    """List remote branches from GitHub repo"""
+    GITHUB_REPO = "https://github.com/Yo-ETE/v0-aurige-ui-design.git"
+    INSTALLED_REPO = "/opt/aurige/repo"
+    repo_to_check = INSTALLED_REPO if Path(f"{INSTALLED_REPO}/.git").exists() else GIT_REPO_PATH
+    
+    try:
+        # Try to get branches from an existing local repo first (faster)
+        if Path(f"{repo_to_check}/.git").exists():
+            run_command(["git", "config", "--global", "--add", "safe.directory", repo_to_check], check=False)
+            run_command(["git", "-C", repo_to_check, "fetch", "--prune", "origin"], check=False)
+            result = run_command(["git", "-C", repo_to_check, "branch", "-r", "--format=%(refname:short)"], check=False)
+            if result.returncode == 0 and result.stdout.strip():
+                branches = []
+                for line in result.stdout.strip().split("\n"):
+                    branch = line.strip()
+                    if branch and not branch.endswith("/HEAD"):
+                        # Remove "origin/" prefix
+                        branch_name = branch.replace("origin/", "", 1) if branch.startswith("origin/") else branch
+                        if branch_name:
+                            branches.append(branch_name)
+                
+                # Get currently saved branch preference
+                saved_branch = ""
+                saved_branch_file = Path("/opt/aurige/branch.txt")
+                if saved_branch_file.exists():
+                    saved_branch = saved_branch_file.read_text().strip()
+                
+                return {
+                    "branches": sorted(set(branches)),
+                    "current": saved_branch or "v0/yo-ete-5c91d9cb",
+                }
+        
+        # Fallback: use git ls-remote (works without local clone)
+        result = run_command(["git", "ls-remote", "--heads", GITHUB_REPO], check=False)
+        if result.returncode == 0 and result.stdout.strip():
+            branches = []
+            for line in result.stdout.strip().split("\n"):
+                parts = line.strip().split("\t")
+                if len(parts) == 2:
+                    ref = parts[1]
+                    branch_name = ref.replace("refs/heads/", "")
+                    if branch_name:
+                        branches.append(branch_name)
+            
+            saved_branch = ""
+            saved_branch_file = Path("/opt/aurige/branch.txt")
+            if saved_branch_file.exists():
+                saved_branch = saved_branch_file.read_text().strip()
+            
+            return {
+                "branches": sorted(branches),
+                "current": saved_branch or "v0/yo-ete-5c91d9cb",
+            }
+        
+        return {"branches": [], "current": "", "error": "Impossible de lister les branches"}
+    except Exception as e:
+        return {"branches": [], "current": "", "error": str(e)}
+
+
 @app.get("/api/system/version")
 async def get_system_version():
     """Get current git version info - checks installed version in /opt/aurige/repo"""
@@ -4087,8 +4148,8 @@ async def restore_backup(filename: str):
 
 
 @app.post("/api/system/update")
-async def start_update():
-    """Start update by fresh clone and install script"""
+async def start_update(request: Request):
+    """Start update by fresh clone and install script. Optionally accepts JSON body with {branch: "..."} """
     global update_output_store
     if update_output_store["running"]:
         return {"status": "error", "message": "Une mise à jour est déjà en cours"}
@@ -4099,12 +4160,28 @@ async def start_update():
     GITHUB_REPO = "https://github.com/Yo-ETE/v0-aurige-ui-design.git"
     TARGET_BRANCH = "v0/yo-ete-5c91d9cb"
     
-    # Check for saved branch preference
-    saved_branch_file = Path("/opt/aurige/branch.txt")
-    if saved_branch_file.exists():
-        saved = saved_branch_file.read_text().strip()
-        if saved:
-            TARGET_BRANCH = saved
+    # Check if a specific branch was requested in the body
+    try:
+        body = await request.json()
+        if body.get("branch"):
+            TARGET_BRANCH = body["branch"]
+            # Save the branch preference immediately
+            save_branch_file = Path("/opt/aurige/branch.txt")
+            try:
+                save_branch_file.parent.mkdir(parents=True, exist_ok=True)
+                save_branch_file.write_text(TARGET_BRANCH)
+            except:
+                pass
+    except:
+        pass
+    
+    # If no branch in body, check for saved branch preference
+    if TARGET_BRANCH == "v0/yo-ete-5c91d9cb":
+        saved_branch_file = Path("/opt/aurige/branch.txt")
+        if saved_branch_file.exists():
+            saved = saved_branch_file.read_text().strip()
+            if saved:
+                TARGET_BRANCH = saved
     
     async def run_update():
         global update_output_store
