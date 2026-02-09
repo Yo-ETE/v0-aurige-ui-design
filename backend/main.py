@@ -2719,11 +2719,42 @@ async def full_obd_scan(request: OBDRequest):
     
     results["logFile"] = str(log_path)
     
+    # Also save as JSON report for later retrieval
+    report_path = Path("/tmp/aurige_last_obd_report.json")
+    import json as json_mod
+    report_data = {
+        "timestamp": time.time(),
+        "interface": request.interface,
+        "vin": results["vin"],
+        "vin_raw": results.get("vin_raw", []),
+        "pids": results["pids"],
+        "dtcs": results["dtcs"],
+        "dtcs_raw": results.get("dtcs_raw", []),
+        "logFile": str(log_path),
+    }
+    with open(report_path, "w") as rf:
+        json_mod.dump(report_data, rf, indent=2)
+    
     return {
         "status": "completed",
         "message": "Full OBD scan completed",
         "results": results,
     }
+
+
+@app.get("/api/obd/last-report")
+async def get_last_obd_report():
+    """Get the last OBD-II scan report if available"""
+    import json as json_mod
+    report_path = Path("/tmp/aurige_last_obd_report.json")
+    if not report_path.exists():
+        return {"status": "not_found", "message": "Aucun rapport OBD disponible"}
+    try:
+        with open(report_path, "r") as f:
+            report = json_mod.load(f)
+        return {"status": "success", "report": report}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 
 @app.post("/api/obd/pid")
@@ -4658,8 +4689,11 @@ async def compare_logs(mission_id: str, request: CompareLogsRequest):
         
         # ============================================================
         # SMART CLASSIFICATION
-        # Compare per-byte: only flag bytes that are STABLE in both
-        # logs but DIFFERENT between them. Ignore counter/variable bytes.
+        # Compare per-byte using two approaches:
+        # 1. Stable bytes: flag if stable in both but different
+        # 2. Variable bytes: compare MEDIAN values - if distributions
+        #    are significantly separated, flag as differential
+        # This catches sensor values that shift range between states.
         # ============================================================
         if not payloads_a:
             classification = "only_b"
@@ -4670,10 +4704,11 @@ async def compare_logs(mission_id: str, request: CompareLogsRequest):
             only_a_count += 1
             confidence = 80.0
         else:
-            # Per-byte comparison: only consider stable bytes
             max_bytes = max(len(bytes_analysis_a), len(bytes_analysis_b))
             stable_diff_count = 0
+            variable_diff_count = 0
             any_stable_diff = False
+            any_variable_diff = False
             
             for i in range(max_bytes):
                 ba = bytes_analysis_a[i] if i < len(bytes_analysis_a) else None
@@ -4686,22 +4721,74 @@ async def compare_logs(mission_id: str, request: CompareLogsRequest):
                     if both_stable and values_differ:
                         stable_diff_count += 1
                         any_stable_diff = True
+                    elif not both_stable and (ba.get("is_counter") or bb.get("is_counter")):
+                        # Variable byte: compare median values between logs
+                        # If the medians are far apart, this is a real state change
+                        vals_a_int = []
+                        vals_b_int = []
+                        for p in payloads_a:
+                            start = i * 2
+                            if start + 2 <= len(p):
+                                try:
+                                    vals_a_int.append(int(p[start:start+2], 16))
+                                except ValueError:
+                                    pass
+                        for p in payloads_b:
+                            start = i * 2
+                            if start + 2 <= len(p):
+                                try:
+                                    vals_b_int.append(int(p[start:start+2], 16))
+                                except ValueError:
+                                    pass
+                        
+                        if vals_a_int and vals_b_int:
+                            sorted_a = sorted(vals_a_int)
+                            sorted_b = sorted(vals_b_int)
+                            median_a = sorted_a[len(sorted_a) // 2]
+                            median_b = sorted_b[len(sorted_b) // 2]
+                            
+                            # Check range overlap: if less than 30% overlap, it's a real shift
+                            min_a, max_a = min(vals_a_int), max(vals_a_int)
+                            min_b, max_b = min(vals_b_int), max(vals_b_int)
+                            overlap_start = max(min_a, min_b)
+                            overlap_end = min(max_a, max_b)
+                            
+                            range_a = max_a - min_a + 1
+                            range_b = max_b - min_b + 1
+                            overlap = max(0, overlap_end - overlap_start + 1)
+                            
+                            max_range = max(range_a, range_b, 1)
+                            overlap_ratio = overlap / max_range
+                            
+                            median_diff = abs(median_a - median_b)
+                            
+                            # Flag as variable-differential if:
+                            # - Medians differ by >15 (significant shift)
+                            # - OR ranges barely overlap (<30%)
+                            if median_diff > 15 or (overlap_ratio < 0.3 and median_diff > 5):
+                                variable_diff_count += 1
+                                any_variable_diff = True
             
-            if any_stable_diff:
+            if any_stable_diff or any_variable_diff:
                 classification = "differential"
                 differential_count += 1
-                confidence = min(95.0, 60.0 + stable_diff_count * 10 + min(len(payloads_a), len(payloads_b)) * 0.5)
+                total_diffs = stable_diff_count + variable_diff_count
+                confidence = min(95.0, 60.0 + total_diffs * 8 + min(len(payloads_a), len(payloads_b)) * 0.5)
+                if any_variable_diff and not any_stable_diff:
+                    # Lower confidence for variable-only diffs
+                    confidence = min(85.0, confidence)
             elif payload_a == payload_b:
                 classification = "identical"
                 identical_count += 1
                 confidence = 95.0
             else:
-                # Payloads differ but only on counter/variable bytes -> treat as identical
+                # Payloads differ but only on counter/variable bytes with overlapping ranges
                 classification = "identical"
                 identical_count += 1
                 confidence = 70.0
         
-        # Find changed bytes with detail - only flag STABLE bytes that differ
+        # Find changed bytes with detail
+        # Flag stable bytes that differ AND variable bytes with distribution shift
         bytes_changed = []
         byte_change_detail = []
         if payload_a and payload_b:
@@ -4713,14 +4800,47 @@ async def compare_logs(mission_id: str, request: CompareLogsRequest):
                 byte_b = pb[i:i+2]
                 byte_idx = i // 2
                 
-                # Check if this byte is stable in both logs (not a counter)
+                # Check if this byte is a counter/variable
                 ba = bytes_analysis_a[byte_idx] if byte_idx < len(bytes_analysis_a) else None
                 bb = bytes_analysis_b[byte_idx] if byte_idx < len(bytes_analysis_b) else None
-                is_noise = False
+                is_counter = False
                 if ba and bb:
-                    is_noise = ba.get("is_counter", False) or bb.get("is_counter", False)
+                    is_counter = ba.get("is_counter", False) or bb.get("is_counter", False)
                 
-                if byte_a != byte_b and not is_noise:
+                # For counter bytes, check if distributions are significantly different
+                is_significant_variable_diff = False
+                if is_counter and ba and bb:
+                    vals_a_int = []
+                    vals_b_int = []
+                    for p in payloads_a:
+                        start = byte_idx * 2
+                        if start + 2 <= len(p):
+                            try:
+                                vals_a_int.append(int(p[start:start+2], 16))
+                            except ValueError:
+                                pass
+                    for p in payloads_b:
+                        start = byte_idx * 2
+                        if start + 2 <= len(p):
+                            try:
+                                vals_b_int.append(int(p[start:start+2], 16))
+                            except ValueError:
+                                pass
+                    if vals_a_int and vals_b_int:
+                        median_a = sorted(vals_a_int)[len(vals_a_int) // 2]
+                        median_b = sorted(vals_b_int)[len(vals_b_int) // 2]
+                        median_diff = abs(median_a - median_b)
+                        min_a, max_a = min(vals_a_int), max(vals_a_int)
+                        min_b, max_b = min(vals_b_int), max(vals_b_int)
+                        overlap_start = max(min_a, min_b)
+                        overlap_end = min(max_a, max_b)
+                        overlap = max(0, overlap_end - overlap_start + 1)
+                        max_range = max(max_a - min_a + 1, max_b - min_b + 1, 1)
+                        overlap_ratio = overlap / max_range
+                        if median_diff > 15 or (overlap_ratio < 0.3 and median_diff > 5):
+                            is_significant_variable_diff = True
+                
+                if byte_a != byte_b and (not is_counter or is_significant_variable_diff):
                     bytes_changed.append(byte_idx)
                     try:
                         val_a = int(byte_a, 16)

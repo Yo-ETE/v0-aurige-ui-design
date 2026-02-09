@@ -42,7 +42,7 @@ import { Label } from "@/components/ui/label"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useIsolationStore, type IsolationLog } from "@/lib/isolation-store"
 import { useExportStore } from "@/lib/export-store"
-import { listMissionLogs, startReplay, stopReplay, getReplayStatus, splitLog, renameLog, deleteLog, getLogContent, getLogDownloadUrl, getLogFamilyDownloadUrl, analyzeCoOccurrence, analyzeFamilyDiff, addDBCSignal, getMissionDBC, getDBCExportUrl, type LogEntry, type CANInterface, type LogFrame, type CoOccurrenceResponse, type CoOccurrenceFrame, type EcuFamily, type FamilyAnalysisResponse, type FrameDiff, type DBCSignal } from "@/lib/api"
+import { listMissionLogs, startReplay, stopReplay, getReplayStatus, splitLog, renameLog, deleteLog, getLogContent, getLogDownloadUrl, getLogFamilyDownloadUrl, analyzeCoOccurrence, analyzeFamilyDiff, addDBCSignal, getMissionDBC, getDBCExportUrl, sendCANFrame, type LogEntry, type CANInterface, type LogFrame, type CoOccurrenceResponse, type CoOccurrenceFrame, type EcuFamily, type FamilyAnalysisResponse, type FrameDiff, type DBCSignal } from "@/lib/api"
 import { useRouter as useNavRouter } from "next/navigation"
 import { useMissionStore } from "@/lib/mission-store"
 import { LogImportButton } from "@/components/log-import-button"
@@ -1476,24 +1476,41 @@ export default function Isolation() {
                             <td className="p-2 text-primary font-semibold">{frame.canId || "-"}</td>
                             <td className="p-2">{frame.data || frame.raw}</td>
                             <td className="p-2">
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                className="h-6 w-6"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  addFrames([{
-                                    canId: frame.canId,
-                                    data: frame.data || frame.raw || "",
-                                    timestamp: String(frame.timestamp || 0),
-                                    source: originLogId || viewingLog?.name || "unknown",
-                                  }])
-                                  navRouter.push("/replay-rapide")
-                                }}
-                                title="Envoyer vers Replay"
-                              >
-                                <Send className="h-3 w-3" />
-                              </Button>
+                              <div className="flex gap-1">
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-6 w-6 text-success hover:text-success"
+                                  onClick={async (e) => {
+                                    e.stopPropagation()
+                                    try {
+                                      await sendCANFrame({ interface: "can0", canId: frame.canId, data: frame.data || frame.raw || "" })
+                                    } catch {
+                                      // silent
+                                    }
+                                  }}
+                                  title="Rejouer cette trame (envoi direct sur CAN)"
+                                >
+                                  <Play className="h-3 w-3" />
+                                </Button>
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-6 w-6"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    addFrames([{
+                                      canId: frame.canId,
+                                      data: frame.data || frame.raw || "",
+                                      timestamp: String(frame.timestamp || 0),
+                                      source: originLogId || viewingLog?.name || "unknown",
+                                    }])
+                                  }}
+                                  title="Ajouter au Replay Rapide"
+                                >
+                                  <Send className="h-3 w-3" />
+                                </Button>
+                              </div>
                             </td>
                           </tr>
                         )

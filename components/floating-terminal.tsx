@@ -173,16 +173,26 @@ export function FloatingTerminal() {
 
   return (
     <div
+      data-sniffer-window
       className={cn(
-        "fixed z-50 flex flex-col rounded-lg border border-border bg-terminal shadow-2xl transition-all",
-        isExpanded
-          ? "bottom-4 right-4 left-72 top-20"
-          : "bottom-4 right-4 h-96 w-[600px]"
+        "fixed z-50 flex flex-col rounded-lg border border-border bg-terminal shadow-2xl",
+        isExpanded && "transition-all"
       )}
+      style={
+        isExpanded
+          ? { bottom: 16, right: 16, left: 288, top: 80 }
+          : position
+            ? { left: position.x, top: position.y, width: size.w, height: size.h }
+            : { bottom: 16, right: 16, width: size.w, height: size.h }
+      }
     >
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-border bg-card/50 px-4 py-2">
+      {/* Header - draggable */}
+      <div
+        className="flex items-center justify-between border-b border-border bg-card/50 px-4 py-2 cursor-grab active:cursor-grabbing select-none"
+        onMouseDown={handleDragStart}
+      >
         <div className="flex items-center gap-3">
+          <GripHorizontal className="h-4 w-4 text-muted-foreground/50" />
           <Terminal className="h-4 w-4 text-terminal-foreground" />
           <span className="text-sm font-medium text-foreground">
             CAN Sniffer
@@ -235,6 +245,25 @@ export function FloatingTerminal() {
         </div>
       )}
 
+      {/* ID Filter bar */}
+      {sortedIds.length > 0 && (
+        <div className="flex items-center gap-2 border-b border-border/50 bg-card/30 px-3 py-1.5">
+          <Filter className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+          <input
+            type="text"
+            value={idFilter}
+            onChange={(e) => setIdFilter(e.target.value)}
+            placeholder="Filtrer par ID (ex: 303, 7DF, 12E,090)"
+            className="flex-1 bg-transparent text-xs font-mono text-foreground placeholder:text-muted-foreground/40 focus:outline-none"
+          />
+          {idFilter && (
+            <span className="text-[10px] text-muted-foreground">
+              {filteredIds.length}/{sortedIds.length}
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Column headers */}
       {sortedIds.length > 0 && (
         <div className="flex items-center gap-3 border-b border-border/50 bg-card/30 px-2 py-1 font-mono text-[10px] text-muted-foreground/60 uppercase">
@@ -258,7 +287,7 @@ export function FloatingTerminal() {
           </div>
         ) : (
           <div>
-            {sortedIds.map((id) => {
+            {filteredIds.map((id) => {
               const frame = frameMap.get(id)
               if (!frame) return null
               return <SnifferRow key={id} frame={frame} />
@@ -314,7 +343,7 @@ export function FloatingTerminal() {
           Clear
         </Button>
         <div className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
-          <span>{sortedIds.length} IDs</span>
+          <span>{filteredIds.length !== sortedIds.length ? `${filteredIds.length}/` : ""}{sortedIds.length} IDs</span>
           <span>{totalMessages} msg</span>
           {isRunning && !isPaused && (
             <span className="flex items-center gap-1">
@@ -323,6 +352,20 @@ export function FloatingTerminal() {
           )}
         </div>
       </div>
+
+      {/* Resize handle (bottom-right corner) */}
+      {!isExpanded && (
+        <div
+          className="absolute bottom-0 right-0 h-4 w-4 cursor-se-resize"
+          onMouseDown={handleResizeStart}
+        >
+          <svg className="h-4 w-4 text-muted-foreground/30" viewBox="0 0 16 16" fill="currentColor">
+            <circle cx="12" cy="12" r="1.5" />
+            <circle cx="8" cy="12" r="1.5" />
+            <circle cx="12" cy="8" r="1.5" />
+          </svg>
+        </div>
+      )}
     </div>
   )
 }

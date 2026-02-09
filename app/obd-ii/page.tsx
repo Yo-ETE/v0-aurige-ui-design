@@ -14,8 +14,8 @@ import {
   Download, Save, FileJson, FileSpreadsheet, Copy, CheckCircle2
 } from "lucide-react"
 import {
-  requestVIN, readDTCs, clearDTCs, resetECU, fullOBDScan,
-  type OBDResponse, type FullScanResponse
+  requestVIN, readDTCs, clearDTCs, resetECU, fullOBDScan, getLastOBDReport,
+  type OBDResponse, type FullScanResponse, type OBDReport
 } from "@/lib/api"
 import { SentFramesHistory, useSentFramesHistory } from "@/components/sent-frames-history"
 import { useMissionStore } from "@/lib/mission-store"
@@ -773,24 +773,71 @@ export default function OBDII() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <Button
-              onClick={handleFullScan}
-              disabled={isLoading !== null}
-              className="w-full"
-              size="lg"
-            >
-              {isLoading === "fullscan" ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Scan en cours... (environ 30 secondes)
-                </>
-              ) : (
-                <>
-                  <Search className="h-4 w-4 mr-2" />
-                  Lancer le scan complet
-                </>
-              )}
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                onClick={handleFullScan}
+                disabled={isLoading !== null}
+                className="flex-1"
+                size="lg"
+              >
+                {isLoading === "fullscan" ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Scan en cours... (environ 30 secondes)
+                  </>
+                ) : (
+                  <>
+                    <Search className="h-4 w-4 mr-2" />
+                    Lancer le scan complet
+                  </>
+                )}
+              </Button>
+              <Button
+                variant="outline"
+                size="lg"
+                className="bg-transparent gap-2"
+                disabled={isLoading !== null}
+                onClick={async () => {
+                  setIsLoading("loadreport")
+                  try {
+                    const res = await getLastOBDReport()
+                    if (res.status === "success" && res.report) {
+                      const report = res.report
+                      const synthResult: FullScanResponse = {
+                        status: "completed",
+                        message: `Rapport du ${new Date(report.timestamp * 1000).toLocaleString("fr-FR")}`,
+                        results: {
+                          vin: report.vin || [],
+                          pids: report.pids || [],
+                          dtcs: report.dtcs || [],
+                          logFile: report.logFile || "",
+                        },
+                      }
+                      setScanResult(synthResult)
+                      if (report.vin?.length && report.vin[0]) {
+                        setVin(report.vin[0])
+                      }
+                      if (report.dtcs?.length) {
+                        setDtcCodes(report.dtcs)
+                      }
+                    } else {
+                      setError("Aucun rapport OBD disponible")
+                    }
+                  } catch {
+                    setError("Erreur lors du chargement du rapport")
+                  } finally {
+                    setIsLoading(null)
+                  }
+                }}
+              >
+                {isLoading === "loadreport" ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <FileJson className="h-4 w-4" />
+                )}
+                Dernier rapport
+              </Button>
+            </div>
 
             {scanResult && (
               <div className="space-y-4">

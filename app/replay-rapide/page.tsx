@@ -402,9 +402,11 @@ export default function ReplayRapide() {
           </CardContent>
         </Card>
 
-        {/* Exported Frames from Isolation */}
-        {exportedFrames.length > 0 && (
-          <Card className="border-border bg-card lg:col-span-2">
+        {/* Sent Frames History - right of Manual Send */}
+        <SentFramesHistory frames={frames} onClear={clearHistory} onToggleSuccess={toggleSuccess} />
+
+        {/* Exported Frames from Isolation - always visible */}
+        <Card className="border-border bg-card lg:col-span-2">
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
@@ -418,95 +420,103 @@ export default function ReplayRapide() {
                     </CardDescription>
                   </div>
                 </div>
-                <div className="flex gap-2">
-                  <Button
-                    onClick={handleReplayExported}
-                    disabled={isReplayingExported}
-                    className="gap-2"
-                    size="sm"
-                  >
-                    {isReplayingExported ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Play className="h-4 w-4" />
-                    )}
-                    <span className="hidden sm:inline">{isReplayingExported ? "Replay..." : "Rejouer tout"}</span>
-                  </Button>
-                  <Button variant="outline" size="icon" onClick={clearExported} className="bg-transparent h-8 w-8">
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
+                {exportedFrames.length > 0 && (
+                  <div className="flex gap-2">
+                    <Button
+                      onClick={handleReplayExported}
+                      disabled={isReplayingExported}
+                      className="gap-2"
+                      size="sm"
+                    >
+                      {isReplayingExported ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Play className="h-4 w-4" />
+                      )}
+                      <span className="hidden sm:inline">{isReplayingExported ? "Replay..." : "Rejouer tout"}</span>
+                    </Button>
+                    <Button variant="outline" size="icon" onClick={clearExported} className="bg-transparent h-8 w-8">
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                )}
               </div>
             </CardHeader>
             <CardContent>
-              <ScrollArea className="h-48 rounded-md border border-border">
-                <div className="p-2 overflow-x-auto">
-                  <table className="w-full text-xs font-mono min-w-[500px]">
-                    <thead className="sticky top-0 bg-secondary">
-                      <tr className="text-left text-muted-foreground">
-                        <th className="p-2 w-20">CAN ID</th>
-                        <th className="p-2">Data</th>
-                        <th className="p-2 w-32">Source</th>
-                        <th className="p-2 w-20">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {exportedFrames.map((frame, index) => (
-                        <tr key={index} className="border-t border-border/50 hover:bg-secondary/50">
-                          <td className="p-2 text-primary font-semibold">{frame.canId}</td>
-                          <td className="p-2">{frame.data}</td>
-                          <td className="p-2 text-muted-foreground truncate max-w-[120px]">{frame.source}</td>
-                          <td className="p-2">
-                            <div className="flex gap-1">
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                className="h-6 w-6"
-                                onClick={() => handleSendExportedFrame(index)}
-                                title="Envoyer"
-                              >
-                                <Send className="h-3 w-3" />
-                              </Button>
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                className="h-6 w-6 text-amber-500"
-                                onClick={() => {
-                                  // Go to Isolation to analyze this frame with its source log
-                                  const params = new URLSearchParams({
-                                    canId: frame.canId,
-                                    data: frame.data,
-                                    source: frame.source || "",
-                                  })
-                                  router.push(`/isolation?analyze=${params.toString()}`)
-                                }}
-                                title="Analyser dans Isolation"
-                              >
-                                <FlaskConical className="h-3 w-3" />
-                              </Button>
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                className="h-6 w-6 text-destructive"
-                                onClick={() => removeExportedFrame(index)}
-                                title="Supprimer"
-                              >
-                                <Trash2 className="h-3 w-3" />
-                              </Button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+              {exportedFrames.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-8 text-center">
+                  <Import className="h-8 w-8 text-muted-foreground/30 mb-2" />
+                  <p className="text-sm text-muted-foreground">Aucune trame importee</p>
+                  <p className="text-xs text-muted-foreground/60 mt-1">
+                    {"Utilisez l'outil Isolation pour identifier et exporter des trames ici"}
+                  </p>
                 </div>
-              </ScrollArea>
+              ) : (
+                <ScrollArea className="h-48 rounded-md border border-border">
+                  <div className="p-2 overflow-x-auto">
+                    <table className="w-full text-xs font-mono min-w-[500px]">
+                      <thead className="sticky top-0 bg-secondary">
+                        <tr className="text-left text-muted-foreground">
+                          <th className="p-2 w-20">CAN ID</th>
+                          <th className="p-2">Data</th>
+                          <th className="p-2 w-32">Source</th>
+                          <th className="p-2 w-20">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {exportedFrames.map((frame, index) => (
+                          <tr key={index} className="border-t border-border/50 hover:bg-secondary/50">
+                            <td className="p-2 text-primary font-semibold">{frame.canId}</td>
+                            <td className="p-2">{frame.data}</td>
+                            <td className="p-2 text-muted-foreground truncate max-w-[120px]">{frame.source}</td>
+                            <td className="p-2">
+                              <div className="flex gap-1">
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-6 w-6"
+                                  onClick={() => handleSendExportedFrame(index)}
+                                  title="Envoyer"
+                                >
+                                  <Send className="h-3 w-3" />
+                                </Button>
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-6 w-6 text-amber-500"
+                                  onClick={() => {
+                                    const params = new URLSearchParams({
+                                      canId: frame.canId,
+                                      data: frame.data,
+                                      source: frame.source || "",
+                                    })
+                                    router.push(`/isolation?analyze=${params.toString()}`)
+                                  }}
+                                  title="Analyser dans Isolation"
+                                >
+                                  <FlaskConical className="h-3 w-3" />
+                                </Button>
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-6 w-6 text-destructive"
+                                  onClick={() => removeExportedFrame(index)}
+                                  title="Supprimer"
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </ScrollArea>
+              )}
             </CardContent>
           </Card>
-        )}
 
-        {/* Sent Frames History */}
-        <SentFramesHistory frames={frames} onClear={clearHistory} onToggleSuccess={toggleSuccess} />
       </div>
     </AppShell>
   )

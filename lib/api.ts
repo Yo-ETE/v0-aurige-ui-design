@@ -619,6 +619,19 @@ export async function fullOBDScan(iface: CANInterface = "can0"): Promise<FullSca
   })
 }
 
+export interface OBDReport {
+  timestamp: number
+  interface: string
+  vin: string[]
+  pids: string[]
+  dtcs: string[]
+  logFile: string
+}
+
+export async function getLastOBDReport(): Promise<{ status: string; report?: OBDReport; message?: string }> {
+  return fetchApi<{ status: string; report?: OBDReport; message?: string }>("/obd/last-report")
+}
+
 // =============================================================================
 // Network Configuration
 // =============================================================================
