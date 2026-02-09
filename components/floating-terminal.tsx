@@ -177,13 +177,10 @@ export function FloatingTerminal() {
 
   // Auto-load DBC when overlay is enabled and mission is available
   useEffect(() => {
-    console.log("[v0] DBC useEffect - dbcEnabled:", dbcEnabled, "currentMission:", currentMission?.id, "dbcLookup size:", dbcLookup.size)
     if (dbcEnabled && currentMission?.id) {
       loadDbc(currentMission.id)
-    } else if (dbcEnabled && !currentMission?.id) {
-      console.log("[v0] DBC overlay enabled but no mission selected!")
     }
-  }, [dbcEnabled, currentMission?.id, loadDbc, dbcLookup.size])
+  }, [dbcEnabled, currentMission?.id, loadDbc])
 
   // Drag state
   const [position, setPosition] = useState<{ x: number; y: number } | null>(null)
@@ -451,13 +448,6 @@ export function FloatingTerminal() {
           </div>
         ) : (
           <div>
-            {filteredIds.slice(0, 1).map((id) => {
-              // Debug first row only to avoid spam
-              if (dbcEnabled) {
-                console.log("[v0] Row lookup - id:", id, "upper:", id.toUpperCase(), "found:", dbcLookup.has(id.toUpperCase()), "lookup keys:", Array.from(dbcLookup.keys()).slice(0, 5))
-              }
-              return null
-            })}
             {filteredIds.map((id) => {
               const frame = frameMap.get(id)
               if (!frame) return null
