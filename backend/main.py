@@ -1299,41 +1299,59 @@ async def start_replay(request: ReplayRequest):
     if not log_file.exists():
         raise HTTPException(status_code=404, detail="Log file not found")
     
-    # Read source interface from the first line of the log file
-    # Format: (timestamp) interface canId#data
-    source_iface = None
+    # Parse frames from the log file and replay using cansend
+    # This is more reliable than canplayer for interface mapping
+    frames = []
     try:
         with open(log_file, "r") as f:
-            first_line = f.readline().strip()
-            if first_line:
-                # Parse: (1234.567890) can0 123#DEADBEEF
-                parts = first_line.split()
-                if len(parts) >= 2:
-                    source_iface = parts[1]  # e.g. "can0"
-    except Exception:
-        pass
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                # Format: (1234.567890) can0 123#DEADBEEF
+                parts = line.split()
+                if len(parts) >= 3 and '#' in parts[2]:
+                    ts_str = parts[0].strip('()')
+                    frame_data = parts[2]  # e.g. "123#DEADBEEF"
+                    try:
+                        ts = float(ts_str)
+                    except ValueError:
+                        ts = 0.0
+                    frames.append((ts, frame_data))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Cannot parse log file: {e}")
     
-    # Build canplayer command
-    # -I: input file, -l i: loop count (1 = once), -g gap: gap between frames
-    cmd = ["canplayer", "-I", str(log_file)]
+    if not frames:
+        raise HTTPException(status_code=400, detail="Log file contains no frames")
     
-    if request.speed != 1.0:
-        # Adjust timing - canplayer doesn't have direct speed control
-        # but we can use -g for gap multiplier
-        gap = int(1000 / request.speed)  # microseconds
-        cmd.extend(["-g", str(gap)])
+    # Build a shell script that replays all frames with timing using cansend
+    # This works reliably on any interface (can0, can1, vcan0)
+    iface = request.interface
+    speed = request.speed if request.speed > 0 else 1.0
     
-    # Map source interface to target interface
-    # canplayer uses source=dest mapping: can0=vcan0 means "replay can0 frames on vcan0"
-    if source_iface:
-        cmd.append(f"{source_iface}={request.interface}")
-    else:
-        # Fallback: map all known interfaces
-        for src in ["can0", "can1", "vcan0"]:
-            cmd.append(f"{src}={request.interface}")
+    # Create a temporary replay script
+    import tempfile
+    script_lines = ["#!/bin/bash", f"# Replay {len(frames)} frames on {iface}"]
     
-    print(f"[REPLAY] Starting canplayer: {' '.join(cmd)}")
-    print(f"[REPLAY] Interface requested: {request.interface}")
+    prev_ts = frames[0][0]
+    for i, (ts, frame_data) in enumerate(frames):
+        if i > 0:
+            delay = (ts - prev_ts) / speed
+            if delay > 0 and delay < 10:  # Cap at 10 seconds
+                script_lines.append(f"sleep {delay:.6f}")
+        script_lines.append(f"cansend {iface} {frame_data}")
+        prev_ts = ts
+    
+    script_content = "\n".join(script_lines) + "\n"
+    
+    tmp_script = tempfile.NamedTemporaryFile(mode='w', suffix='.sh', delete=False, prefix='replay_')
+    tmp_script.write(script_content)
+    tmp_script.close()
+    os.chmod(tmp_script.name, 0o755)
+    
+    cmd = ["bash", tmp_script.name]
+    
+    print(f"[REPLAY] Replaying {len(frames)} frames on {iface} (speed={speed})")
     state.canplayer_process = await run_command_async(cmd)
     
     # Check if process died immediately (e.g. interface not available)
@@ -1342,9 +1360,14 @@ async def start_replay(request: ReplayRequest):
         stderr = ""
         if state.canplayer_process.stderr:
             stderr = (await state.canplayer_process.stderr.read()).decode()
-        print(f"[REPLAY] canplayer exited immediately with code {state.canplayer_process.returncode}: {stderr}")
+        print(f"[REPLAY] replay failed with code {state.canplayer_process.returncode}: {stderr}")
         state.canplayer_process = None
-        raise HTTPException(status_code=500, detail=f"canplayer failed: {stderr or 'exited immediately'}")
+        # Clean up
+        try:
+            os.unlink(tmp_script.name)
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=f"Replay failed on {iface}: {stderr or 'cansend error'}")
     
     return {
         "status": "started",

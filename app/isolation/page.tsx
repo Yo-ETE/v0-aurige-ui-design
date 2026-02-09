@@ -450,9 +450,7 @@ export default function Isolation() {
   const handleReplay = async (log: IsolationLog) => {
     setIsReplaying(log.id)
     try {
-      console.log("[v0] handleReplay:", log.id, "interface:", canInterface)
       const result = await startReplay(log.missionId, log.id, canInterface)
-      console.log("[v0] startReplay result:", result)
       
       // Poll for completion instead of fixed timeout
       const pollInterval = setInterval(async () => {
@@ -461,7 +459,6 @@ export default function Isolation() {
           if (!status.running) {
             clearInterval(pollInterval)
             setIsReplaying(null)
-            console.log("[v0] replay finished for", log.id)
           }
         } catch {
           clearInterval(pollInterval)
@@ -470,7 +467,6 @@ export default function Isolation() {
       }, 500)
       
     } catch (err) {
-      console.error("[v0] handleReplay error:", err, "interface:", canInterface)
       const msg = err instanceof Error ? err.message : String(err)
       toast({
         title: `Erreur replay sur ${canInterface}`,
