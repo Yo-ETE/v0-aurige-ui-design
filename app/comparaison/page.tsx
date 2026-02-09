@@ -37,6 +37,8 @@ import {
   TrendingUp,
   ArrowUpDown,
   Info,
+  Zap,
+  Filter,
 } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -143,13 +145,33 @@ export default function ComparaisonPage() {
   const [canInterface, setCanInterface] = useState<"can0" | "can1" | "vcan0">("can0")
 
   // Sort mode for results
-  const [sortMode, setSortMode] = useState<"stability" | "confidence" | "classification">("stability")
+  const [sortMode, setSortMode] = useState<"stability" | "confidence" | "classification" | "command">("stability")
+  // Filters for command mode
+  const [filterExclusiveOnly, setFilterExclusiveOnly] = useState(false)
+  const [rareThreshold, setRareThreshold] = useState(1)
 
   const logTree = buildLogTree(missionLogs)
 
   const sortedFrames = useMemo(() => {
     if (!comparisonResult) return []
-    return [...comparisonResult.frames].sort((a, b) => {
+    let frames = [...comparisonResult.frames]
+    
+    // Filtre: seulement les IDs avec des rares exclusifs
+    if (filterExclusiveOnly) {
+      frames = frames.filter(f => 
+        (f.exclusive_rare_a?.length ?? 0) > 0 || (f.exclusive_rare_b?.length ?? 0) > 0
+      )
+    }
+    
+    return frames.sort((a, b) => {
+      if (sortMode === "command") {
+        // Tri par commandScore descroissant, puis par classification
+        const scoreA = a.command_score ?? 0
+        const scoreB = b.command_score ?? 0
+        if (scoreA !== scoreB) return scoreB - scoreA
+        const prio: Record<string, number> = { differential: 0, only_a: 1, only_b: 2, identical: 3 }
+        return (prio[a.classification] ?? 4) - (prio[b.classification] ?? 4)
+      }
       if (sortMode === "stability") {
         const priorityA = a.classification === "differential" ? 0 : a.classification === "only_a" ? 1 : a.classification === "only_b" ? 2 : 3
         const priorityB = b.classification === "differential" ? 0 : b.classification === "only_a" ? 1 : b.classification === "only_b" ? 2 : 3
@@ -160,7 +182,7 @@ export default function ComparaisonPage() {
       const prio: Record<string, number> = { differential: 0, only_a: 1, only_b: 2, identical: 3 }
       return (prio[a.classification] ?? 4) - (prio[b.classification] ?? 4)
     })
-  }, [comparisonResult, sortMode])
+  }, [comparisonResult, sortMode, filterExclusiveOnly])
 
   useEffect(() => {
     const localId = sessionStorage.getItem("activeMissionId")
@@ -543,6 +565,27 @@ export default function ComparaisonPage() {
                 <Info className="h-3 w-3" />
                 Type
               </Button>
+              <Button
+                size="sm"
+                variant={sortMode === "command" ? "default" : "outline"}
+                className={`h-7 text-xs gap-1 ${sortMode !== "command" ? "bg-transparent" : ""}`}
+                onClick={() => setSortMode("command")}
+              >
+                <Zap className="h-3 w-3" />
+                Commande probable
+              </Button>
+            </div>
+            <div className="h-4 w-px bg-border" />
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant={filterExclusiveOnly ? "default" : "outline"}
+                className={`h-7 text-xs gap-1 ${!filterExclusiveOnly ? "bg-transparent" : ""}`}
+                onClick={() => setFilterExclusiveOnly(!filterExclusiveOnly)}
+              >
+                <Filter className="h-3 w-3" />
+                Rare exclusif seul
+              </Button>
             </div>
           </div>
 
@@ -571,6 +614,16 @@ export default function ComparaisonPage() {
                       >
                         {getClassificationLabel(frame.classification)}
                       </Badge>
+                      {(frame.command_score ?? 0) > 0 && (
+                        <Badge variant="secondary" className={`ml-1 text-[10px] h-5 gap-0.5 font-mono ${
+                          (frame.command_score ?? 0) >= 60 ? "bg-violet-500/20 text-violet-400 border-violet-500/30"
+                          : (frame.command_score ?? 0) >= 30 ? "bg-amber-500/20 text-amber-400 border-amber-500/30"
+                          : "bg-muted text-muted-foreground"
+                        }`}>
+                          <Zap className="h-2.5 w-2.5" />
+                          {(frame.command_score ?? 0).toFixed(0)}
+                        </Badge>
+                      )}
                       {frame.classification !== "identical" && (frame.stability_score ?? 0) > 0 && (
                         <div className="flex items-center gap-1.5 ml-auto" title={`Score de stabilite: ${(frame.stability_score ?? 0).toFixed(0)}% - Plus le score est eleve, plus la trame est un bon candidat pour le reverse`}>
                           <Shield className={`h-3.5 w-3.5 ${
@@ -632,6 +685,53 @@ export default function ComparaisonPage() {
                             )}
                           </div>
                         )}
+                        {/* Bloc Rares Exclusifs */}
+                        {((frame.exclusive_rare_a?.length ?? 0) > 0 || (frame.exclusive_rare_b?.length ?? 0) > 0) && (
+                          <div className="p-2 rounded-lg bg-violet-500/5 border border-violet-500/20 space-y-2">
+                            <div className="flex items-center gap-1.5 text-xs font-medium text-violet-400">
+                              <Zap className="h-3.5 w-3.5" />
+                              Rares exclusifs
+                              <Badge variant="secondary" className="bg-violet-500/20 text-violet-400 text-[10px] h-4 ml-1">
+                                CmdScore: {(frame.command_score ?? 0).toFixed(0)}
+                              </Badge>
+                            </div>
+                            <div className="grid gap-2 sm:grid-cols-2">
+                              {/* Exclusifs A */}
+                              <div className="space-y-1">
+                                <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Log A</span>
+                                {(frame.exclusive_rare_a?.length ?? 0) > 0 ? frame.exclusive_rare_a.map((rp, i) => (
+                                  <div key={i} className="flex items-center gap-2 p-1.5 rounded bg-card border border-border">
+                                    <code className="text-xs font-mono text-red-400 break-all">{frame.can_id}#{rp.payload}</code>
+                                    <Badge variant="outline" className="text-[10px] h-4 shrink-0">x{rp.count}</Badge>
+                                    {rp.ts_preview.length > 0 && (
+                                      <span className="text-[10px] text-muted-foreground shrink-0" title={`Timestamps: ${rp.ts_preview.join(", ")}`}>
+                                        <Clock className="h-2.5 w-2.5 inline mr-0.5" />
+                                        {rp.ts_preview[0].toFixed(2)}s
+                                      </span>
+                                    )}
+                                  </div>
+                                )) : <span className="text-[10px] text-muted-foreground italic">Aucun</span>}
+                              </div>
+                              {/* Exclusifs B */}
+                              <div className="space-y-1">
+                                <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Log B</span>
+                                {(frame.exclusive_rare_b?.length ?? 0) > 0 ? frame.exclusive_rare_b.map((rp, i) => (
+                                  <div key={i} className="flex items-center gap-2 p-1.5 rounded bg-card border border-border">
+                                    <code className="text-xs font-mono text-emerald-400 break-all">{frame.can_id}#{rp.payload}</code>
+                                    <Badge variant="outline" className="text-[10px] h-4 shrink-0">x{rp.count}</Badge>
+                                    {rp.ts_preview.length > 0 && (
+                                      <span className="text-[10px] text-muted-foreground shrink-0" title={`Timestamps: ${rp.ts_preview.join(", ")}`}>
+                                        <Clock className="h-2.5 w-2.5 inline mr-0.5" />
+                                        {rp.ts_preview[0].toFixed(2)}s
+                                      </span>
+                                    )}
+                                  </div>
+                                )) : <span className="text-[10px] text-muted-foreground italic">Aucun</span>}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
                         <div className="grid gap-2 sm:grid-cols-2">
                           <div className="p-2 rounded bg-card border border-border">
                             <div className="flex items-center justify-between mb-1">

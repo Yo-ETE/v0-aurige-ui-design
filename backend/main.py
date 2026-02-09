@@ -4688,6 +4688,12 @@ class CompareFrameDiff(BaseModel):
     dominant_ratio_a: float = 0.0 # % of frames matching the most common payload in A
     dominant_ratio_b: float = 0.0 # % of frames matching the most common payload in B
     byte_change_detail: list[dict] = []  # Per changed byte: {index, val_a, val_b, hex_diff}
+    # Commande probable: rare/exclusif scoring
+    command_score: float = 0.0             # 0-100: higher = more likely a command frame
+    rare_payloads_a: list[dict] = []       # [{payload, count, ts_preview}]
+    rare_payloads_b: list[dict] = []
+    exclusive_rare_a: list[dict] = []      # [{payload, count, ts_preview}]
+    exclusive_rare_b: list[dict] = []
 
 class CompareLogsResponse(BaseModel):
     log_a_name: str
@@ -4717,9 +4723,13 @@ async def compare_logs(mission_id: str, request: CompareLogsRequest):
     if not log_b_file.exists():
         raise HTTPException(status_code=404, detail=f"Log B non trouve: {request.log_b_id}")
     
-    def parse_log(log_file: Path) -> dict[str, list[str]]:
-        """Parse log and return dict of can_id -> list of payloads"""
+    def parse_log(log_file: Path) -> tuple[dict[str, list[str]], dict[str, dict[str, list[float]]]]:
+        """Parse log and return:
+        - dict of can_id -> list of payloads
+        - dict of can_id -> { payload -> [timestamps] }
+        """
         frames = defaultdict(list)
+        payload_timestamps = defaultdict(lambda: defaultdict(list))
         with open(log_file, "r") as f:
             for line in f:
                 line = line.strip()
@@ -4727,10 +4737,12 @@ async def compare_logs(mission_id: str, request: CompareLogsRequest):
                     continue
                 match = re.match(r"\((\d+\.\d+)\)\s+\w+\s+([0-9A-Fa-f]+)#([0-9A-Fa-f]*)", line)
                 if match:
+                    ts = float(match.group(1))
                     can_id = match.group(2).upper()
                     data = match.group(3).upper()
                     frames[can_id].append(data)
-        return dict(frames)
+                    payload_timestamps[can_id][data].append(ts)
+        return dict(frames), dict(payload_timestamps)
     
     def get_most_common(data_list: list[str]) -> str:
         if not data_list:
@@ -4782,9 +4794,9 @@ async def compare_logs(mission_id: str, request: CompareLogsRequest):
         """Build a representative payload from per-byte analysis."""
         return "".join(b["most_common"] for b in byte_analysis)
     
-    # Parse both logs
-    frames_a = parse_log(log_a_file)
-    frames_b = parse_log(log_b_file)
+    # Parse both logs (with timestamps)
+    frames_a, ts_map_a = parse_log(log_a_file)
+    frames_b, ts_map_b = parse_log(log_b_file)
     
     # Get all unique CAN IDs
     all_ids = set(frames_a.keys()) | set(frames_b.keys())
@@ -5142,6 +5154,87 @@ async def compare_logs(mission_id: str, request: CompareLogsRequest):
                 stability = max(10.0, dominant * 0.3)
             stability = round(stability, 1)
         
+        # ============================================================
+        # COMMANDE PROBABLE: rare/exclusif analysis
+        # Payloads rares = count <= rareThreshold (default 1)
+        # Exclusifs = rares dans A absents de B (et vice versa)
+        # ============================================================
+        rare_threshold = 1  # configurable via frontend later
+        
+        payload_counts_a = Counter(payloads_a) if payloads_a else Counter()
+        payload_counts_b = Counter(payloads_b) if payloads_b else Counter()
+        ts_a = ts_map_a.get(can_id, {})
+        ts_b = ts_map_b.get(can_id, {})
+        
+        def make_rare_list(payload_counter, ts_map_for_id, threshold):
+            rares = []
+            for payload, count in payload_counter.items():
+                if count <= threshold:
+                    timestamps = ts_map_for_id.get(payload, [])
+                    rares.append({
+                        "payload": payload,
+                        "count": count,
+                        "ts_preview": [round(t, 4) for t in timestamps[:3]]
+                    })
+            return rares
+        
+        rare_a = make_rare_list(payload_counts_a, ts_a, rare_threshold)
+        rare_b = make_rare_list(payload_counts_b, ts_b, rare_threshold)
+        
+        rare_a_payloads = {r["payload"] for r in rare_a}
+        rare_b_payloads = {r["payload"] for r in rare_b}
+        
+        exclusive_a = [r for r in rare_a if r["payload"] not in payload_counts_b]
+        exclusive_b = [r for r in rare_b if r["payload"] not in payload_counts_a]
+        
+        # Command score calculation (0-100)
+        cmd_score = 0.0
+        
+        # Boost principal: exclusifs presents
+        if exclusive_a:
+            cmd_score += 45
+        if exclusive_b:
+            cmd_score += 45
+        
+        # Rarete: bonus par payload exclusif
+        for ep in exclusive_a + exclusive_b:
+            if ep["count"] == 1:
+                cmd_score += 15
+            elif ep["count"] == 2:
+                cmd_score += 8
+        
+        # Concentration temporelle: si tous les timestamps d'un payload exclusif
+        # sont concentres en < 0.5s -> boost
+        for ep in exclusive_a:
+            tsl = ts_a.get(ep["payload"], [])
+            if len(tsl) >= 1 and (max(tsl) - min(tsl)) < 0.5:
+                cmd_score += 10
+        for ep in exclusive_b:
+            tsl = ts_b.get(ep["payload"], [])
+            if len(tsl) >= 1 and (max(tsl) - min(tsl)) < 0.5:
+                cmd_score += 10
+        
+        # Malus trame d'etat cyclique
+        total_frames_both = len(payloads_a) + len(payloads_b)
+        if payloads_a:
+            top_count_a = payload_counts_a.most_common(1)[0][1]
+            top_pct_a = top_count_a / len(payloads_a)
+        else:
+            top_pct_a = 0
+        if payloads_b:
+            top_count_b = payload_counts_b.most_common(1)[0][1]
+            top_pct_b = top_count_b / len(payloads_b)
+        else:
+            top_pct_b = 0
+        top_pct = max(top_pct_a, top_pct_b)
+        
+        if total_frames_both > 300 and top_pct > 0.85:
+            cmd_score -= 35
+        elif total_frames_both > 150 and top_pct > 0.7:
+            cmd_score -= 25
+        
+        cmd_score = min(100.0, max(0.0, cmd_score))
+        
         # Only include interesting frames (not identical unless few)
         if classification != "identical" or len(all_ids) < 50:
             results.append(CompareFrameDiff(
@@ -5159,6 +5252,11 @@ async def compare_logs(mission_id: str, request: CompareLogsRequest):
                 dominant_ratio_a=dominant_a,
                 dominant_ratio_b=dominant_b,
                 byte_change_detail=byte_change_detail,
+                command_score=round(cmd_score, 1),
+                rare_payloads_a=rare_a,
+                rare_payloads_b=rare_b,
+                exclusive_rare_a=exclusive_a,
+                exclusive_rare_b=exclusive_b,
             ))
     
     # Sort: differential first, then by stability_score DESC (most stable = best for reverse)

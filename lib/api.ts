@@ -1098,6 +1098,12 @@ export interface ByteChangeDetail {
   decimal_diff: number
 }
 
+export interface RarePayloadInfo {
+  payload: string
+  count: number
+  ts_preview: number[]
+}
+
 export interface CompareFrameDiff {
   can_id: string
   payload_a: string
@@ -1114,6 +1120,12 @@ export interface CompareFrameDiff {
   dominant_ratio_a: number      // % of frames matching most common payload in A
   dominant_ratio_b: number      // % of frames matching most common payload in B
   byte_change_detail: ByteChangeDetail[]
+  // Commande probable: rare/exclusif scoring
+  command_score: number
+  rare_payloads_a: RarePayloadInfo[]
+  rare_payloads_b: RarePayloadInfo[]
+  exclusive_rare_a: RarePayloadInfo[]
+  exclusive_rare_b: RarePayloadInfo[]
 }
 
 export interface CompareLogsResponse {
