@@ -376,12 +376,14 @@ export default function Isolation() {
   }
   
   const handleImportLog = (log: LogEntry, closeDialog = true) => {
+    // Utiliser les tags du backend si disponibles, sinon default
+    const backendTags = log.tags && log.tags.length > 0 ? log.tags : (log.parentId ? [] : ["original"])
     const newLog: IsolationLog = {
       id: log.id,
       name: log.filename,
       filename: log.filename,
       missionId: importMissionId,
-      tags: log.parentId ? [] : ["original"],  // Only mark as original if no parent
+      tags: backendTags,
       frameCount: log.framesCount,
     }
     
@@ -883,15 +885,25 @@ export default function Isolation() {
     }
   }
   
-  const handleTagChange = (logId: string, tag: "success" | "failed") => {
-    // Find the log to check if it already has the tag
+  const handleTagChange = async (logId: string, tag: "success" | "failed") => {
     const log = findLog(logId)
+    const logMission = log?.missionId || missionId
+    let newTags: string[]
     if (log?.tags.includes(tag)) {
-      // Remove the tag (toggle off)
-      updateLogTags(logId, log.tags.filter(t => t !== tag))
+      newTags = log.tags.filter(t => t !== tag)
     } else {
-      // Add the tag (toggle on)
-      updateLogTags(logId, [tag])
+      newTags = [tag]
+    }
+    // Mettre a jour le store local
+    updateLogTags(logId, newTags)
+    // Persister sur le backend (meta.json)
+    if (logMission) {
+      try {
+        const { updateLogTags: apiUpdateTags } = await import("@/lib/api")
+        await apiUpdateTags(logMission, logId, newTags)
+      } catch (err) {
+        console.error("[v0] Erreur persistance tags:", err)
+      }
     }
   }
 

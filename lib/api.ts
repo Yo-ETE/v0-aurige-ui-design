@@ -67,6 +67,7 @@ export interface LogEntry {
   description?: string
   parentId?: string  // ID of parent log if this is a split
   isOrigin?: boolean  // True if this is an origin log (has children)
+  tags?: string[]  // Tags: success, failed, original, etc.
 }
 
 export interface SystemStatus {
@@ -432,6 +433,14 @@ export function getLogDownloadUrl(missionId: string, logId: string): string {
 
 export function getLogFamilyDownloadUrl(missionId: string, logId: string): string {
   return `${getApiBaseUrl()}/api/missions/${missionId}/logs/${logId}/download-family`
+}
+
+export async function updateLogTags(missionId: string, logId: string, tags: string[]): Promise<void> {
+  await fetchApi(`/missions/${missionId}/logs/${logId}/tags`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tags }),
+  })
 }
 
 export async function deleteLog(missionId: string, logId: string): Promise<void> {

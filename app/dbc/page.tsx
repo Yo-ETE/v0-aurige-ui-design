@@ -10,6 +10,7 @@ import {
   deleteDBCSignal,
   getDBCExportUrl,
   addDBCSignal,
+  sendCANFrame,
   type DBCSignal,
   type DBCMessage,
   type MissionDBC,
@@ -64,6 +65,9 @@ import {
   FileText,
   FolderOpen,
   ArrowLeft,
+  Loader2,
+  CheckCircle2,
+  Zap,
 } from "lucide-react"
 
 export default function DBCPage() {
@@ -76,6 +80,9 @@ export default function DBCPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
   const [expandedMessages, setExpandedMessages] = useState<Set<string>>(new Set())
+  const [canInterface, setCanInterface] = useState<"can0" | "can1" | "vcan0">("can0")
+  const [sendingSignalId, setSendingSignalId] = useState<string | null>(null)
+  const [sentSignalId, setSentSignalId] = useState<string | null>(null)
   
   // Edit dialog state
   const [editingSignal, setEditingSignal] = useState<DBCSignal | null>(null)
@@ -183,6 +190,42 @@ export default function DBCPage() {
     } catch (error) {
       console.error("Failed to add signal:", error)
     }
+  }
+
+  // Play direct: envoie la trame STATUS (ou ACK, ou AVANT) sur l'interface CAN
+  const handlePlaySignal = async (signal: DBCSignal) => {
+    const payload = signal.sample_status || signal.sample_ack || signal.sample_before
+    if (!payload || !payload.trim()) return
+    
+    const signalKey = signal.id || signal.name
+    setSendingSignalId(signalKey)
+    setSentSignalId(null)
+    try {
+      await sendCANFrame({ interface: canInterface, canId: signal.can_id, data: payload.replace(/\s/g, "") })
+      setSentSignalId(signalKey)
+      setTimeout(() => setSentSignalId(prev => prev === signalKey ? null : prev), 2000)
+    } catch (err) {
+      console.error("Erreur envoi CAN:", err)
+    } finally {
+      setSendingSignalId(null)
+    }
+  }
+
+  // Replay Rapide pour un seul signal
+  const handleReplaySignal = (signal: DBCSignal) => {
+    const frames: Array<{canId: string, data: string, timestamp: string, source: string}> = []
+    const cleanPayload = (p: string | undefined) => p && p.trim() ? p.replace(/\s/g, "") : null
+    const avant = cleanPayload(signal.sample_before)
+    const ack = cleanPayload(signal.sample_ack)
+    const status = cleanPayload(signal.sample_status)
+    
+    if (avant) frames.push({ canId: signal.can_id, data: avant, timestamp: "0", source: `${signal.name}-AVANT` })
+    if (ack && ack !== avant) frames.push({ canId: signal.can_id, data: ack, timestamp: "0", source: `${signal.name}-ACK` })
+    if (status && status !== avant && status !== ack) frames.push({ canId: signal.can_id, data: status, timestamp: "0", source: `${signal.name}-STATUS` })
+    if (!avant && !ack && !status) frames.push({ canId: signal.can_id, data: "00".repeat(8), timestamp: "0", source: signal.name })
+    
+    addFrames(frames)
+    router.push("/replay-rapide")
   }
 
   // Send signals to Replay Rapide - sends all 3 frame states (AVANT, ACK, STATUS)
@@ -336,19 +379,31 @@ export default function DBCPage() {
             className="pl-10"
           />
         </div>
-        <Button 
-          variant="default" 
-          size="sm" 
-          className="gap-1"
-          onClick={() => {
-            const allSignals = filteredMessages.flatMap(m => m.signals)
-            handleSendToReplay(allSignals)
-          }}
-          disabled={filteredMessages.length === 0}
-        >
-          <Send className="h-4 w-4" />
-          Envoyer vers Replay
-        </Button>
+        <div className="flex items-center gap-2">
+          <Label className="text-xs text-muted-foreground whitespace-nowrap">Interface CAN:</Label>
+          <select
+            value={canInterface}
+            onChange={(e) => setCanInterface(e.target.value as "can0" | "can1" | "vcan0")}
+            className="rounded border border-border bg-secondary px-2 py-1 text-xs text-foreground h-8"
+          >
+            <option value="can0">can0</option>
+            <option value="can1">can1</option>
+            <option value="vcan0">vcan0 (test)</option>
+          </select>
+          <Button 
+            variant="default" 
+            size="sm" 
+            className="gap-1"
+            onClick={() => {
+              const allSignals = filteredMessages.flatMap(m => m.signals)
+              handleSendToReplay(allSignals)
+            }}
+            disabled={filteredMessages.length === 0}
+          >
+            <Send className="h-4 w-4" />
+            Envoyer tout vers Replay
+          </Button>
+        </div>
       </div>
 
       {/* Messages List */}
@@ -446,7 +501,8 @@ export default function DBCPage() {
                           <TableHead>Scale/Offset</TableHead>
                           <TableHead>Unite</TableHead>
                           <TableHead>Commentaire</TableHead>
-                          <TableHead className="w-20">Actions</TableHead>
+                          <TableHead>Samples</TableHead>
+                          <TableHead className="w-32">Actions</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -466,7 +522,43 @@ export default function DBCPage() {
                               {signal.comment || "-"}
                             </TableCell>
                             <TableCell>
+                              <div className="flex flex-col gap-0.5 text-xs font-mono">
+                                {signal.sample_before && <span className="text-muted-foreground truncate max-w-[120px]" title={`AVANT: ${signal.sample_before}`}>AV: {signal.sample_before}</span>}
+                                {signal.sample_ack && <span className="text-muted-foreground truncate max-w-[120px]" title={`ACK: ${signal.sample_ack}`}>ACK: {signal.sample_ack}</span>}
+                                {signal.sample_status && <span className="text-muted-foreground truncate max-w-[120px]" title={`STATUS: ${signal.sample_status}`}>ST: {signal.sample_status}</span>}
+                                {!signal.sample_before && !signal.sample_ack && !signal.sample_status && <span className="text-muted-foreground/50">-</span>}
+                              </div>
+                            </TableCell>
+                            <TableCell>
                               <div className="flex items-center gap-1">
+                                {/* Bouton Play direct (envoi sur CAN) */}
+                                <Button 
+                                  variant="ghost" 
+                                  size="icon" 
+                                  className={`h-7 w-7 bg-transparent ${sentSignalId === (signal.id || signal.name) ? "text-success" : "text-foreground"}`}
+                                  disabled={sendingSignalId === (signal.id || signal.name) || (!signal.sample_status && !signal.sample_ack && !signal.sample_before)}
+                                  onClick={() => handlePlaySignal(signal)}
+                                  title={`Envoyer sur ${canInterface}: ${signal.can_id}#${signal.sample_status || signal.sample_ack || signal.sample_before || ""}`}
+                                >
+                                  {sendingSignalId === (signal.id || signal.name) ? (
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  ) : sentSignalId === (signal.id || signal.name) ? (
+                                    <CheckCircle2 className="h-3.5 w-3.5" />
+                                  ) : (
+                                    <Play className="h-3.5 w-3.5" />
+                                  )}
+                                </Button>
+                                {/* Bouton Replay Rapide (page dediee) */}
+                                <Button 
+                                  variant="ghost" 
+                                  size="icon" 
+                                  className="h-7 w-7 bg-transparent"
+                                  onClick={() => handleReplaySignal(signal)}
+                                  title="Ouvrir dans Replay Rapide"
+                                  disabled={!signal.sample_status && !signal.sample_ack && !signal.sample_before}
+                                >
+                                  <Zap className="h-3.5 w-3.5" />
+                                </Button>
                                 <Button 
                                   variant="ghost" 
                                   size="icon" 

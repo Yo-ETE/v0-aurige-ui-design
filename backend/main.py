@@ -153,7 +153,8 @@ class LogEntry(BaseModel):
     description: Optional[str] = None
     parent_id: Optional[str] = Field(default=None, alias="parentId")  # ID of parent log if this is a split
     is_origin: bool = Field(default=False, alias="isOrigin")  # True if this is an origin log (has children)
-
+    tags: list[str] = []
+    
     class Config:
         populate_by_name = True
 
@@ -1686,6 +1687,7 @@ async def list_mission_logs(mission_id: str):
             description=meta.get("description"),
             parentId=parent_id,
             isOrigin=is_origin,
+            tags=meta.get("tags", []),
         ))
 
     return sorted(logs, key=lambda x: x.created_at, reverse=True)
@@ -1858,6 +1860,37 @@ async def delete_log(mission_id: str, log_id: str):
     update_mission_stats(mission_id)
     
     return {"status": "deleted", "id": log_id}
+
+
+class UpdateLogTagsRequest(BaseModel):
+    tags: list[str]
+
+@app.put("/api/missions/{mission_id}/logs/{log_id}/tags")
+async def update_log_tags(mission_id: str, log_id: str, request: UpdateLogTagsRequest):
+    """Update tags for a log (success, failed, original, etc.)"""
+    load_mission(mission_id)
+    logs_dir = get_mission_logs_dir(mission_id)
+    meta_file = logs_dir / f"{log_id}.meta.json"
+    log_file = logs_dir / f"{log_id}.log"
+    
+    if not log_file.exists():
+        raise HTTPException(status_code=404, detail="Log not found")
+    
+    # Load or create meta
+    meta = {}
+    if meta_file.exists():
+        try:
+            with open(meta_file, "r") as f:
+                meta = json.load(f)
+        except Exception:
+            meta = {}
+    
+    meta["tags"] = request.tags
+    
+    with open(meta_file, "w") as f:
+        json.dump(meta, f, indent=2)
+    
+    return {"status": "ok", "tags": request.tags}
 
 
 class RenameLogRequest(BaseModel):
@@ -4473,17 +4506,6 @@ async def get_mission_dbc(mission_id: str) -> MissionDBC:
     with open(dbc_file, "r") as f:
         data = json.load(f)
     
-    # Migrate: ensure all signals have unique IDs
-    migrated = False
-    for msg in data.get("messages", []):
-        for idx, s in enumerate(msg.get("signals", [])):
-            if not s.get("id"):
-                s["id"] = f"{s.get('can_id', msg.get('can_id', 'UNK'))}_{s.get('name', 'SIG')}_{idx}_{int(time.time())}"
-                migrated = True
-    if migrated:
-        with open(dbc_file, "w") as f:
-            json.dump(data, f, indent=2)
-    
     return MissionDBC(**data)
 
 @app.post("/api/missions/{mission_id}/dbc/signal")
@@ -4529,17 +4551,11 @@ async def add_dbc_signal(mission_id: str, signal: DBCSignal):
         unique_suffix = datetime.now().strftime("%H%M%S") + str(int(time.time() * 1000) % 1000)
         signal.id = f"{signal.can_id}_{signal.name}_{unique_suffix}"
     
-    # Migrate: assign unique IDs to any existing signals that don't have one
-    for idx, s in enumerate(message["signals"]):
-        if not s.get("id"):
-            s["id"] = f"{s.get('can_id', signal.can_id)}_{s.get('name', 'SIG')}_{idx}_{int(time.time())}"
-    
-    # Add or update signal - only update if EXACT same id, never match by (can_id, start_bit)
-    # This allows multiple signals on the same byte (e.g. ouverture + fermeture)
+    # Match par ID exact uniquement (permet d'avoir plusieurs signaux sur le meme octet)
     signal_dict = signal.model_dump()
     existing_idx = None
     for idx, s in enumerate(message["signals"]):
-        if s.get("id") and s.get("id") == signal.id:
+        if s.get("id") and s["id"] == signal.id:
             existing_idx = idx
             break
     
