@@ -436,7 +436,7 @@ const handleDeleteLog = async (logId: string) => {
     </div>
     <LogImportButton 
       missionId={missionId} 
-      onImportSuccess={() => loadLogs()} 
+      onImportSuccess={() => fetchLogs()} 
       size="sm"
     />
   </div>

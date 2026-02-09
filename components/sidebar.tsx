@@ -211,6 +211,7 @@ export function Sidebar() {
                 src="/images/aurige.png"
                 alt="AURIGE Logo"
                 fill
+                sizes="32px"
                 className="object-contain p-0.5"
                 priority
               />
