@@ -46,6 +46,7 @@ import { useExportStore } from "@/lib/export-store"
 import { listMissionLogs, startReplay, stopReplay, getReplayStatus, splitLog, renameLog, deleteLog, getLogContent, getLogDownloadUrl, getLogFamilyDownloadUrl, analyzeCoOccurrence, analyzeFamilyDiff, addDBCSignal, getMissionDBC, getDBCExportUrl, sendCANFrame, createFrameLog, type LogEntry, type CANInterface, type LogFrame, type CoOccurrenceResponse, type CoOccurrenceFrame, type EcuFamily, type FamilyAnalysisResponse, type FrameDiff, type DBCSignal } from "@/lib/api"
 import { useRouter as useNavRouter } from "next/navigation"
 import { useMissionStore } from "@/lib/mission-store"
+import { useToast } from "@/hooks/use-toast"
 import { LogImportButton } from "@/components/log-import-button"
 
 const steps = [
@@ -271,6 +272,7 @@ export default function Isolation() {
   const searchParams = useSearchParams()
   const { logs, importLog, addChildLog, removeLog, updateLogTags, updateLogName, clearLogs, setMission, findLog } = useIsolationStore()
   const { addFrames } = useExportStore()
+  const { toast } = useToast()
   
   // Analyze param from Replay Rapide (frame to analyze with source context)
   const analyzeParam = searchParams.get("analyze")
@@ -448,7 +450,9 @@ export default function Isolation() {
   const handleReplay = async (log: IsolationLog) => {
     setIsReplaying(log.id)
     try {
-      await startReplay(log.missionId, log.id, canInterface)
+      console.log("[v0] handleReplay:", log.id, "interface:", canInterface)
+      const result = await startReplay(log.missionId, log.id, canInterface)
+      console.log("[v0] startReplay result:", result)
       
       // Poll for completion instead of fixed timeout
       const pollInterval = setInterval(async () => {
@@ -457,6 +461,7 @@ export default function Isolation() {
           if (!status.running) {
             clearInterval(pollInterval)
             setIsReplaying(null)
+            console.log("[v0] replay finished for", log.id)
           }
         } catch {
           clearInterval(pollInterval)
@@ -464,7 +469,14 @@ export default function Isolation() {
         }
       }, 500)
       
-    } catch {
+    } catch (err) {
+      console.error("[v0] handleReplay error:", err, "interface:", canInterface)
+      const msg = err instanceof Error ? err.message : String(err)
+      toast({
+        title: `Erreur replay sur ${canInterface}`,
+        description: msg,
+        variant: "destructive",
+      })
       setIsReplaying(null)
     }
   }

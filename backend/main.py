@@ -1299,6 +1299,20 @@ async def start_replay(request: ReplayRequest):
     if not log_file.exists():
         raise HTTPException(status_code=404, detail="Log file not found")
     
+    # Read source interface from the first line of the log file
+    # Format: (timestamp) interface canId#data
+    source_iface = None
+    try:
+        with open(log_file, "r") as f:
+            first_line = f.readline().strip()
+            if first_line:
+                # Parse: (1234.567890) can0 123#DEADBEEF
+                parts = first_line.split()
+                if len(parts) >= 2:
+                    source_iface = parts[1]  # e.g. "can0"
+    except Exception:
+        pass
+    
     # Build canplayer command
     # -I: input file, -l i: loop count (1 = once), -g gap: gap between frames
     cmd = ["canplayer", "-I", str(log_file)]
@@ -1309,18 +1323,34 @@ async def start_replay(request: ReplayRequest):
         gap = int(1000 / request.speed)  # microseconds
         cmd.extend(["-g", str(gap)])
     
-    # Map all possible source interfaces to the target interface
+    # Map source interface to target interface
     # canplayer uses source=dest mapping: can0=vcan0 means "replay can0 frames on vcan0"
-    # We map all known interfaces to the chosen one so it works regardless of capture source
-    for src_iface in ["can0", "can1", "vcan0"]:
-        cmd.append(f"{src_iface}={request.interface}")
+    if source_iface:
+        cmd.append(f"{source_iface}={request.interface}")
+    else:
+        # Fallback: map all known interfaces
+        for src in ["can0", "can1", "vcan0"]:
+            cmd.append(f"{src}={request.interface}")
     
+    print(f"[REPLAY] Starting canplayer: {' '.join(cmd)}")
+    print(f"[REPLAY] Interface requested: {request.interface}")
     state.canplayer_process = await run_command_async(cmd)
+    
+    # Check if process died immediately (e.g. interface not available)
+    await asyncio.sleep(0.3)
+    if state.canplayer_process.returncode is not None:
+        stderr = ""
+        if state.canplayer_process.stderr:
+            stderr = (await state.canplayer_process.stderr.read()).decode()
+        print(f"[REPLAY] canplayer exited immediately with code {state.canplayer_process.returncode}: {stderr}")
+        state.canplayer_process = None
+        raise HTTPException(status_code=500, detail=f"canplayer failed: {stderr or 'exited immediately'}")
     
     return {
         "status": "started",
         "missionId": request.mission_id,
         "logId": request.log_id,
+        "interface": request.interface,
         "speed": request.speed,
     }
 
