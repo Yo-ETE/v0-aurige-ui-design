@@ -35,9 +35,7 @@ import {
   FolderTree,
   Search,
   Network,
-  Zap,
   FolderCheck,
-  FileCode,
 } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
@@ -1077,92 +1075,73 @@ export default function Isolation() {
           return (
             <Card className="border-success/30 bg-success/5">
               <CardHeader className="pb-2">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <FolderCheck className="h-5 w-5 text-success" />
-                    Dossier Success ({allSuccessLogs.length})
-                  </CardTitle>
-                  <div className="flex items-center gap-1">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-7 text-xs gap-1 bg-transparent"
-                      onClick={() => {
-                        // Replay toutes les trames success via export store
-                        const allFrames: Array<{canId: string, data: string, timestamp: string, source: string}> = []
-                        for (const slog of allSuccessLogs) {
-                          allFrames.push({
-                            canId: slog.id,
-                            data: "",
-                            timestamp: "0",
-                            source: slog.name,
-                          })
-                        }
-                        // On charge les trames de chaque log et on les envoie
-                        navRouter.push("/replay-rapide")
-                      }}
-                      title="Ouvrir Replay Rapide"
-                    >
-                      <Zap className="h-3 w-3" />
-                      Replay Rapide
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-7 text-xs gap-1 bg-transparent"
-                      onClick={() => navRouter.push(`/dbc?mission=${missionId}`)}
-                      title="Ouvrir la page DBC"
-                    >
-                      <FileCode className="h-3 w-3" />
-                      Ouvrir DBC
-                    </Button>
-                  </div>
-                </div>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <FolderCheck className="h-5 w-5 text-success" />
+                  Dossier Success ({allSuccessLogs.length})
+                </CardTitle>
                 <CardDescription className="text-xs">
-                  Logs valides comme success. Rejouez, analysez ou envoyez vers DBC.
+                  Logs valides. Memes actions que dans l&apos;arbre d&apos;isolation.
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-1.5">
+              <CardContent className="space-y-1">
                 {allSuccessLogs.map((log) => (
-                  <div key={log.id} className="flex items-center gap-2 p-2 rounded-md border border-success/20 bg-card">
+                  <div key={log.id} className="flex items-center gap-2 rounded-md border border-success/20 bg-secondary/50 p-3 hover:bg-secondary">
                     <FileText className="h-4 w-4 text-success shrink-0" />
-                    <span className="flex-1 font-mono text-xs truncate" title={log.name}>{log.name}</span>
-                    <span className="text-[10px] text-muted-foreground shrink-0">{log.frameCount ? `${log.frameCount} tr.` : ""}</span>
-                    <div className="flex items-center gap-0.5 shrink-0">
-                      <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => handleReplay(log)} title={`Rejouer sur ${canInterface}`}>
-                        {isReplaying === log.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
-                      </Button>
-                      <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => {
-                        // Envoyer vers Replay Rapide
-                        getLogContent(log.missionId, log.id).then(content => {
-                          if (content?.frames) {
-                            addFrames(content.frames.map((f: LogFrame) => ({
-                              canId: f.canId,
-                              data: f.data || f.raw || "",
-                              timestamp: String(f.timestamp || 0),
-                              source: log.name,
-                            })))
-                            navRouter.push("/replay-rapide")
-                          }
-                        })
-                      }} title="Replay Rapide">
-                        <Zap className="h-3 w-3" />
-                      </Button>
-                      <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => handleViewLog(log)} title="Voir les trames">
-                        <Eye className="h-3 w-3" />
-                      </Button>
-                      <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => handleAnalyzeCoOccurrence(log)} title="Co-occurrence">
+                    {renamingLog === log.id ? (
+                      <div className="flex-1 flex items-center gap-2">
+                        <Input
+                          value={newLogName}
+                          onChange={(e) => setNewLogName(e.target.value)}
+                          className="h-7 text-sm"
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") handleRename(log)
+                            if (e.key === "Escape") setRenamingLog(null)
+                          }}
+                        />
+                        <Button size="sm" variant="ghost" onClick={() => handleRename(log)}>OK</Button>
+                        <Button size="sm" variant="ghost" onClick={() => setRenamingLog(null)}>Annuler</Button>
+                      </div>
+                    ) : (
+                      <span className="flex-1 truncate font-mono text-sm" title={log.name}>{log.name}</span>
+                    )}
+                    <div className="flex items-center gap-1 shrink-0">
+                      {/* Play - identique a isolation */}
+                      {isReplaying === log.id ? (
+                        <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive">
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        </Button>
+                      ) : (
+                        <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleReplay(log)} title={`Rejouer sur ${canInterface}`}>
+                          <Play className="h-3 w-3" />
+                        </Button>
+                      )}
+                      {/* Co-occurrence */}
+                      <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleAnalyzeCoOccurrence(log)} title="Co-occurrence">
                         <Network className="h-3 w-3" />
                       </Button>
-                      <Button size="icon" variant="ghost" className="h-6 w-6" asChild title="Telecharger">
+                      {/* Voir les trames */}
+                      <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleViewLog(log)} title="Voir les trames">
+                        <Eye className="h-3 w-3" />
+                      </Button>
+                      {/* Telecharger */}
+                      <Button size="icon" variant="ghost" className="h-7 w-7" asChild title="Telecharger">
                         <a href={getLogDownloadUrl(log.missionId, log.id)} download={log.filename}>
                           <Download className="h-3 w-3" />
                         </a>
                       </Button>
-                      <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => { setRenamingLog(log.id); setNewLogName(log.name.replace(".log", "")) }} title="Renommer">
+                      {/* Renommer */}
+                      <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => { setRenamingLog(log.id); setNewLogName(log.name.replace(".log", "")) }} title="Renommer">
                         <Pencil className="h-3 w-3" />
                       </Button>
-                      <Button size="icon" variant="ghost" className="h-6 w-6 text-destructive hover:text-destructive" onClick={() => handleDeleteLog(log)} title="Supprimer">
+                      {/* Retirer du dossier success (retire le tag, ne supprime pas le log) */}
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7 text-destructive hover:text-destructive"
+                        onClick={() => handleTagChange(log.id, "success")}
+                        title="Retirer du dossier success"
+                      >
                         <Trash2 className="h-3 w-3" />
                       </Button>
                     </div>

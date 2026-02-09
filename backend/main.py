@@ -1309,8 +1309,11 @@ async def start_replay(request: ReplayRequest):
         gap = int(1000 / request.speed)  # microseconds
         cmd.extend(["-g", str(gap)])
     
-    # Map interface
-    cmd.append(f"{request.interface}={request.interface}")
+    # Map all possible source interfaces to the target interface
+    # canplayer uses source=dest mapping: can0=vcan0 means "replay can0 frames on vcan0"
+    # We map all known interfaces to the chosen one so it works regardless of capture source
+    for src_iface in ["can0", "can1", "vcan0"]:
+        cmd.append(f"{src_iface}={request.interface}")
     
     state.canplayer_process = await run_command_async(cmd)
     
