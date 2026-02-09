@@ -35,6 +35,10 @@ import {
   FolderTree,
   Search,
   Network,
+  Star,
+  Zap,
+  Copy,
+  FolderCheck,
 } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
@@ -268,7 +272,7 @@ export default function Isolation() {
   const router = useRouter()
   const navRouter = useNavRouter()
   const searchParams = useSearchParams()
-  const { logs, importLog, addChildLog, removeLog, updateLogTags, updateLogName, clearLogs, setMission, findLog } = useIsolationStore()
+  const { logs, importLog, addChildLog, removeLog, updateLogTags, updateLogName, clearLogs, setMission, findLog, successFrames, addSuccessFrame, removeSuccessFrame, renameSuccessFrame, clearSuccessFrames } = useIsolationStore()
   const { addFrames } = useExportStore()
   
   // Analyze param from Replay Rapide (frame to analyze with source context)
@@ -1059,6 +1063,213 @@ export default function Isolation() {
             )}
           </CardContent>
         </Card>
+
+        {/* Dossier Success - trames et logs valides */}
+        {(successFrames.length > 0 || logs.some(l => l.tags.includes("success") || (l.children || []).some(c => c.tags.includes("success")))) && (
+          <Card className="border-success/30 bg-success/5">
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <FolderCheck className="h-5 w-5 text-success" />
+                  Dossier Success
+                </CardTitle>
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs gap-1 bg-transparent"
+                    disabled={successFrames.length === 0}
+                    onClick={() => {
+                      // Envoyer toutes les trames success vers Replay Rapide
+                      addFrames(successFrames.map(sf => ({
+                        canId: sf.canId,
+                        data: sf.data,
+                        timestamp: sf.timestamp || "0",
+                        source: sf.label || `${sf.sourceLog}`,
+                      })))
+                      navRouter.push("/replay-rapide")
+                    }}
+                    title="Envoyer les trames vers Replay Rapide"
+                  >
+                    <Zap className="h-3 w-3" />
+                    Replay Rapide
+                  </Button>
+                  {successFrames.length > 0 && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs gap-1 bg-transparent text-destructive hover:text-destructive"
+                      onClick={() => clearSuccessFrames()}
+                    >
+                      <Trash2 className="h-3 w-3" />
+                      Vider
+                    </Button>
+                  )}
+                </div>
+              </div>
+              <CardDescription className="text-xs">
+                Trames et logs valides. Rejouez, analysez ou envoyez vers DBC.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {/* Logs tagues success */}
+              {(() => {
+                const allSuccessLogs: IsolationLog[] = []
+                const collectSuccess = (items: IsolationLog[]) => {
+                  for (const l of items) {
+                    if (l.tags.includes("success")) allSuccessLogs.push(l)
+                    if (l.children) collectSuccess(l.children)
+                  }
+                }
+                collectSuccess(logs)
+                if (allSuccessLogs.length === 0 && successFrames.length === 0) return null
+                return (
+                  <>
+                    {allSuccessLogs.length > 0 && (
+                      <div className="space-y-1">
+                        <span className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Logs success ({allSuccessLogs.length})</span>
+                        {allSuccessLogs.map((log) => (
+                          <div key={log.id} className="flex items-center gap-2 p-2 rounded-md border border-success/20 bg-card">
+                            <FileText className="h-4 w-4 text-success shrink-0" />
+                            <span className="flex-1 font-mono text-xs truncate">{log.name}</span>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => handleReplay(log)} title="Rejouer sur CAN">
+                                {isReplaying === log.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+                              </Button>
+                              <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => handleViewLog(log)} title="Voir les trames">
+                                <Eye className="h-3 w-3" />
+                              </Button>
+                              <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => handleAnalyzeCoOccurrence(log)} title="Co-occurrence">
+                                <Network className="h-3 w-3" />
+                              </Button>
+                              <Button size="icon" variant="ghost" className="h-6 w-6" asChild title="Telecharger">
+                                <a href={getLogDownloadUrl(log.missionId, log.id)} download={log.filename}>
+                                  <Download className="h-3 w-3" />
+                                </a>
+                              </Button>
+                              <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => { setRenamingLog(log.id); setNewLogName(log.name.replace(".log", "")) }} title="Renommer">
+                                <Pencil className="h-3 w-3" />
+                              </Button>
+                              <Button size="icon" variant="ghost" className="h-6 w-6 text-destructive hover:text-destructive" onClick={() => handleDeleteLog(log)} title="Supprimer">
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Trames individuelles success */}
+                    {successFrames.length > 0 && (
+                      <div className="space-y-1">
+                        <span className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Trames validees ({successFrames.length})</span>
+                        <div className="rounded-md border border-border overflow-hidden">
+                          <table className="w-full text-xs font-mono">
+                            <thead className="bg-secondary">
+                              <tr className="text-left text-muted-foreground">
+                                <th className="p-1.5 w-20">CAN ID</th>
+                                <th className="p-1.5">Data</th>
+                                <th className="p-1.5 w-32">Label / Source</th>
+                                <th className="p-1.5 w-24">Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {successFrames.map((sf) => (
+                                <tr key={sf.addedAt} className="border-t border-border/50 hover:bg-secondary/30">
+                                  <td className="p-1.5 text-primary font-semibold">{sf.canId}</td>
+                                  <td className="p-1.5">{sf.data}</td>
+                                  <td className="p-1.5 text-muted-foreground truncate max-w-[120px]" title={sf.sourceLog}>
+                                    {sf.label || sf.sourceLog}
+                                  </td>
+                                  <td className="p-1.5">
+                                    <div className="flex items-center gap-0.5">
+                                      <Button
+                                        size="icon"
+                                        variant="ghost"
+                                        className="h-5 w-5"
+                                        onClick={async () => {
+                                          try {
+                                            await sendCANFrame({ interface: replayCanInterface, canId: sf.canId, data: sf.data })
+                                          } catch { /* ignore */ }
+                                        }}
+                                        title={`Envoyer sur ${replayCanInterface}`}
+                                      >
+                                        <Play className="h-2.5 w-2.5" />
+                                      </Button>
+                                      <Button
+                                        size="icon"
+                                        variant="ghost"
+                                        className="h-5 w-5"
+                                        onClick={() => {
+                                          addFrames([{ canId: sf.canId, data: sf.data, timestamp: sf.timestamp || "0", source: sf.label || sf.sourceLog }])
+                                          navRouter.push("/replay-rapide")
+                                        }}
+                                        title="Replay Rapide"
+                                      >
+                                        <Zap className="h-2.5 w-2.5" />
+                                      </Button>
+                                      <Button
+                                        size="icon"
+                                        variant="ghost"
+                                        className="h-5 w-5"
+                                        onClick={() => {
+                                          navigator.clipboard.writeText(`${sf.canId}#${sf.data}`)
+                                        }}
+                                        title="Copier"
+                                      >
+                                        <Copy className="h-2.5 w-2.5" />
+                                      </Button>
+                                      <Button
+                                        size="icon"
+                                        variant="ghost"
+                                        className="h-5 w-5"
+                                        onClick={() => {
+                                          const newLabel = prompt("Label:", sf.label || sf.canId)
+                                          if (newLabel) renameSuccessFrame(sf.addedAt, newLabel)
+                                        }}
+                                        title="Renommer"
+                                      >
+                                        <Pencil className="h-2.5 w-2.5" />
+                                      </Button>
+                                      <Button
+                                        size="icon"
+                                        variant="ghost"
+                                        className="h-5 w-5 text-destructive hover:text-destructive"
+                                        onClick={() => removeSuccessFrame(sf.addedAt)}
+                                        title="Supprimer"
+                                      >
+                                        <Trash2 className="h-2.5 w-2.5" />
+                                      </Button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Bouton envoyer vers DBC */}
+                    {(allSuccessLogs.length > 0 || successFrames.length > 0) && (
+                      <div className="flex items-center justify-end pt-2 border-t border-success/20">
+                        <Button
+                          size="sm"
+                          variant="default"
+                          className="gap-1.5"
+                          onClick={() => navRouter.push("/dbc")}
+                        >
+                          <Send className="h-3.5 w-3.5" />
+                          Ouvrir DBC
+                        </Button>
+                      </div>
+                    )}
+                  </>
+                )
+              })()}
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       {/* Import Dialog */}
@@ -1394,6 +1605,43 @@ export default function Isolation() {
               <Send className="h-3 w-3" />
               <span className="hidden sm:inline">Exporter vers</span> Replay
             </Button>
+            {/* Actions sur le log en cours */}
+            {viewingLog && (
+              <div className="flex items-center gap-1">
+                <Button
+                  size="sm"
+                  variant={viewingLog.tags.includes("success") ? "default" : "outline"}
+                  className={`h-7 gap-1 text-xs ${viewingLog.tags.includes("success") ? "bg-success text-success-foreground hover:bg-success/80" : "bg-transparent"}`}
+                  onClick={() => handleTagChange(viewingLog.id, "success")}
+                  title="Marquer comme succes"
+                >
+                  <CheckCircle2 className="h-3 w-3" />
+                  Success
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 gap-1 text-xs bg-transparent"
+                  onClick={() => {
+                    setRenamingLog(viewingLog.id)
+                    setNewLogName(viewingLog.name.replace(".log", ""))
+                  }}
+                  title="Renommer"
+                >
+                  <Pencil className="h-3 w-3" />
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 gap-1 text-xs bg-transparent"
+                  asChild
+                >
+                  <a href={getLogDownloadUrl(viewingLog.missionId, viewingLog.id)} download={viewingLog.filename}>
+                    <Download className="h-3 w-3" />
+                  </a>
+                </Button>
+              </div>
+            )}
             <div className="flex items-center gap-1 ml-auto">
               <Label className="text-xs whitespace-nowrap text-muted-foreground">Replay CAN:</Label>
               <select
@@ -1551,6 +1799,36 @@ export default function Isolation() {
                                   title="Ajouter au Replay Rapide"
                                 >
                                   <Send className="h-3 w-3" />
+                                </Button>
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className={`h-6 w-6 ${
+                                    successFrames.some(sf => sf.canId === frame.canId && sf.data === (frame.data || frame.raw || "") && sf.sourceLog === (viewingLog?.name || ""))
+                                      ? "text-success bg-success/20"
+                                      : ""
+                                  }`}
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    const data = frame.data || frame.raw || ""
+                                    const sourceLog = viewingLog?.name || ""
+                                    const existing = successFrames.find(sf => sf.canId === frame.canId && sf.data === data && sf.sourceLog === sourceLog)
+                                    if (existing) {
+                                      removeSuccessFrame(existing.addedAt)
+                                    } else {
+                                      addSuccessFrame({
+                                        canId: frame.canId,
+                                        data,
+                                        timestamp: frame.timestamp ? String(frame.timestamp) : undefined,
+                                        sourceLog,
+                                        sourceMission: viewingLog?.missionId || missionId || "",
+                                        addedAt: Date.now(),
+                                      })
+                                    }
+                                  }}
+                                  title="Ajouter/retirer du dossier Success"
+                                >
+                                  <Star className="h-3 w-3" />
                                 </Button>
                               </div>
                             </td>

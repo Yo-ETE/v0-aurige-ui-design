@@ -20,12 +20,25 @@ export interface IsolationLog {
   children?: IsolationLog[]
 }
 
+export interface SuccessFrame {
+  canId: string
+  data: string
+  timestamp?: string
+  sourceLog: string       // nom du log source
+  sourceMission: string   // id de la mission
+  label?: string          // label optionnel (renomme)
+  addedAt: number         // timestamp d'ajout
+}
+
 interface IsolationStore {
   // Current mission context
   currentMissionId: string | null
   
   // Current logs being analyzed (filtered by mission)
   logs: IsolationLog[]
+  
+  // Trames success (trames validees individuellement)
+  successFrames: SuccessFrame[]
   
   // Set current mission (clears logs if mission changes)
   setMission: (missionId: string | null) => void
@@ -53,6 +66,12 @@ interface IsolationStore {
   
   // Find log by ID (recursive)
   findLog: (logId: string) => IsolationLog | null
+  
+  // Success frames management
+  addSuccessFrame: (frame: SuccessFrame) => void
+  removeSuccessFrame: (addedAt: number) => void
+  renameSuccessFrame: (addedAt: number, label: string) => void
+  clearSuccessFrames: () => void
 }
 
 function findLogRecursive(logs: IsolationLog[], logId: string): IsolationLog | null {
@@ -94,15 +113,16 @@ export const useIsolationStore = create<IsolationStore>()(
     (set, get) => ({
       currentMissionId: null,
       logs: [],
+      successFrames: [],
 
       setMission: (missionId) => {
         const current = get().currentMissionId
         if (missionId === null) {
           // Explicit clear
-          set({ currentMissionId: null, logs: [] })
+          set({ currentMissionId: null, logs: [], successFrames: [] })
         } else if (current !== null && current !== missionId) {
           // Mission actually changed (both non-null, different) - clear logs
-          set({ currentMissionId: missionId, logs: [] })
+          set({ currentMissionId: missionId, logs: [], successFrames: [] })
         } else if (current !== missionId) {
           // First call after hydration (current=null, missionId set) - keep persisted logs
           set({ currentMissionId: missionId })
@@ -166,12 +186,36 @@ export const useIsolationStore = create<IsolationStore>()(
       findLog: (logId) => {
         return findLogRecursive(get().logs, logId)
       },
+
+      addSuccessFrame: (frame) => {
+        // Eviter les doublons (meme canId + data + sourceLog)
+        const existing = get().successFrames.find(
+          f => f.canId === frame.canId && f.data === frame.data && f.sourceLog === frame.sourceLog
+        )
+        if (existing) return
+        set((state) => ({ successFrames: [...state.successFrames, frame] }))
+      },
+
+      removeSuccessFrame: (addedAt) => {
+        set((state) => ({ successFrames: state.successFrames.filter(f => f.addedAt !== addedAt) }))
+      },
+
+      renameSuccessFrame: (addedAt, label) => {
+        set((state) => ({
+          successFrames: state.successFrames.map(f => f.addedAt === addedAt ? { ...f, label } : f),
+        }))
+      },
+
+      clearSuccessFrames: () => {
+        set({ successFrames: [] })
+      },
     }),
     {
       name: "aurige-isolation-store",
       partialize: (state) => ({
         currentMissionId: state.currentMissionId,
         logs: state.logs,
+        successFrames: state.successFrames,
       }),
     }
   )
