@@ -140,6 +140,7 @@ export default function ComparaisonPage() {
 
   // Actions
   const [sendingFrame, setSendingFrame] = useState<string | null>(null)
+  const [canInterface, setCanInterface] = useState<"can0" | "can1" | "vcan0">("can0")
 
   // Sort mode for results
   const [sortMode, setSortMode] = useState<"stability" | "confidence" | "classification">("stability")
@@ -297,8 +298,8 @@ export default function ComparaisonPage() {
     setSendingFrame(frame.can_id)
     try {
       const payload = usePayloadA ? frame.payload_a : frame.payload_b
-      await sendCANFrame("can0", frame.can_id, payload)
-      toast({ title: "Envoyee", description: `Trame ${frame.can_id} envoyee` })
+      await sendCANFrame({ interface: canInterface, canId: frame.can_id, data: payload })
+      toast({ title: "Envoyee", description: `Trame ${frame.can_id} envoyee sur ${canInterface}` })
     } catch {
       toast({ title: "Erreur", description: "Echec de l'envoi", variant: "destructive" })
     } finally {
@@ -322,10 +323,14 @@ export default function ComparaisonPage() {
     if (!missionId) return
     try {
       const payload = usePayloadA ? frame.payload_a : frame.payload_b
+      const label = usePayloadA ? "A" : "B"
+      const uniqueId = Date.now().toString(36).slice(-4).toUpperCase()
+      const signalName = `SIG_${frame.can_id}_${label}_${uniqueId}`
       const signal = {
+        id: signalName,
         can_id: frame.can_id,
-        name: `SIG_${frame.can_id}_COMP_${Date.now().toString(36).slice(-4).toUpperCase()}`,
-        start_bit: 0,
+        name: signalName,
+        start_bit: frame.bytes_changed.length > 0 ? frame.bytes_changed[0] * 8 : 0,
         length: Math.min(payload.length * 4, 64),
         byte_order: "little_endian" as const,
         is_signed: false,
@@ -334,11 +339,11 @@ export default function ComparaisonPage() {
         min_val: 0,
         max_val: 255,
         unit: "",
-        comment: `Comparaison: ${usePayloadA ? "Log A" : "Log B"}`,
+        comment: `Comparaison Log ${label}: ${currentComparisonName || ""}`,
         sample_status: payload,
       }
       await addDBCSignal(missionId, signal)
-      toast({ title: "Enregistre", description: `Signal ${signal.name} ajoute au DBC` })
+      toast({ title: "Enregistre", description: `Signal ${signalName} ajoute au DBC (Log ${label})` })
     } catch {
       toast({ title: "Erreur", description: "Echec de l'enregistrement DBC", variant: "destructive" })
     }
@@ -493,8 +498,21 @@ export default function ComparaisonPage() {
             </div>
           </div>
 
-          {/* Sort controls */}
-          <div className="flex items-center gap-2 text-sm">
+          {/* CAN Interface + Sort controls */}
+          <div className="flex items-center gap-4 text-sm flex-wrap">
+            <div className="flex items-center gap-2">
+              <Label className="text-xs text-muted-foreground">Interface CAN:</Label>
+              <select
+                value={canInterface}
+                onChange={(e) => setCanInterface(e.target.value as "can0" | "can1" | "vcan0")}
+                className="rounded border border-border bg-secondary px-2 py-1 text-xs text-foreground"
+              >
+                <option value="can0">can0</option>
+                <option value="can1">can1</option>
+                <option value="vcan0">vcan0 (test)</option>
+              </select>
+            </div>
+            <div className="h-4 w-px bg-border" />
             <ArrowUpDown className="h-4 w-4 text-muted-foreground" />
             <span className="text-muted-foreground">Trier par:</span>
             <div className="flex gap-1">

@@ -211,6 +211,7 @@ export function FloatingTerminal() {
           <select
             value={selectedInterface}
             onChange={(e) => setInterface(e.target.value as "can0" | "can1" | "vcan0")}
+            onMouseDown={(e) => e.stopPropagation()}
             disabled={isRunning}
             className="mr-2 rounded border border-border bg-secondary px-2 py-1 text-xs text-foreground disabled:opacity-50"
           >
@@ -253,6 +254,7 @@ export function FloatingTerminal() {
             type="text"
             value={idFilter}
             onChange={(e) => setIdFilter(e.target.value)}
+            onMouseDown={(e) => e.stopPropagation()}
             placeholder="Filtrer par ID (ex: 303, 7DF, 12E,090)"
             className="flex-1 bg-transparent text-xs font-mono text-foreground placeholder:text-muted-foreground/40 focus:outline-none"
           />

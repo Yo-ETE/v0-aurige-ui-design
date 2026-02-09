@@ -1683,16 +1683,38 @@ async def download_log_family(mission_id: str, log_id: str):
     if main_log.exists():
         family_files.append(main_log)
     
-    # Find all children recursively (log_A, log_B, log_A_A, log_A_B, etc.)
-    def find_children(parent_stem: str):
-        for suffix in ["_A", "_B", "_a", "_b"]:  # Check both cases
+    # Build a map of parentId -> children by reading metadata files
+    all_metas = {}
+    for meta_file in logs_dir.glob("*.meta.json"):
+        try:
+            with open(meta_file, "r") as f:
+                meta = json.load(f)
+            stem = meta_file.stem.replace(".meta", "")
+            all_metas[stem] = meta
+        except Exception:
+            pass
+    
+    # Find all children recursively using parentId metadata
+    def find_children_by_meta(parent_id: str):
+        for stem, meta in all_metas.items():
+            if meta.get("parentId") == parent_id:
+                child_file = logs_dir / f"{stem}.log"
+                if child_file.exists() and child_file not in family_files:
+                    family_files.append(child_file)
+                    find_children_by_meta(stem)
+    
+    find_children_by_meta(log_id)
+    
+    # Fallback: also try the old naming convention approach
+    def find_children_by_name(parent_stem: str):
+        for suffix in ["_A", "_B", "_a", "_b"]:
             child_stem = f"{parent_stem}{suffix}"
             child_file = logs_dir / f"{child_stem}.log"
-            if child_file.exists():
+            if child_file.exists() and child_file not in family_files:
                 family_files.append(child_file)
-                find_children(child_stem)  # Recursively find grandchildren
+                find_children_by_name(child_stem)
     
-    find_children(log_id)
+    find_children_by_name(log_id)
     
     if not family_files:
         raise HTTPException(status_code=404, detail="Log not found")
@@ -1707,7 +1729,7 @@ async def download_log_family(mission_id: str, log_id: str):
             path=tmp.name,
             filename=f"{log_id}_famille.zip",
             media_type="application/zip",
-            background=None,  # Don't delete immediately
+            background=None,
         )
 
 
@@ -1824,7 +1846,28 @@ async def rename_log(mission_id: str, log_id: str, request: RenameLogRequest):
     
     # Rename or update meta file
     if old_meta_file.exists():
+        # Update parentId references in the meta
+        try:
+            with open(old_meta_file, "r") as f:
+                meta = json.load(f)
+            meta["oldId"] = log_id
+            with open(old_meta_file, "w") as f:
+                json.dump(meta, f, indent=2)
+        except Exception:
+            pass
         old_meta_file.rename(new_meta_file)
+    
+    # Update children metadata: any log with parentId == log_id should now reference new_id
+    for meta_file in logs_dir.glob("*.meta.json"):
+        try:
+            with open(meta_file, "r") as f:
+                meta = json.load(f)
+            if meta.get("parentId") == log_id:
+                meta["parentId"] = new_id
+                with open(meta_file, "w") as f:
+                    json.dump(meta, f, indent=2)
+        except Exception:
+            pass
     
     return {"status": "renamed", "oldId": log_id, "newId": new_id, "newName": f"{new_id}.log"}
 
@@ -4717,55 +4760,87 @@ async def compare_logs(mission_id: str, request: CompareLogsRequest):
                 if ba and bb:
                     both_stable = ba["is_stable"] and bb["is_stable"]
                     values_differ = ba["most_common"] != bb["most_common"]
+                    is_counter = ba.get("is_counter", False) or bb.get("is_counter", False)
                     
                     if both_stable and values_differ:
+                        # Case 1: Both bytes are stable but have different dominant values
                         stable_diff_count += 1
                         any_stable_diff = True
-                    elif not both_stable and (ba.get("is_counter") or bb.get("is_counter")):
-                        # Variable byte: compare median values between logs
-                        # If the medians are far apart, this is a real state change
+                    elif not both_stable:
+                        # Case 2+3: Byte is not stable in at least one log
+                        # Compare the VALUE DISTRIBUTIONS between logs
+                        # This catches: toggle bytes (95/55), state bytes, counters, sensors
+                        vals_a_hex = []
+                        vals_b_hex = []
                         vals_a_int = []
                         vals_b_int = []
                         for p in payloads_a:
                             start = i * 2
                             if start + 2 <= len(p):
+                                hv = p[start:start+2]
+                                vals_a_hex.append(hv)
                                 try:
-                                    vals_a_int.append(int(p[start:start+2], 16))
+                                    vals_a_int.append(int(hv, 16))
                                 except ValueError:
                                     pass
                         for p in payloads_b:
                             start = i * 2
                             if start + 2 <= len(p):
+                                hv = p[start:start+2]
+                                vals_b_hex.append(hv)
                                 try:
-                                    vals_b_int.append(int(p[start:start+2], 16))
+                                    vals_b_int.append(int(hv, 16))
                                 except ValueError:
                                     pass
                         
                         if vals_a_int and vals_b_int:
+                            # For non-counter bytes (toggle/state with few values):
+                            # Compare value distribution directly
+                            counter_a = Counter(vals_a_hex)
+                            counter_b = Counter(vals_b_hex)
+                            
+                            # Calculate distribution similarity using frequency comparison
+                            all_vals = set(counter_a.keys()) | set(counter_b.keys())
+                            total_a = len(vals_a_hex)
+                            total_b = len(vals_b_hex)
+                            
+                            distribution_diff = 0.0
+                            for v in all_vals:
+                                freq_a = counter_a.get(v, 0) / total_a if total_a else 0
+                                freq_b = counter_b.get(v, 0) / total_b if total_b else 0
+                                distribution_diff += abs(freq_a - freq_b)
+                            
+                            # distribution_diff ranges 0-2 (0=identical, 2=completely different)
+                            
                             sorted_a = sorted(vals_a_int)
                             sorted_b = sorted(vals_b_int)
                             median_a = sorted_a[len(sorted_a) // 2]
                             median_b = sorted_b[len(sorted_b) // 2]
+                            median_diff = abs(median_a - median_b)
                             
-                            # Check range overlap: if less than 30% overlap, it's a real shift
+                            # Check range overlap
                             min_a, max_a = min(vals_a_int), max(vals_a_int)
                             min_b, max_b = min(vals_b_int), max(vals_b_int)
                             overlap_start = max(min_a, min_b)
                             overlap_end = min(max_a, max_b)
-                            
                             range_a = max_a - min_a + 1
                             range_b = max_b - min_b + 1
                             overlap = max(0, overlap_end - overlap_start + 1)
-                            
                             max_range = max(range_a, range_b, 1)
                             overlap_ratio = overlap / max_range
                             
-                            median_diff = abs(median_a - median_b)
+                            # Flag as differential if ANY of these conditions:
+                            # - Distribution significantly different (>0.5 on 0-2 scale)
+                            # - Medians differ by >15 (sensor shift)
+                            # - Ranges barely overlap (<30%) with some median diff
+                            # - Most common value is different AND byte has few unique vals (toggle)
+                            is_toggle = (ba["unique_count"] <= 5 and bb["unique_count"] <= 5)
+                            most_common_differs = ba["most_common"] != bb["most_common"]
                             
-                            # Flag as variable-differential if:
-                            # - Medians differ by >15 (significant shift)
-                            # - OR ranges barely overlap (<30%)
-                            if median_diff > 15 or (overlap_ratio < 0.3 and median_diff > 5):
+                            if (distribution_diff > 0.5
+                                or median_diff > 15
+                                or (overlap_ratio < 0.3 and median_diff > 5)
+                                or (is_toggle and most_common_differs and distribution_diff > 0.3)):
                                 variable_diff_count += 1
                                 any_variable_diff = True
             
@@ -4807,26 +4882,47 @@ async def compare_logs(mission_id: str, request: CompareLogsRequest):
                 if ba and bb:
                     is_counter = ba.get("is_counter", False) or bb.get("is_counter", False)
                 
-                # For counter bytes, check if distributions are significantly different
-                is_significant_variable_diff = False
-                if is_counter and ba and bb:
+                # For unstable bytes, check if distributions are significantly different
+                is_significant_diff = False
+                both_stable_here = False
+                if ba and bb:
+                    both_stable_here = ba["is_stable"] and bb["is_stable"]
+                
+                if not both_stable_here and ba and bb:
+                    vals_a_hex = []
+                    vals_b_hex = []
                     vals_a_int = []
                     vals_b_int = []
                     for p in payloads_a:
                         start = byte_idx * 2
                         if start + 2 <= len(p):
+                            hv = p[start:start+2]
+                            vals_a_hex.append(hv)
                             try:
-                                vals_a_int.append(int(p[start:start+2], 16))
+                                vals_a_int.append(int(hv, 16))
                             except ValueError:
                                 pass
                     for p in payloads_b:
                         start = byte_idx * 2
                         if start + 2 <= len(p):
+                            hv = p[start:start+2]
+                            vals_b_hex.append(hv)
                             try:
-                                vals_b_int.append(int(p[start:start+2], 16))
+                                vals_b_int.append(int(hv, 16))
                             except ValueError:
                                 pass
                     if vals_a_int and vals_b_int:
+                        counter_va = Counter(vals_a_hex)
+                        counter_vb = Counter(vals_b_hex)
+                        total_a = len(vals_a_hex)
+                        total_b = len(vals_b_hex)
+                        all_vals = set(counter_va.keys()) | set(counter_vb.keys())
+                        distribution_diff = 0.0
+                        for v in all_vals:
+                            freq_a = counter_va.get(v, 0) / total_a if total_a else 0
+                            freq_b = counter_vb.get(v, 0) / total_b if total_b else 0
+                            distribution_diff += abs(freq_a - freq_b)
+                        
                         median_a = sorted(vals_a_int)[len(vals_a_int) // 2]
                         median_b = sorted(vals_b_int)[len(vals_b_int) // 2]
                         median_diff = abs(median_a - median_b)
@@ -4837,10 +4933,20 @@ async def compare_logs(mission_id: str, request: CompareLogsRequest):
                         overlap = max(0, overlap_end - overlap_start + 1)
                         max_range = max(max_a - min_a + 1, max_b - min_b + 1, 1)
                         overlap_ratio = overlap / max_range
-                        if median_diff > 15 or (overlap_ratio < 0.3 and median_diff > 5):
-                            is_significant_variable_diff = True
+                        
+                        is_toggle = (ba["unique_count"] <= 5 and bb["unique_count"] <= 5)
+                        most_common_differs = ba["most_common"] != bb["most_common"]
+                        
+                        if (distribution_diff > 0.5
+                            or median_diff > 15
+                            or (overlap_ratio < 0.3 and median_diff > 5)
+                            or (is_toggle and most_common_differs and distribution_diff > 0.3)):
+                            is_significant_diff = True
                 
-                if byte_a != byte_b and (not is_counter or is_significant_variable_diff):
+                # Include byte as changed if:
+                # - It's a stable byte that differs
+                # - Or it's an unstable byte with significant distribution change
+                if byte_a != byte_b and (both_stable_here or is_significant_diff):
                     bytes_changed.append(byte_idx)
                     try:
                         val_a = int(byte_a, 16)

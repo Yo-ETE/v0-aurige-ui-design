@@ -799,6 +799,7 @@ export default function OBDII() {
                 disabled={isLoading !== null}
                 onClick={async () => {
                   setIsLoading("loadreport")
+                  setError(null)
                   try {
                     const res = await getLastOBDReport()
                     if (res.status === "success" && res.report) {
@@ -821,7 +822,7 @@ export default function OBDII() {
                         setDtcCodes(report.dtcs)
                       }
                     } else {
-                      setError("Aucun rapport OBD disponible")
+                      setError("Aucun rapport OBD disponible. Lancez un scan complet d'abord.")
                     }
                   } catch {
                     setError("Erreur lors du chargement du rapport")

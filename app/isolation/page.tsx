@@ -305,6 +305,7 @@ export default function Isolation() {
   const [analysisDirection, setAnalysisDirection] = useState<"before" | "after" | "both">("both")
   const [selectedFrame, setSelectedFrame] = useState<LogFrame | null>(null)
   const [originLogId, setOriginLogId] = useState<string | null>(null)
+  const [replayCanInterface, setReplayCanInterface] = useState<"can0" | "can1" | "vcan0">("can0")
   const [availableLogsForAnalysis, setAvailableLogsForAnalysis] = useState<Array<{id: string, name: string, depth?: number}>>([])
   const [selectedCoOccurrenceIds, setSelectedCoOccurrenceIds] = useState<Set<string>>(new Set())
   
@@ -1428,6 +1429,18 @@ export default function Isolation() {
                   </SelectContent>
                 </Select>
               </div>
+              <div className="flex items-center gap-1">
+                <Label className="text-xs whitespace-nowrap">Replay:</Label>
+                <select
+                  value={replayCanInterface}
+                  onChange={(e) => setReplayCanInterface(e.target.value as "can0" | "can1" | "vcan0")}
+                  className="rounded border border-border bg-secondary px-2 py-1 text-xs text-foreground h-7"
+                >
+                  <option value="can0">can0</option>
+                  <option value="can1">can1</option>
+                  <option value="vcan0">vcan0</option>
+                </select>
+              </div>
               {selectedFrame && (
                 <div className="flex items-center gap-1 col-span-2 sm:col-span-1">
                   <span className="text-xs text-muted-foreground">Trame:</span>
@@ -1484,7 +1497,7 @@ export default function Isolation() {
                                   onClick={async (e) => {
                                     e.stopPropagation()
                                     try {
-                                      await sendCANFrame({ interface: "can0", canId: frame.canId, data: frame.data || frame.raw || "" })
+                                      await sendCANFrame({ interface: replayCanInterface, canId: frame.canId, data: frame.data || frame.raw || "" })
                                     } catch {
                                       // silent
                                     }
@@ -1574,7 +1587,6 @@ export default function Isolation() {
                   // Qualifier la trame cible (t0)
                   setSelectedFamilyIds([coOccurrenceResult.targetFrame.canId])
                   setShowFamilyDiff(true)
-                  handleFamilyDiff([coOccurrenceResult.targetFrame.canId])
                 }}
               >
                 Qualifier t0
