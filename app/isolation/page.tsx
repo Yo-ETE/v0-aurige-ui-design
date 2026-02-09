@@ -294,6 +294,8 @@ export default function Isolation() {
   // Log viewer state
   const [viewingLog, setViewingLog] = useState<IsolationLog | null>(null)
   const [logFrames, setLogFrames] = useState<LogFrame[]>([])
+  const [replayingFrameIdx, setReplayingFrameIdx] = useState<number | null>(null)
+  const [replayedFrameIdx, setReplayedFrameIdx] = useState<number | null>(null)
   const [isLoadingFrames, setIsLoadingFrames] = useState(false)
   const [totalFrames, setTotalFrames] = useState(0)
   
@@ -834,11 +836,12 @@ export default function Isolation() {
     setShowSignalEditor(true)
   }
   
-  // Save signal to mission DBC
+  // Save signal to mission DBC - always generate unique ID to avoid overwriting
   const handleSaveSignal = async () => {
     if (!missionId || !editingSignal) return
     try {
-      await addDBCSignal(missionId, editingSignal)
+      const uniqueId = `${editingSignal.can_id}_${editingSignal.name}_${Date.now().toString(36)}`
+      await addDBCSignal(missionId, { ...editingSignal, id: uniqueId })
       setShowSignalEditor(false)
       setEditingSignal(null)
     } catch (error) {
@@ -1493,18 +1496,31 @@ export default function Isolation() {
                                 <Button
                                   size="icon"
                                   variant="ghost"
-                                  className="h-6 w-6 text-success hover:text-success"
+                                  className={`h-6 w-6 ${replayedFrameIdx === index ? "text-success bg-success/20" : "text-success hover:text-success"}`}
+                                  disabled={replayingFrameIdx === index}
                                   onClick={async (e) => {
                                     e.stopPropagation()
+                                    setReplayingFrameIdx(index)
+                                    setReplayedFrameIdx(null)
                                     try {
                                       await sendCANFrame({ interface: replayCanInterface, canId: frame.canId, data: frame.data || frame.raw || "" })
+                                      setReplayedFrameIdx(index)
+                                      setTimeout(() => setReplayedFrameIdx((prev) => prev === index ? null : prev), 2000)
                                     } catch {
-                                      // silent
+                                      // show brief error
+                                    } finally {
+                                      setReplayingFrameIdx(null)
                                     }
                                   }}
-                                  title="Rejouer cette trame (envoi direct sur CAN)"
+                                  title={`Rejouer sur ${replayCanInterface}: ${frame.canId}#${frame.data || frame.raw}`}
                                 >
-                                  <Play className="h-3 w-3" />
+                                  {replayingFrameIdx === index ? (
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                  ) : replayedFrameIdx === index ? (
+                                    <CheckCircle2 className="h-3 w-3" />
+                                  ) : (
+                                    <Play className="h-3 w-3" />
+                                  )}
                                 </Button>
                                 <Button
                                   size="icon"

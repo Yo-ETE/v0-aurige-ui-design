@@ -1617,18 +1617,38 @@ async def list_mission_logs(mission_id: str):
         is_origin = False
         
         # First check metadata for parent info (most reliable)
-        if meta.get("parentLog"):
-            parent_id = meta.get("parentLog")
+        if meta.get("parentId"):
+            # parentId from metadata (set by split or updated by rename)
+            pid = meta.get("parentId")
+            if pid in log_names:
+                parent_id = pid
+            else:
+                # parentId might reference old (pre-rename) ID, search for actual file
+                # by checking if any log has oldId matching pid
+                for other_stem in log_names:
+                    other_meta_file = logs_dir / f"{other_stem}.meta.json"
+                    if other_meta_file.exists():
+                        try:
+                            with open(other_meta_file, "r") as omf:
+                                other_meta = json.load(omf)
+                            if other_meta.get("oldId") == pid:
+                                parent_id = other_stem
+                                break
+                        except Exception:
+                            pass
+                if not parent_id:
+                    parent_id = pid  # Keep it even if not found
+        elif meta.get("parentLog"):
+            parent_id = meta.get("parentLog") if meta.get("parentLog") in log_names else meta.get("parentLog")
         elif meta.get("splitFrom"):
-            parent_id = meta.get("splitFrom")
+            parent_id = meta.get("splitFrom") if meta.get("splitFrom") in log_names else meta.get("splitFrom")
         # Fallback: detect by naming convention (_A, _B suffixes)
-        # For nested splits like foo_A_B, parent is foo_A (not foo)
         elif log_stem.endswith(("_A", "_B", "_a", "_b")):
-            potential_parent = log_stem[:-2]  # Remove _A, _B, _a, or _b
+            potential_parent = log_stem[:-2]
             if potential_parent in log_names:
                 parent_id = potential_parent
         
-        # Check if this log has children (is an origin) - check both cases
+        # Check if this log has children (is an origin) - check naming and metadata
         if (f"{log_stem}_A" in log_names or f"{log_stem}_B" in log_names or
             f"{log_stem}_a" in log_names or f"{log_stem}_b" in log_names):
             is_origin = True
@@ -1705,7 +1725,13 @@ async def download_log_family(mission_id: str, log_id: str):
     
     find_children_by_meta(log_id)
     
-    # Fallback: also try the old naming convention approach
+    # Also check if this log was renamed (has oldId) and search children by old name
+    parent_meta = all_metas.get(log_id, {})
+    old_id = parent_meta.get("oldId")
+    if old_id and old_id != log_id:
+        find_children_by_meta(old_id)
+    
+    # Fallback: also try the old naming convention approach with both current and old IDs
     def find_children_by_name(parent_stem: str):
         for suffix in ["_A", "_B", "_a", "_b"]:
             child_stem = f"{parent_stem}{suffix}"
@@ -1715,6 +1741,8 @@ async def download_log_family(mission_id: str, log_id: str):
                 find_children_by_name(child_stem)
     
     find_children_by_name(log_id)
+    if old_id and old_id != log_id:
+        find_children_by_name(old_id)
     
     if not family_files:
         raise HTTPException(status_code=404, detail="Log not found")
@@ -4455,15 +4483,17 @@ async def add_dbc_signal(mission_id: str, signal: DBCSignal):
         }
         data["messages"].append(message)
     
-    # Generate ID if not provided
+    # Generate unique ID if not provided
     if not signal.id:
-        signal.id = f"{signal.can_id}_{signal.name}_{signal.start_bit}"
+        unique_suffix = datetime.now().strftime("%H%M%S") + str(int(time.time() * 1000) % 1000)
+        signal.id = f"{signal.can_id}_{signal.name}_{unique_suffix}"
     
-    # Add or update signal
+    # Add or update signal - only update if EXACT same id, never match by (can_id, start_bit)
+    # This allows multiple signals on the same byte (e.g. ouverture + fermeture)
     signal_dict = signal.model_dump()
     existing_idx = None
     for idx, s in enumerate(message["signals"]):
-        if s.get("id") == signal.id or (s["can_id"] == signal.can_id and s["start_bit"] == signal.start_bit):
+        if s.get("id") == signal.id:
             existing_idx = idx
             break
     

@@ -8,6 +8,7 @@
  */
 
 import { create } from "zustand"
+import { persist } from "zustand/middleware"
 
 export interface IsolationLog {
   id: string
@@ -89,6 +90,7 @@ function removeLogRecursive(logs: IsolationLog[], logId: string): IsolationLog[]
 }
 
 export const useIsolationStore = create<IsolationStore>()(
+  persist(
     (set, get) => ({
       currentMissionId: null,
       logs: [],
@@ -157,5 +159,13 @@ export const useIsolationStore = create<IsolationStore>()(
       findLog: (logId) => {
         return findLogRecursive(get().logs, logId)
       },
-    })
+    }),
+    {
+      name: "aurige-isolation-store",
+      partialize: (state) => ({
+        currentMissionId: state.currentMissionId,
+        logs: state.logs,
+      }),
+    }
+  )
 )
