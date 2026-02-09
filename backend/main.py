@@ -1862,6 +1862,54 @@ async def delete_log(mission_id: str, log_id: str):
     return {"status": "deleted", "id": log_id}
 
 
+class CreateFrameLogRequest(BaseModel):
+    can_id: str
+    data: str
+    timestamp: Optional[str] = None
+    name: Optional[str] = None
+    interface: str = "can0"
+
+@app.post("/api/missions/{mission_id}/logs/create-frame")
+async def create_frame_log(mission_id: str, request: CreateFrameLogRequest):
+    """Create a .log file containing a single CAN frame. Used for success frame extraction."""
+    load_mission(mission_id)
+    logs_dir = get_mission_logs_dir(mission_id)
+    
+    ts = request.timestamp or f"{time.time():.6f}"
+    iface = request.interface
+    name = request.name or f"success_{request.can_id}_{datetime.now().strftime('%H%M%S')}"
+    if not name.endswith(".log"):
+        name = name
+    
+    log_id = name
+    log_file = logs_dir / f"{log_id}.log"
+    
+    # Avoid overwriting
+    counter = 1
+    while log_file.exists():
+        log_id = f"{name}_{counter}"
+        log_file = logs_dir / f"{log_id}.log"
+        counter += 1
+    
+    # Write the .log file in standard candump format
+    line = f"({ts}) {iface} {request.can_id}#{request.data}\n"
+    with open(log_file, "w") as f:
+        f.write(line)
+    
+    # Write meta with success tag
+    meta_file = logs_dir / f"{log_id}.meta.json"
+    meta = {
+        "tags": ["success"],
+        "description": f"Trame isolee {request.can_id}#{request.data}",
+    }
+    with open(meta_file, "w") as f:
+        json.dump(meta, f, indent=2)
+    
+    update_mission_stats(mission_id)
+    
+    return {"status": "ok", "logId": log_id, "filename": f"{log_id}.log"}
+
+
 class UpdateLogTagsRequest(BaseModel):
     tags: list[str]
 

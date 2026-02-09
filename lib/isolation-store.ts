@@ -21,12 +21,14 @@ export interface IsolationLog {
 }
 
 export interface SuccessFrame {
+  id: string              // unique ID
   canId: string
   data: string
   timestamp?: string
   sourceLog: string       // nom du log source
   sourceMission: string   // id de la mission
-  label?: string          // label optionnel (renomme)
+  label?: string          // label optionnel (renomme par l'utilisateur)
+  logId?: string          // ID du .log cree sur le backend
   addedAt: number         // timestamp d'ajout
 }
 
@@ -69,8 +71,8 @@ interface IsolationStore {
   
   // Success frames management
   addSuccessFrame: (frame: SuccessFrame) => void
-  removeSuccessFrame: (addedAt: number) => void
-  renameSuccessFrame: (addedAt: number, label: string) => void
+  removeSuccessFrame: (id: string) => void
+  renameSuccessFrame: (id: string, label: string) => void
   clearSuccessFrames: () => void
 }
 
@@ -196,13 +198,13 @@ export const useIsolationStore = create<IsolationStore>()(
         set((state) => ({ successFrames: [...state.successFrames, frame] }))
       },
 
-      removeSuccessFrame: (addedAt) => {
-        set((state) => ({ successFrames: state.successFrames.filter(f => f.addedAt !== addedAt) }))
+      removeSuccessFrame: (id) => {
+        set((state) => ({ successFrames: state.successFrames.filter(f => f.id !== id) }))
       },
 
-      renameSuccessFrame: (addedAt, label) => {
+      renameSuccessFrame: (id, label) => {
         set((state) => ({
-          successFrames: state.successFrames.map(f => f.addedAt === addedAt ? { ...f, label } : f),
+          successFrames: state.successFrames.map(f => f.id === id ? { ...f, label } : f),
         }))
       },
 

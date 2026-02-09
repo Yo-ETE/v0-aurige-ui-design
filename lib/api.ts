@@ -443,6 +443,26 @@ export async function updateLogTags(missionId: string, logId: string, tags: stri
   })
 }
 
+export async function createFrameLog(missionId: string, params: {
+  canId: string
+  data: string
+  timestamp?: string
+  name?: string
+  interface?: string
+}): Promise<{ status: string; logId: string; filename: string }> {
+  return fetchApi(`/missions/${missionId}/logs/create-frame`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      can_id: params.canId,
+      data: params.data,
+      timestamp: params.timestamp,
+      name: params.name,
+      interface: params.interface,
+    }),
+  })
+}
+
 export async function deleteLog(missionId: string, logId: string): Promise<void> {
   await fetchApi(`/missions/${missionId}/logs/${logId}`, {
     method: "DELETE",
