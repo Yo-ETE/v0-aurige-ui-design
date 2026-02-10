@@ -18,6 +18,8 @@ import {
   GripHorizontal,
   FileCode,
   ChevronRight,
+  Zap,
+  TrendingUp,
 } from "lucide-react"
 import { useSnifferStore, type SnifferFrame, type DecodedSignal } from "@/lib/sniffer-store"
 import { useMissionStore } from "@/lib/mission-store"
@@ -46,24 +48,36 @@ function SnifferRow({
   dbcEntry, 
   dbcEnabled,
   decodeSignals,
+  highlightChangesEnabled,
 }: { 
   frame: SnifferFrame
   dbcEntry?: { messageName: string } | null
   dbcEnabled: boolean
   decodeSignals: (canId: string, bytes: string[]) => DecodedSignal[]
+  highlightChangesEnabled: boolean
 }) {
   const [expanded, setExpanded] = useState(false)
+  const [flashKey, setFlashKey] = useState(0)
   const isKnown = !!dbcEntry
   const decoded = expanded && dbcEnabled && isKnown ? decodeSignals(frame.canId, frame.bytes) : []
+
+  // Trigger flash animation when payload changes
+  useEffect(() => {
+    if (highlightChangesEnabled && frame.payloadChanged && !frame.isNoisy) {
+      setFlashKey(prev => prev + 1)
+    }
+  }, [frame.payloadChanged, frame.changedAt, highlightChangesEnabled, frame.isNoisy])
 
   return (
     <div>
       <div 
+        key={flashKey}
         className={cn(
           "flex items-center gap-3 px-2 py-px rounded transition-colors",
           dbcEnabled && isKnown && "bg-success/5 hover:bg-success/10",
           dbcEnabled && !isKnown && "bg-warning/5 hover:bg-warning/10",
           !dbcEnabled && "hover:bg-accent/20",
+          highlightChangesEnabled && frame.payloadChanged && !frame.isNoisy && "sniffer-row-flash",
         )}
         onClick={dbcEnabled && isKnown ? () => setExpanded(!expanded) : undefined}
         style={dbcEnabled && isKnown ? { cursor: "pointer" } : undefined}
@@ -124,6 +138,18 @@ function SnifferRow({
         <span className="w-12 flex-shrink-0 text-right text-muted-foreground/50">
           {frame.count}
         </span>
+        {/* Delta badge for changed frames */}
+        {highlightChangesEnabled && frame.payloadChanged && !frame.isNoisy && (
+          <span className="flex-shrink-0 inline-flex items-center gap-0.5 rounded bg-warning/20 px-1 py-px text-[9px] font-bold text-warning leading-tight">
+            Δ{frame.deltaBytes > 0 && frame.deltaBytes}
+          </span>
+        )}
+        {/* Noisy badge */}
+        {frame.isNoisy && (
+          <span className="flex-shrink-0 inline-flex items-center rounded bg-muted/40 px-1 py-px text-[9px] font-medium text-muted-foreground leading-tight">
+            noisy
+          </span>
+        )}
       </div>
       {/* Expanded signal decode view */}
       {expanded && decoded.length > 0 && (
@@ -159,6 +185,9 @@ export function FloatingTerminal() {
     dbcLookup,
     dbcLoading,
     dbcFilter,
+    highlightChangesEnabled,
+    changedOnlyMode,
+    changedWindowMs,
     setInterface,
     setIdFilter,
     start,
@@ -171,6 +200,9 @@ export function FloatingTerminal() {
     loadDbc,
     setDbcFilter,
     decodeSignals,
+    toggleHighlightChanges,
+    toggleChangedOnly,
+    setChangedWindow,
   } = useSnifferStore()
 
   const currentMission = useMissionStore((state) => state.getCurrentMission())
@@ -246,6 +278,16 @@ export function FloatingTerminal() {
   const filteredIds = useMemo(() => {
     let ids = sortedIds
     
+    // Apply "Changed only" filter
+    if (changedOnlyMode) {
+      const now = Date.now()
+      ids = ids.filter(id => {
+        const frame = frameMap.get(id)
+        if (!frame || frame.changedAt === 0) return false
+        return (now - frame.changedAt) <= changedWindowMs
+      })
+    }
+    
     // Apply DBC filter
     if (dbcEnabled && dbcFilter === "dbc") {
       ids = ids.filter(id => dbcLookup.has(id.toUpperCase()))
@@ -260,7 +302,7 @@ export function FloatingTerminal() {
     }
     
     return ids
-  }, [sortedIds, idFilter, dbcEnabled, dbcFilter, dbcLookup])
+  }, [sortedIds, idFilter, dbcEnabled, dbcFilter, dbcLookup, changedOnlyMode, changedWindowMs, frameMap])
 
   if (isMinimized) {
     return (
@@ -317,6 +359,36 @@ export function FloatingTerminal() {
           )}
         </div>
         <div className="flex items-center gap-1">
+          <Button
+            size="icon"
+            variant="ghost"
+            className={cn(
+              "h-7 w-7",
+              highlightChangesEnabled 
+                ? "text-warning hover:text-warning/80" 
+                : "text-muted-foreground hover:text-foreground"
+            )}
+            onClick={toggleHighlightChanges}
+            onMouseDown={(e) => e.stopPropagation()}
+            title={highlightChangesEnabled ? "Desactiver highlight changes" : "Activer highlight changes"}
+          >
+            <Zap className="h-4 w-4" />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className={cn(
+              "h-7 w-7",
+              changedOnlyMode 
+                ? "text-warning hover:text-warning/80" 
+                : "text-muted-foreground hover:text-foreground"
+            )}
+            onClick={toggleChangedOnly}
+            onMouseDown={(e) => e.stopPropagation()}
+            title={changedOnlyMode ? "Montrer tous les IDs" : "Filtrer IDs changes uniquement"}
+          >
+            <TrendingUp className="h-4 w-4" />
+          </Button>
           <Button
             size="icon"
             variant="ghost"
@@ -459,6 +531,7 @@ export function FloatingTerminal() {
                   dbcEntry={dbcEntry}
                   dbcEnabled={dbcEnabled}
                   decodeSignals={decodeSignals}
+                  highlightChangesEnabled={highlightChangesEnabled}
                 />
               )
             })}
@@ -513,6 +586,11 @@ export function FloatingTerminal() {
           Clear
         </Button>
         <div className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
+          {highlightChangesEnabled && changedOnlyMode && (
+            <span className="text-warning font-medium">
+              Δ {filteredIds.length}
+            </span>
+          )}
           {dbcEnabled && dbcStats && (
             <span className={cn(
               "font-medium",

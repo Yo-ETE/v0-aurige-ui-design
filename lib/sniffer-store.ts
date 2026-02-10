@@ -47,6 +47,14 @@ export interface SnifferFrame {
   cycleMs: number
   /** Last raw timestamp for delta calculation */
   _lastRawTs: number
+  /** Payload changed flag (for flash animation) */
+  payloadChanged: boolean
+  /** Number of bytes that changed */
+  deltaBytes: number
+  /** Timestamp when payload changed */
+  changedAt: number
+  /** Noisy flag (changes too frequently) */
+  isNoisy: boolean
 }
 
 interface SnifferState {
@@ -71,6 +79,13 @@ interface SnifferState {
   dbcLoading: boolean
   dbcFilter: "all" | "dbc" | "unknown"
   
+  // Change tracking (for flash animation)
+  highlightChangesEnabled: boolean
+  changedOnlyMode: boolean
+  changedWindowMs: number
+  lastPayloadById: Map<string, string>
+  changeCountById: Map<string, { count: number; lastResetTs: number }>
+  
   // Terminal state
   isPaused: boolean
   isMinimized: boolean
@@ -93,6 +108,9 @@ interface SnifferState {
   loadDbc: (missionId: string) => Promise<void>
   setDbcFilter: (filter: "all" | "dbc" | "unknown") => void
   decodeSignals: (canId: string, bytes: string[]) => DecodedSignal[]
+  toggleHighlightChanges: () => void
+  toggleChangedOnly: () => void
+  setChangedWindow: (ms: number) => void
 }
 
 export const useSnifferStore = create<SnifferState>((set, get) => ({
@@ -108,6 +126,11 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
   dbcMissionId: null,
   dbcLoading: false,
   dbcFilter: "all",
+  highlightChangesEnabled: true,
+  changedOnlyMode: false,
+  changedWindowMs: 5000,
+  lastPayloadById: new Map(),
+  changeCountById: new Map(),
   isPaused: false,
   isMinimized: false,
   isExpanded: false,
@@ -157,7 +180,15 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
       const ws = createSnifferWebSocket(
         selectedInterface,
         (msg: CANMessage) => {
-          const { isPaused, frameMap, sortedIds, totalMessages } = get()
+          const { 
+            isPaused, 
+            frameMap, 
+            sortedIds, 
+            totalMessages, 
+            lastPayloadById, 
+            changeCountById,
+            highlightChangesEnabled,
+          } = get()
           if (isPaused) return
           
           const id = msg.canId.toUpperCase()
@@ -165,10 +196,12 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
           const now = typeof msg.timestamp === "number" 
             ? msg.timestamp 
             : Date.now() / 1000
-          const ts = new Date(now * 1000).toISOString().substr(11, 12)
+          const nowMs = now * 1000
+          const ts = new Date(nowMs).toISOString().substr(11, 12)
           
           const existing = frameMap.get(id)
           
+          // Byte-level change detection (for coloring)
           const changedIndices = new Set<number>()
           if (existing) {
             for (let i = 0; i < newBytes.length; i++) {
@@ -177,6 +210,46 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
               }
             }
           }
+          
+          // Payload-level change detection (for flash animation)
+          const payloadHex = newBytes.join("")
+          const prevPayloadHex = lastPayloadById.get(id)
+          let payloadChanged = false
+          let deltaBytes = 0
+          let isNoisy = false
+          
+          if (highlightChangesEnabled && prevPayloadHex !== undefined) {
+            if (prevPayloadHex !== payloadHex) {
+              payloadChanged = true
+              // Count how many bytes changed
+              const prevBytesArr = prevPayloadHex.match(/.{1,2}/g) || []
+              const maxLen = Math.max(newBytes.length, prevBytesArr.length)
+              for (let i = 0; i < maxLen; i++) {
+                const a = newBytes[i] || ""
+                const b = prevBytesArr[i] || ""
+                if (a !== b) deltaBytes++
+              }
+              
+              // Track change frequency for noise detection
+              const changeStats = changeCountById.get(id) || { count: 0, lastResetTs: nowMs }
+              const timeSinceReset = nowMs - changeStats.lastResetTs
+              
+              if (timeSinceReset > 1000) {
+                // Reset counter every second
+                changeCountById.set(id, { count: 1, lastResetTs: nowMs })
+              } else {
+                const newCount = changeStats.count + 1
+                changeCountById.set(id, { count: newCount, lastResetTs: changeStats.lastResetTs })
+                // Mark as noisy if > 10 changes per second
+                if (newCount > 10) {
+                  isNoisy = true
+                }
+              }
+            }
+          }
+          
+          // Update payload memory
+          lastPayloadById.set(id, payloadHex)
           
           const deltaMs = existing && existing._lastRawTs > 0
             ? Math.round((now - existing._lastRawTs) * 1000)
@@ -198,6 +271,10 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
             dlc: newBytes.length,
             cycleMs,
             _lastRawTs: now,
+            payloadChanged,
+            deltaBytes,
+            changedAt: payloadChanged ? nowMs : (existing?.changedAt || 0),
+            isNoisy,
           }
           
           const newMap = new Map(frameMap)
@@ -217,6 +294,8 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
             frameMap: newMap,
             sortedIds: newSortedIds,
             totalMessages: totalMessages + 1,
+            lastPayloadById,
+            changeCountById,
           })
         },
         () => {
@@ -354,4 +433,10 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
     }
     return decoded
   },
+  
+  toggleHighlightChanges: () => set((state) => ({ highlightChangesEnabled: !state.highlightChangesEnabled })),
+  
+  toggleChangedOnly: () => set((state) => ({ changedOnlyMode: !state.changedOnlyMode })),
+  
+  setChangedWindow: (ms: number) => set({ changedWindowMs: ms }),
 }))

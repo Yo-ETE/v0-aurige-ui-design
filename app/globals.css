@@ -108,6 +108,31 @@
   }
 }
 
+/* CAN Sniffer flash animation for payload changes */
+@keyframes sniffer-flash {
+  0% {
+    background-color: oklch(0.75 0.15 70 / 0.3);
+    box-shadow: 0 0 0 2px oklch(0.75 0.15 70 / 0.6);
+  }
+  50% {
+    background-color: oklch(0.75 0.15 70 / 0.2);
+    box-shadow: 0 0 0 1px oklch(0.75 0.15 70 / 0.4);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: none;
+  }
+}
+
+.sniffer-row-flash {
+  animation: sniffer-flash 800ms ease-out;
+}
+
+.sniffer-row-flash-subtle {
+  animation: sniffer-flash 600ms ease-out;
+  animation-iteration-count: 1;
+}
+
 /* Mobile responsive utilities */
 @layer utilities {
   /* Improve touch targets on mobile */
