@@ -401,6 +401,71 @@ export async function getLogsAnalysis(missionId: string, logId?: string): Promis
 }
 
 // =============================================================================
+// Crash Recovery
+// =============================================================================
+
+export interface FuzzingHistoryFrame {
+  id: string
+  data: string
+  timestamp: number
+}
+
+export interface FuzzingHistory {
+  exists: boolean
+  frames: FuzzingHistoryFrame[]
+  started_at?: number
+  stopped_at?: number
+  total_sent?: number
+  message?: string
+}
+
+export interface CrashRecoveryResult {
+  id: string
+  status: string
+  frame?: string
+  error?: string
+}
+
+export interface CrashRecoveryResponse {
+  status: string
+  results: CrashRecoveryResult[]
+  message: string
+}
+
+export interface LogComparisonResult {
+  pre_fuzz_ids: string[]
+  fuzzing_ids: string[]
+  suspect_ids: string[]
+  message: string
+}
+
+export async function attemptCrashRecovery(
+  iface: CANInterface,
+  suspectIds?: string[]
+): Promise<CrashRecoveryResponse> {
+  return fetchApi("/fuzzing/crash-recovery", {
+    method: "POST",
+    body: JSON.stringify({
+      interface: iface,
+      suspectIds,
+    }),
+  })
+}
+
+export async function getFuzzingHistory(): Promise<FuzzingHistory> {
+  return fetchApi("/fuzzing/history")
+}
+
+export async function compareLogsWithFuzzing(
+  missionId: string,
+  logId: string
+): Promise<LogComparisonResult> {
+  return fetchApi(`/fuzzing/compare-logs?mission_id=${missionId}&log_id=${logId}`, {
+    method: "POST",
+  })
+}
+
+// =============================================================================
 // Sniffer
 // =============================================================================
 

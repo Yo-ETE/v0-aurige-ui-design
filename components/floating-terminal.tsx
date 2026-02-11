@@ -390,17 +390,34 @@ export function FloatingTerminal() {
             <Zap className="h-4 w-4" />
           </Button>
           {highlightChangesEnabled && (
-            <select
-              value={highlightMode}
-              onChange={(e) => setHighlightMode(e.target.value as "payload" | "signal" | "both")}
-              onMouseDown={(e) => e.stopPropagation()}
-              className="h-7 rounded border border-border bg-secondary px-2 text-[10px] text-foreground"
-              title="Mode de detection"
-            >
-              <option value="payload">Payload</option>
-              <option value="signal">Signal</option>
-              <option value="both">Both</option>
-            </select>
+            <>
+              <select
+                value={highlightMode}
+                onChange={(e) => setHighlightMode(e.target.value as "payload" | "signal" | "both")}
+                onMouseDown={(e) => e.stopPropagation()}
+                className="h-7 rounded border border-border bg-secondary px-2 text-[10px] text-foreground"
+                title="Mode de detection"
+              >
+                <option value="payload">Payload</option>
+                <option value="signal">Signal</option>
+                <option value="both">Both</option>
+              </select>
+              <Button
+                size="icon"
+                variant="ghost"
+                className={cn(
+                  "h-7 w-7",
+                  ignoreNoisy 
+                    ? "text-muted-foreground hover:text-foreground" 
+                    : "text-warning hover:text-warning/80"
+                )}
+                onClick={toggleIgnoreNoisy}
+                onMouseDown={(e) => e.stopPropagation()}
+                title={ignoreNoisy ? "Afficher les IDs bruyants" : "Masquer les IDs bruyants"}
+              >
+                <span className="text-xs font-bold">N</span>
+              </Button>
+            </>
           )}
           <Button
             size="icon"

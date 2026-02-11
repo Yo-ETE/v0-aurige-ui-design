@@ -217,7 +217,19 @@ class FuzzingRequest(BaseModel):
     
     # DLC (data length code)
     dlc: int = 8
+    
+    # Crash detection & recovery
+    enable_crash_detection: bool = Field(alias="enableCrashDetection", default=True)
 
+    class Config:
+        populate_by_name = True
+
+
+class CrashRecoveryRequest(BaseModel):
+    """Request to attempt crash recovery"""
+    interface: str = "can0"
+    suspect_ids: Optional[list] = Field(alias="suspectIds", default=None)  # IDs to try reset on
+    
     class Config:
         populate_by_name = True
 
@@ -1693,8 +1705,131 @@ async def stop_fuzzing():
 @app.get("/api/fuzzing/status")
 async def get_fuzzing_status():
     """Get fuzzing status"""
-    is_running = state.fuzzing_process and state.fuzzing_process.returncode is None
+    is_running = state.fuzzing_process and state.fuzzing_process.returncode is not None
     return {"running": is_running}
+
+
+@app.post("/api/fuzzing/crash-recovery")
+async def attempt_crash_recovery(request: CrashRecoveryRequest):
+    """
+    Attempt to recover from a crash by sending reset frames (00 00 00...).
+    If suspect_ids provided, only reset those. Otherwise, try common crash IDs.
+    """
+    iface = request.interface
+    suspect_ids = request.suspect_ids or []
+    
+    # Common crash-related IDs (airbag, powertrain, BSI status)
+    common_crash_ids = ["4C8", "5E8", "3B7", "360", "1A0", "0F6"]
+    
+    ids_to_reset = suspect_ids if suspect_ids else common_crash_ids
+    
+    results = []
+    for can_id_hex in ids_to_reset:
+        # Send zero reset frame
+        reset_frame = f"{can_id_hex}#0000000000000000"
+        try:
+            result = run_command(["cansend", iface, reset_frame], check=False)
+            results.append({
+                "id": can_id_hex,
+                "status": "sent" if result.returncode == 0 else "failed",
+                "frame": reset_frame,
+            })
+            # Small delay between resets
+            await asyncio.sleep(0.05)
+        except Exception as e:
+            results.append({
+                "id": can_id_hex,
+                "status": "error",
+                "error": str(e),
+            })
+    
+    return {
+        "status": "recovery_attempted",
+        "results": results,
+        "message": f"Sent {len([r for r in results if r['status'] == 'sent'])} reset frames",
+    }
+
+
+@app.get("/api/fuzzing/history")
+async def get_fuzzing_history():
+    """
+    Get the last fuzzing history (frames sent before potential crash).
+    This reads from /tmp/aurige_fuzz_history.json if it exists.
+    """
+    history_file = Path("/tmp/aurige_fuzz_history.json")
+    if not history_file.exists():
+        return {
+            "exists": False,
+            "frames": [],
+            "message": "No fuzzing history found. Run fuzzing with crash detection enabled.",
+        }
+    
+    try:
+        with open(history_file, "r") as f:
+            data = json.load(f)
+        return {
+            "exists": True,
+            "frames": data.get("frames", []),
+            "started_at": data.get("started_at"),
+            "stopped_at": data.get("stopped_at"),
+            "total_sent": data.get("total_sent", 0),
+        }
+    except Exception as e:
+        return {
+            "exists": True,
+            "error": str(e),
+            "frames": [],
+        }
+
+
+@app.post("/api/fuzzing/compare-logs")
+async def compare_logs_with_fuzzing(mission_id: str, log_id: str):
+    """
+    Compare a pre-fuzz log with fuzzing history to identify suspect IDs.
+    Returns IDs that appeared during fuzzing but not in normal operation.
+    """
+    # Read pre-fuzz log
+    logs_dir = get_mission_logs_dir(mission_id)
+    log_file = logs_dir / f"{log_id}.log"
+    
+    if not log_file.exists():
+        raise HTTPException(status_code=404, detail="Log file not found")
+    
+    # Extract IDs from pre-fuzz log
+    pre_fuzz_ids = set()
+    try:
+        with open(log_file, "r") as f:
+            for line in f:
+                parts = line.strip().split()
+                if len(parts) >= 3:
+                    frame_parts = parts[2].split("#")
+                    if len(frame_parts) == 2:
+                        pre_fuzz_ids.add(frame_parts[0].upper())
+    except:
+        pass
+    
+    # Read fuzzing history
+    history_file = Path("/tmp/aurige_fuzz_history.json")
+    fuzzing_ids = set()
+    if history_file.exists():
+        try:
+            with open(history_file, "r") as f:
+                data = json.load(f)
+            for frame_info in data.get("frames", []):
+                fuzzing_ids.add(frame_info["id"].upper())
+        except:
+            pass
+    
+    # Find suspects: in fuzzing but not in pre-fuzz
+    suspects = list(fuzzing_ids - pre_fuzz_ids)
+    suspects.sort()
+    
+    return {
+        "pre_fuzz_ids": sorted(list(pre_fuzz_ids)),
+        "fuzzing_ids": sorted(list(fuzzing_ids)),
+        "suspect_ids": suspects,
+        "message": f"Found {len(suspects)} suspect IDs not present in normal operation",
+    }
 
 
 @app.get("/api/missions/{mission_id}/logs-analysis")
