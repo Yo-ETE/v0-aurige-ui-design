@@ -68,6 +68,7 @@ import {
   Loader2,
   CheckCircle2,
   Zap,
+  Upload,
 } from "lucide-react"
 
 export default function DBCPage() {
@@ -83,6 +84,10 @@ export default function DBCPage() {
   const [canInterface, setCanInterface] = useState<"can0" | "can1" | "vcan0">("can0")
   const [sendingSignalId, setSendingSignalId] = useState<string | null>(null)
   const [sentSignalId, setSentSignalId] = useState<string | null>(null)
+  
+  // Import DBC state
+  const [isImporting, setIsImporting] = useState(false)
+  const [importResult, setImportResult] = useState<{ success: boolean; message: string } | null>(null)
   
   // Edit dialog state
   const [editingSignal, setEditingSignal] = useState<DBCSignal | null>(null)
@@ -104,6 +109,49 @@ export default function DBCPage() {
     unit: "",
     comment: "",
   })
+
+  // Import DBC file
+  const handleImportDBC = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (!missionId || !event.target.files || event.target.files.length === 0) return
+    
+    const file = event.target.files[0]
+    setIsImporting(true)
+    setImportResult(null)
+    
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      
+      const response = await fetch(`/api/missions/${missionId}/dbc/import`, {
+        method: 'POST',
+        body: formData,
+      })
+      
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.detail || 'Import failed')
+      }
+      
+      const result = await response.json()
+      setImportResult({
+        success: true,
+        message: `Successfully imported ${result.imported_signals} signals from ${result.total_messages} messages`
+      })
+      
+      // Reload DBC data
+      await loadDBC()
+    } catch (error) {
+      console.error('DBC import failed:', error)
+      setImportResult({
+        success: false,
+        message: error instanceof Error ? error.message : 'Import failed'
+      })
+    } finally {
+      setIsImporting(false)
+      // Reset file input
+      event.target.value = ''
+    }
+  }
 
   // Load DBC data
   const loadDBC = useCallback(async () => {
@@ -333,6 +381,32 @@ export default function DBCPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <input
+            type="file"
+            id="dbc-file-input"
+            accept=".dbc"
+            className="hidden"
+            onChange={handleImportDBC}
+            disabled={isImporting}
+          />
+          <Button 
+            variant="outline" 
+            className="bg-transparent gap-2" 
+            onClick={() => document.getElementById('dbc-file-input')?.click()}
+            disabled={isImporting}
+          >
+            {isImporting ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Import en cours...
+              </>
+            ) : (
+              <>
+                <Upload className="h-4 w-4" />
+                Importer DBC
+              </>
+            )}
+          </Button>
           <Button variant="outline" className="bg-transparent gap-2" onClick={() => setShowAddDialog(true)}>
             <Plus className="h-4 w-4" />
             Ajouter signal
@@ -345,6 +419,34 @@ export default function DBCPage() {
           </Button>
         </div>
       </div>
+
+      {/* Import result notification */}
+      {importResult && (
+        <Card className={importResult.success ? "border-green-500 bg-green-500/10" : "border-destructive bg-destructive/10"}>
+          <CardContent className="pt-6">
+            <div className="flex items-start gap-3">
+              {importResult.success ? (
+                <CheckCircle2 className="h-5 w-5 text-green-500 mt-0.5" />
+              ) : (
+                <AlertCircle className="h-5 w-5 text-destructive mt-0.5" />
+              )}
+              <div className="flex-1">
+                <p className={importResult.success ? "text-green-700 dark:text-green-400" : "text-destructive"}>
+                  {importResult.message}
+                </p>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setImportResult(null)}
+                className="h-6 w-6 p-0"
+              >
+                ×
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
