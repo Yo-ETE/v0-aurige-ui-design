@@ -190,7 +190,12 @@ export default function CrashRecoveryPage() {
             </Alert>
           )}
 
-          {history?.exists && (
+          {history?.exists && (() => {
+            // Use frames_sent (new format) or frames (legacy)
+            const allFrames = history.frames_sent || history.frames || []
+            const uniqueIds = new Set(allFrames.map(f => f.id)).size
+            
+            return (
             <>
               <div className="grid grid-cols-3 gap-3 text-sm">
                 <div className="rounded border border-border bg-secondary/20 p-3">
@@ -200,7 +205,7 @@ export default function CrashRecoveryPage() {
                 <div className="rounded border border-border bg-secondary/20 p-3">
                   <p className="text-muted-foreground text-xs">IDs uniques</p>
                   <p className="text-2xl font-bold text-primary">
-                    {new Set((history.frames || []).map(f => f.id)).size}
+                    {uniqueIds}
                   </p>
                 </div>
                 <div className="rounded border border-border bg-secondary/20 p-3">
@@ -213,12 +218,12 @@ export default function CrashRecoveryPage() {
                 </div>
               </div>
 
-              {history.frames && history.frames.length > 0 && (
+              {allFrames.length > 0 && (
                 <div className="max-h-96 overflow-y-auto rounded border border-border bg-secondary/10 p-3 font-mono text-xs">
                   <div className="mb-2 text-muted-foreground">
-                    Affichage de toutes les {history.frames.length} trames envoyées
+                    Affichage de toutes les {allFrames.length} trames envoyées
                   </div>
-                  {history.frames.map((frame, i) => (
+                  {allFrames.map((frame, i) => (
                     <div key={i} className="flex items-center gap-3 py-0.5">
                       <span className="text-muted-foreground w-12">#{frame.index || i+1}</span>
                       <span className="text-primary font-bold w-16">{frame.id}</span>
@@ -229,7 +234,8 @@ export default function CrashRecoveryPage() {
                 </div>
               )}
             </>
-          )}
+            )
+          })()}
         </CardContent>
       </Card>
 

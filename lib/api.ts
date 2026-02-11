@@ -433,11 +433,13 @@ export interface FuzzingHistoryFrame {
 
 export interface FuzzingHistory {
   exists: boolean
-  frames: FuzzingHistoryFrame[]
+  frames?: FuzzingHistoryFrame[]  // Legacy format (limited to 1000)
+  frames_sent?: FuzzingHistoryFrame[]  // New format (all frames with index)
   started_at?: number
   stopped_at?: number
   total_sent?: number
   message?: string
+  during_fuzz_log?: string
 }
 
 export interface CrashRecoveryResult {
