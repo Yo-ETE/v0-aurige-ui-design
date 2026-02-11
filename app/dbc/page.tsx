@@ -8,6 +8,7 @@ import { useExportStore } from "@/lib/export-store"
 import {
   getMissionDBC,
   deleteDBCSignal,
+  deleteDBCMessage,
   clearMissionDBC,
   getDBCExportUrl,
   addDBCSignal,
@@ -16,6 +17,7 @@ import {
   type DBCMessage,
   type MissionDBC,
 } from "@/lib/api"
+import { getApiBaseUrl } from "@/lib/api-config"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -140,7 +142,7 @@ export default function DBCPage() {
       const formData = new FormData()
       formData.append('file', file)
       
-      const response = await fetch(`/api/missions/${missionId}/dbc/import`, {
+      const response = await fetch(`${getApiBaseUrl()}/api/missions/${missionId}/dbc/import`, {
         method: 'POST',
         body: formData,
       })
@@ -611,10 +613,15 @@ export default function DBCPage() {
                           <DropdownMenuSeparator />
                           <DropdownMenuItem 
                             className="text-destructive"
-                            onClick={() => {
-                              message.signals.forEach(s => {
-                                if (s.id) handleDeleteSignal(s.id)
-                              })
+                            onClick={async () => {
+                              if (!missionId) return
+                              if (!confirm(`Supprimer le message 0x${message.can_id} et ses ${message.signals.length} signaux ?`)) return
+                              try {
+                                await deleteDBCMessage(missionId, message.can_id)
+                                await loadDBC()
+                              } catch (error) {
+                                console.error("Failed to delete message:", error)
+                              }
                             }}
                           >
                             <Trash2 className="h-4 w-4 mr-2" />

@@ -1271,6 +1271,12 @@ export async function deleteDBCSignal(missionId: string, signalId: string): Prom
   })
 }
 
+export async function deleteDBCMessage(missionId: string, canId: string): Promise<{ status: string }> {
+  return fetchApi(`/missions/${missionId}/dbc/message/${canId}`, {
+    method: "DELETE",
+  })
+}
+
 export async function clearMissionDBC(missionId: string): Promise<{ status: string }> {
   return fetchApi(`/missions/${missionId}/dbc`, {
     method: "DELETE",
