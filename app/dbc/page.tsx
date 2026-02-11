@@ -69,6 +69,7 @@ import {
   CheckCircle2,
   Zap,
   Upload,
+  ExternalLink,
 } from "lucide-react"
 
 export default function DBCPage() {
@@ -415,6 +416,12 @@ export default function DBCPage() {
             <a href={getDBCExportUrl(missionId)} download>
               <Download className="h-4 w-4" />
               Exporter DBC
+            </a>
+          </Button>
+          <Button variant="outline" className="bg-transparent gap-2" asChild>
+            <a href="https://github.com/commaai/opendbc/tree/master/dbc" target="_blank" rel="noopener noreferrer">
+              <ExternalLink className="h-4 w-4" />
+              OpenDBC
             </a>
           </Button>
         </div>
