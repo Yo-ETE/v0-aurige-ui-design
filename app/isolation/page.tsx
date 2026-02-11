@@ -491,11 +491,6 @@ export default function Isolation() {
       setIsReplaying(null)
     }
   }
-        } catch {
-          clearInterval(pollInterval)
-          setIsReplaying(null)
-        }
-      }, 500)
       
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
