@@ -1680,7 +1680,7 @@ signal.signal(signal.SIGTERM, lambda s, f: cleanup())
 signal.signal(signal.SIGINT, lambda s, f: cleanup())
 
 def generate_data_random():
-    return "".join(f"{{random.randint(0, 255):02X}}" for _ in range(DLC))
+    return "".join("{{:02X}}".format(random.randint(0, 255)) for _ in range(DLC))
 
 def generate_data_static():
     if DATA_TEMPLATE:
@@ -1696,9 +1696,9 @@ def generate_data_range():
         if matching:
             br = matching[0]
             val = random.randint(br["min"], br["max"])
-            data.append(f"{{val:02X}}")
+            data.append("{{:02X}}".format(val))
         else:
-            data.append(f"{{random.randint(0, 255):02X}}")
+            data.append("{{:02X}}".format(random.randint(0, 255)))
     return "".join(data)
 
 def generate_data_logs(can_id):
@@ -1708,7 +1708,7 @@ def generate_data_logs(can_id):
     return random.choice(samples)
 
 sent = 0
-print(f"Starting fuzzing on {{INTERFACE}}")
+print("Starting fuzzing on {{}}".format(INTERFACE))
 
 try:
     if TARGET_IDS:
@@ -1724,7 +1724,7 @@ try:
             else:
                 data = generate_data_random()
             
-            frame = f"{{can_id_hex}}#{{data}}"
+            frame = "{{}}#{{}}".format(can_id_hex, data)
             subprocess.run(["cansend", INTERFACE, frame], capture_output=True)
             sent += 1
             
@@ -1736,7 +1736,7 @@ try:
             }})
             
             if sent % 50 == 0:
-                sys.stdout.write(f"\\rSent {{sent}}/{{ITERATIONS}} frames")
+                sys.stdout.write("\\rSent {{}}/{{}} frames".format(sent, ITERATIONS))
                 sys.stdout.flush()
             time.sleep(DELAY_SEC)
     else:
@@ -1744,7 +1744,7 @@ try:
         id_range = max(1, ID_END - ID_START + 1)
         for i in range(ITERATIONS):
             current_id = ID_START + (i % id_range)
-            can_id_hex = f"{{current_id:03X}}"
+            can_id_hex = "{{:03X}}".format(current_id)
             
             if MODE == "static":
                 data = generate_data_static()
@@ -1755,7 +1755,7 @@ try:
             else:
                 data = generate_data_random()
             
-            frame = f"{{can_id_hex}}#{{data}}"
+            frame = "{{}}#{{}}".format(can_id_hex, data)
             subprocess.run(["cansend", INTERFACE, frame], capture_output=True)
             sent += 1
             
@@ -1767,7 +1767,7 @@ try:
             }})
             
             if sent % 50 == 0:
-                sys.stdout.write(f"\\rSent {{sent}}/{{ITERATIONS}} frames")
+                sys.stdout.write("\\rSent {{}}/{{}} frames".format(sent, ITERATIONS))
                 sys.stdout.flush()
             time.sleep(DELAY_SEC)
 finally:
@@ -1778,10 +1778,10 @@ finally:
     with open(HISTORY_FILE, "w") as f:
         json.dump(history, f)
     
-    print(f"\\nFuzzing complete: {{sent}} frames sent.")
-    print(f"History saved to {{HISTORY_FILE}}")
+    print("\\nFuzzing complete: {{}} frames sent.".format(sent))
+    print("History saved to {{}}".format(HISTORY_FILE))
     if DURING_FUZZ_LOG:
-        print(f"CAN traffic recorded to {{DURING_FUZZ_LOG}}")
+        print("CAN traffic recorded to {{}}".format(DURING_FUZZ_LOG))
 '''
     
     # Write script to file
