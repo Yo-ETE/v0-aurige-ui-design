@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { AppShell } from "@/components/app-shell"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -19,10 +20,12 @@ import {
   attemptCrashRecovery, 
   getFuzzingHistory, 
   compareLogsWithFuzzing,
+  getMissionLogs,
   type FuzzingHistory,
   type CrashRecoveryResponse,
   type LogComparisonResult,
   type CANInterface,
+  type LogMetadata,
 } from "@/lib/api"
 import { useMissionStore } from "@/lib/mission-store"
 import { cn } from "@/lib/utils"
@@ -39,10 +42,28 @@ export default function CrashRecoveryPage() {
   const [isRecovering, setIsRecovering] = useState(false)
   const [selectedPreFuzzLog, setSelectedPreFuzzLog] = useState<string>("")
   const [customSuspectIds, setCustomSuspectIds] = useState<string>("")
+  const [availableLogs, setAvailableLogs] = useState<LogMetadata[]>([])
+  const [isLoadingLogs, setIsLoadingLogs] = useState(false)
 
   useEffect(() => {
     loadHistory()
-  }, [])
+    if (currentMission?.id) {
+      loadLogs()
+    }
+  }, [currentMission?.id])
+  
+  const loadLogs = async () => {
+    if (!currentMission?.id) return
+    setIsLoadingLogs(true)
+    try {
+      const logs = await getMissionLogs(currentMission.id)
+      setAvailableLogs(logs)
+    } catch (error) {
+      console.error("Failed to load logs:", error)
+    } finally {
+      setIsLoadingLogs(false)
+    }
+  }
 
   const loadHistory = async () => {
     setIsLoadingHistory(true)
@@ -109,6 +130,7 @@ export default function CrashRecoveryPage() {
   }
 
   return (
+    <AppShell>
     <div className="container mx-auto space-y-6 py-6">
       <div>
         <h1 className="text-3xl font-bold text-foreground">Crash Recovery</h1>
@@ -224,14 +246,30 @@ export default function CrashRecoveryPage() {
         <CardContent className="space-y-3">
           <div className="flex items-center gap-3">
             <label className="text-sm font-medium w-32">Log pre-fuzz:</label>
-            <input
-              type="text"
-              value={selectedPreFuzzLog}
-              onChange={(e) => setSelectedPreFuzzLog(e.target.value)}
-              placeholder="Ex: 20250211_143022"
-              className="flex-1 rounded border border-border bg-background px-3 py-2 text-sm"
-            />
-            <Button onClick={handleCompare} disabled={isComparing || !currentMission}>
+            {availableLogs.length > 0 ? (
+              <select
+                value={selectedPreFuzzLog}
+                onChange={(e) => setSelectedPreFuzzLog(e.target.value)}
+                className="flex-1 rounded border border-border bg-background px-3 py-2 text-sm"
+                disabled={isLoadingLogs}
+              >
+                <option value="">Selectionnez un log...</option>
+                {availableLogs.map((log) => (
+                  <option key={log.id} value={log.id}>
+                    {log.id} - {log.metadata?.duration || "?"} sec
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type="text"
+                value={selectedPreFuzzLog}
+                onChange={(e) => setSelectedPreFuzzLog(e.target.value)}
+                placeholder="Ex: 20250211_143022"
+                className="flex-1 rounded border border-border bg-background px-3 py-2 text-sm"
+              />
+            )}
+            <Button onClick={handleCompare} disabled={isComparing || !currentMission || !selectedPreFuzzLog}>
               <FileSearch className="h-4 w-4 mr-2" />
               {isComparing ? "Analyse..." : "Comparer"}
             </Button>
@@ -372,5 +410,6 @@ export default function CrashRecoveryPage() {
         </CardContent>
       </Card>
     </div>
+    </AppShell>
   )
 }

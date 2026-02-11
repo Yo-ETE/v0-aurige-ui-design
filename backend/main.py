@@ -1551,6 +1551,7 @@ import subprocess
 import time
 import random
 import sys
+import json
 
 INTERFACE = "{request.interface}"
 ID_START = 0x{request.id_start}
@@ -1561,8 +1562,17 @@ DLC = {dlc}
 MODE = "{mode}"
 DATA_TEMPLATE = "{request.data_template or ''}"
 TARGET_IDS = {json.dumps(target_ids)}
+HISTORY_FILE = "/tmp/aurige_fuzz_history.json"
 {log_samples_code}
 {byte_ranges_code}
+
+# Initialize history
+history = {{
+    "started_at": time.time(),
+    "stopped_at": None,
+    "total_sent": 0,
+    "frames": []
+}}
 
 def generate_data_static():
     """Same static data for every frame"""
@@ -1634,6 +1644,16 @@ def main():
             frame = f"{{can_id_hex}}#{{data}}"
             subprocess.run(["cansend", INTERFACE, frame], capture_output=True)
             sent += 1
+            
+            # Record in history (last 1000 frames)
+            history["frames"].append({{
+                "id": can_id_hex,
+                "data": data,
+                "timestamp": time.time()
+            }})
+            if len(history["frames"]) > 1000:
+                history["frames"].pop(0)
+            
             if sent % 50 == 0:
                 sys.stdout.write(f"\\rSent {{sent}}/{{ITERATIONS}} frames")
                 sys.stdout.flush()
@@ -1657,12 +1677,28 @@ def main():
             frame = f"{{can_id_hex}}#{{data}}"
             subprocess.run(["cansend", INTERFACE, frame], capture_output=True)
             sent += 1
+            
+            # Record in history (last 1000 frames)
+            history["frames"].append({{
+                "id": can_id_hex,
+                "data": data,
+                "timestamp": time.time()
+            }})
+            if len(history["frames"]) > 1000:
+                history["frames"].pop(0)
+            
             if sent % 50 == 0:
                 sys.stdout.write(f"\\rSent {{sent}}/{{ITERATIONS}} frames")
                 sys.stdout.flush()
             time.sleep(DELAY_SEC)
     
-    print(f"\\nFuzzing complete: {{sent}} frames sent")
+    # Save history to file
+    history["stopped_at"] = time.time()
+    history["total_sent"] = sent
+    with open(HISTORY_FILE, "w") as f:
+        json.dump(history, f)
+    
+    print(f"\\nFuzzing complete: {{sent}} frames sent. History saved to {{HISTORY_FILE}}")
 
 if __name__ == "__main__":
     main()
@@ -1705,7 +1741,7 @@ async def stop_fuzzing():
 @app.get("/api/fuzzing/status")
 async def get_fuzzing_status():
     """Get fuzzing status"""
-    is_running = state.fuzzing_process and state.fuzzing_process.returncode is not None
+    is_running = state.fuzzing_process is not None and state.fuzzing_process.returncode is None
     return {"running": is_running}
 
 
