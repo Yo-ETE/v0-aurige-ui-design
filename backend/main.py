@@ -33,8 +33,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-# Import error logger and DBC parser
-from error_logger import log_error, log_info, setup_error_logging
+# Import DBC parser
 from dbc_parser import parse_dbc_file
 
 # =============================================================================
@@ -64,10 +63,6 @@ state = ProcessState()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
   """Startup and cleanup"""
-  # Initialize error logging
-  setup_error_logging(DATA_DIR)
-  log_info("AURIGE Backend starting up")
-  
   yield
   
   # Stop all processes on shutdown
@@ -5412,9 +5407,9 @@ async def import_dbc_file(mission_id: str, file: UploadFile = File(...)):
     content = await file.read()
     dbc_content = content.decode('utf-8', errors='ignore')
     
-    # Parse DBC file
-    log_info(f"Importing DBC file: {file.filename} for mission {mission_id}")
-    parsed_dbc = parse_dbc_file(dbc_content)
+  # Parse DBC file
+  print(f"[INFO] Importing DBC file: {file.filename} for mission {mission_id}")
+  parsed_dbc = parse_dbc_file(dbc_content)
     
     # Get existing DBC or create new
     dbc_file = Path(MISSIONS_DIR) / mission_id / "dbc.json"
@@ -5464,7 +5459,7 @@ async def import_dbc_file(mission_id: str, file: UploadFile = File(...)):
     with open(dbc_file, 'w') as f:
       json.dump(existing_dbc, f, indent=2)
     
-    log_info(f"Successfully imported {imported_count} signals from {file.filename}")
+    print(f"[INFO] Successfully imported {imported_count} signals from {file.filename}")
     
     return {
       "status": "success",
@@ -5476,7 +5471,7 @@ async def import_dbc_file(mission_id: str, file: UploadFile = File(...)):
   except HTTPException:
     raise
   except Exception as e:
-    log_error(f"DBC import failed: {str(e)}")
+    print(f"[ERROR] DBC import failed: {str(e)}")
     raise HTTPException(status_code=500, detail=f"Failed to import DBC: {str(e)}")
 
 
