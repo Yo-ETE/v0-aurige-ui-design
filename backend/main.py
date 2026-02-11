@@ -1409,6 +1409,28 @@ async def get_replay_status():
     return {"running": is_running}
 
 
+@app.post("/api/replay/force-cleanup")
+async def force_cleanup_replay():
+    """Force cleanup of replay state (for stuck processes)"""
+    # Kill any bash/cansend processes
+    try:
+        run_command(["pkill", "-f", "aurige_replay.sh"], check=False)
+        run_command(["pkill", "-f", "cansend"], check=False)
+        await asyncio.sleep(0.5)
+    except:
+        pass
+    
+    # Reset state
+    if state.canplayer_process:
+        try:
+            state.canplayer_process.kill()
+        except:
+            pass
+    state.canplayer_process = None
+    
+    return {"status": "cleaned", "message": "Forced cleanup of replay processes"}
+
+
 # =============================================================================
 # Generator / Fuzzing Endpoints
 # =============================================================================
@@ -1823,6 +1845,29 @@ async def get_fuzzing_status():
     """Get fuzzing status"""
     is_running = state.fuzzing_process is not None and state.fuzzing_process.returncode is None
     return {"running": is_running}
+
+
+@app.post("/api/fuzzing/force-cleanup")
+async def force_cleanup_fuzzing():
+    """Force cleanup of fuzzing state (for stuck processes)"""
+    # Kill any python/candump/cansend processes related to fuzzing
+    try:
+        run_command(["pkill", "-f", "aurige_fuzz.py"], check=False)
+        run_command(["pkill", "-f", "candump.*during_fuzz"], check=False)
+        run_command(["pkill", "-f", "cansend"], check=False)
+        await asyncio.sleep(0.5)
+    except:
+        pass
+    
+    # Reset state
+    if state.fuzzing_process:
+        try:
+            state.fuzzing_process.kill()
+        except:
+            pass
+    state.fuzzing_process = None
+    
+    return {"status": "cleaned", "message": "Forced cleanup of fuzzing processes"}
 
 
 @app.post("/api/fuzzing/crash-recovery")

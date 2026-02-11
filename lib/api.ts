@@ -295,6 +295,12 @@ export async function stopReplay(): Promise<{ status: string }> {
   })
 }
 
+export async function forceCleanupReplay(): Promise<{ status: string; message: string }> {
+  return fetchApi("/replay/force-cleanup", {
+    method: "POST",
+  })
+}
+
 export async function getReplayStatus(): Promise<ProcessStatus> {
   return fetchApi<ProcessStatus>("/replay/status")
 }
@@ -322,6 +328,12 @@ export async function startGenerator(
 
 export async function stopGenerator(): Promise<{ status: string }> {
   return fetchApi("/generator/stop", {
+    method: "POST",
+  })
+}
+
+export async function forceCleanupGenerator(): Promise<{ status: string; message: string }> {
+  return fetchApi("/generator/force-cleanup", {
     method: "POST",
   })
 }
@@ -362,6 +374,12 @@ export async function startFuzzing(params: FuzzingParams): Promise<{ status: str
 
 export async function stopFuzzing(): Promise<{ status: string }> {
   return fetchApi("/fuzzing/stop", {
+    method: "POST",
+  })
+}
+
+export async function forceCleanupFuzzing(): Promise<{ status: string; message: string }> {
+  return fetchApi("/fuzzing/force-cleanup", {
     method: "POST",
   })
 }

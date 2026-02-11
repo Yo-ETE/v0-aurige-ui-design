@@ -43,7 +43,7 @@ import { Label } from "@/components/ui/label"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useIsolationStore, type IsolationLog } from "@/lib/isolation-store"
 import { useExportStore } from "@/lib/export-store"
-import { listMissionLogs, startReplay, stopReplay, getReplayStatus, splitLog, renameLog, deleteLog, getLogContent, getLogDownloadUrl, getLogFamilyDownloadUrl, analyzeCoOccurrence, analyzeFamilyDiff, addDBCSignal, getMissionDBC, getDBCExportUrl, sendCANFrame, createFrameLog, type LogEntry, type CANInterface, type LogFrame, type CoOccurrenceResponse, type CoOccurrenceFrame, type EcuFamily, type FamilyAnalysisResponse, type FrameDiff, type DBCSignal } from "@/lib/api"
+import { listMissionLogs, startReplay, stopReplay, forceCleanupReplay, getReplayStatus, splitLog, renameLog, deleteLog, getLogContent, getLogDownloadUrl, getLogFamilyDownloadUrl, analyzeCoOccurrence, analyzeFamilyDiff, addDBCSignal, getMissionDBC, getDBCExportUrl, sendCANFrame, createFrameLog, type LogEntry, type CANInterface, type LogFrame, type CoOccurrenceResponse, type CoOccurrenceFrame, type EcuFamily, type FamilyAnalysisResponse, type FrameDiff, type DBCSignal } from "@/lib/api"
 import { useRouter as useNavRouter } from "next/navigation"
 import { useMissionStore } from "@/lib/mission-store"
 import { useToast } from "@/hooks/use-toast"
@@ -460,6 +460,37 @@ export default function Isolation() {
             clearInterval(pollInterval)
             setIsReplaying(null)
           }
+        } catch {
+          clearInterval(pollInterval)
+          setIsReplaying(null)
+        }
+      }, 500)
+      
+      // Safety timeout
+      setTimeout(() => {
+        clearInterval(pollInterval)
+        setIsReplaying(null)
+      }, 120000)
+    } catch (error: any) {
+      console.error("[v0] Replay error:", error)
+      
+      // If 409 conflict, offer force cleanup
+      if (error?.status === 409) {
+        const shouldCleanup = confirm("Un replay semble bloque. Voulez-vous forcer le nettoyage ?")
+        if (shouldCleanup) {
+          try {
+            await forceCleanupReplay()
+            toast({ title: "Nettoyage force effectue", description: "Vous pouvez maintenant relancer le replay" })
+          } catch (cleanupError) {
+            console.error("[v0] Cleanup error:", cleanupError)
+            toast({ title: "Erreur", description: "Echec du nettoyage force", variant: "destructive" })
+          }
+        }
+      }
+      
+      setIsReplaying(null)
+    }
+  }
         } catch {
           clearInterval(pollInterval)
           setIsReplaying(null)
