@@ -5483,30 +5483,30 @@ async def import_dbc_file(mission_id: str, file: UploadFile = File(...)):
 @app.post("/api/missions/{mission_id}/dbc/signal")
 async def add_dbc_signal(mission_id: str, signal: DBCSignal):
   """Add or update a signal in the mission DBC"""
-  dbc_file = Path(MISSIONS_DIR) / mission_id / "dbc.json"
-    mission_dir = Path(MISSIONS_DIR) / mission_id
-    
-    if not mission_dir.exists():
-        raise HTTPException(status_code=404, detail="Mission non trouvee")
-    
-    # Load existing or create new
-    if dbc_file.exists():
-        with open(dbc_file, "r") as f:
-            data = json.load(f)
-    else:
-        data = {
-            "mission_id": mission_id,
-            "messages": [],
-            "created_at": datetime.now().isoformat(),
-            "updated_at": ""
-        }
-    
-    # Find or create message for this CAN ID
-    message = None
-    for msg in data["messages"]:
-        if msg["can_id"] == signal.can_id:
-            message = msg
-            break
+  mission_dir = Path(MISSIONS_DIR) / mission_id
+  dbc_file = mission_dir / "dbc.json"
+  
+  if not mission_dir.exists():
+    raise HTTPException(status_code=404, detail="Mission non trouvee")
+  
+  # Load existing or create new
+  if dbc_file.exists():
+    with open(dbc_file, "r") as f:
+      data = json.load(f)
+  else:
+    data = {
+      "mission_id": mission_id,
+      "messages": [],
+      "created_at": datetime.now().isoformat(),
+      "updated_at": ""
+    }
+  
+  # Find or create message for this CAN ID
+  message = None
+  for msg in data["messages"]:
+    if msg["can_id"] == signal.can_id:
+      message = msg
+      break
     
     if not message:
         message = {
