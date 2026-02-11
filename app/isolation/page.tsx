@@ -491,17 +491,6 @@ export default function Isolation() {
       setIsReplaying(null)
     }
   }
-      
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      toast({
-        title: `Erreur replay sur ${canInterface}`,
-        description: msg,
-        variant: "destructive",
-      })
-      setIsReplaying(null)
-    }
-  }
 
   const handleRename = async (log: IsolationLog) => {
     if (!newLogName.trim()) return
