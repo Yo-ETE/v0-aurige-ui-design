@@ -324,9 +324,11 @@ export default function Fuzzing() {
       delayMs: parseFloat(delay),
       dataMode,
       dlc: parseInt(dlc),
+      enablePreFuzzCapture: true,
+      preFuzzDurationSec: 5,
+      missionId: currentMission?.id,
       ...(dataMode === "static" && { dataTemplate }),
       ...(dataMode === "range" && { byteRanges: computedByteRanges }),
-      ...(dataMode === "logs" && { missionId: currentMission?.id }),
       ...(targetIds && { targetIds }),
     }
 

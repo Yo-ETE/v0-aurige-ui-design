@@ -349,6 +349,8 @@ export interface FuzzingParams {
   logId?: string
   targetIds?: string[]
   dlc?: number
+  enablePreFuzzCapture?: boolean
+  preFuzzDurationSec?: number
 }
 
 export async function startFuzzing(params: FuzzingParams): Promise<{ status: string }> {

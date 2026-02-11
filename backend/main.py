@@ -220,6 +220,8 @@ class FuzzingRequest(BaseModel):
     
     # Crash detection & recovery
     enable_crash_detection: bool = Field(alias="enableCrashDetection", default=True)
+    enable_pre_fuzz_capture: bool = Field(alias="enablePreFuzzCapture", default=True)
+    pre_fuzz_duration_sec: int = Field(alias="preFuzzDurationSec", default=5)
 
     class Config:
         populate_by_name = True
@@ -1492,6 +1494,41 @@ async def start_fuzzing(request: FuzzingRequest):
     
     dlc = max(1, min(request.dlc, 8))
     mode = request.data_mode
+    
+    # PRE-FUZZ CAPTURE: Record baseline traffic before fuzzing
+    pre_fuzz_log_path = None
+    if request.enable_pre_fuzz_capture and request.mission_id:
+        try:
+            from datetime import datetime
+            logs_dir = get_mission_logs_dir(request.mission_id)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            pre_fuzz_log_path = logs_dir / f"pre_fuzz_{timestamp}.log"
+            
+            # Run candump for N seconds to capture baseline
+            duration = request.pre_fuzz_duration_sec
+            candump_cmd = [
+                "timeout", str(duration),
+                "candump", request.interface,
+                "-L"
+            ]
+            
+            with open(pre_fuzz_log_path, "w") as log_f:
+                result = run_command(candump_cmd, check=False, stdout=log_f)
+            
+            # Create metadata
+            meta_path = logs_dir / f"pre_fuzz_{timestamp}.meta.json"
+            with open(meta_path, "w") as meta_f:
+                json.dump({
+                    "type": "pre_fuzz_capture",
+                    "duration": duration,
+                    "interface": request.interface,
+                    "timestamp": timestamp,
+                }, meta_f)
+            
+            print(f"Pre-fuzz capture saved: {pre_fuzz_log_path}")
+        except Exception as e:
+            print(f"Pre-fuzz capture failed: {e}")
+            # Continue anyway - not critical
     
     # Build Python fuzzing script (more flexible than bash for data generation)
     # Pre-compute data based on mode
