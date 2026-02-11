@@ -20,12 +20,12 @@ import {
   attemptCrashRecovery, 
   getFuzzingHistory, 
   compareLogsWithFuzzing,
-  getMissionLogs,
+  listMissionLogs,
   type FuzzingHistory,
   type CrashRecoveryResponse,
   type LogComparisonResult,
   type CANInterface,
-  type LogMetadata,
+  type LogEntry,
 } from "@/lib/api"
 import { useMissionStore } from "@/lib/mission-store"
 import { cn } from "@/lib/utils"
@@ -42,7 +42,7 @@ export default function CrashRecoveryPage() {
   const [isRecovering, setIsRecovering] = useState(false)
   const [selectedPreFuzzLog, setSelectedPreFuzzLog] = useState<string>("")
   const [customSuspectIds, setCustomSuspectIds] = useState<string>("")
-  const [availableLogs, setAvailableLogs] = useState<LogMetadata[]>([])
+  const [availableLogs, setAvailableLogs] = useState<LogEntry[]>([])
   const [isLoadingLogs, setIsLoadingLogs] = useState(false)
 
   useEffect(() => {
@@ -56,7 +56,7 @@ export default function CrashRecoveryPage() {
     if (!currentMission?.id) return
     setIsLoadingLogs(true)
     try {
-      const logs = await getMissionLogs(currentMission.id)
+      const logs = await listMissionLogs(currentMission.id)
       setAvailableLogs(logs)
     } catch (error) {
       console.error("Failed to load logs:", error)
@@ -256,7 +256,7 @@ export default function CrashRecoveryPage() {
                 <option value="">Selectionnez un log...</option>
                 {availableLogs.map((log) => (
                   <option key={log.id} value={log.id}>
-                    {log.id} - {log.metadata?.duration || "?"} sec
+                    {log.name || log.id}
                   </option>
                 ))}
               </select>
