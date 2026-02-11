@@ -195,36 +195,37 @@ export default function CrashRecoveryPage() {
               <div className="grid grid-cols-3 gap-3 text-sm">
                 <div className="rounded border border-border bg-secondary/20 p-3">
                   <p className="text-muted-foreground text-xs">Trames envoyees</p>
-                  <p className="text-2xl font-bold text-foreground">{history.total_sent || history.frames.length}</p>
+                  <p className="text-2xl font-bold text-foreground">{history.total_sent || 0}</p>
                 </div>
                 <div className="rounded border border-border bg-secondary/20 p-3">
                   <p className="text-muted-foreground text-xs">IDs uniques</p>
                   <p className="text-2xl font-bold text-primary">
-                    {new Set(history.frames.map(f => f.id)).size}
+                    {new Set((history.frames || []).map(f => f.id)).size}
                   </p>
                 </div>
                 <div className="rounded border border-border bg-secondary/20 p-3">
                   <p className="text-muted-foreground text-xs">Duree (approx)</p>
                   <p className="text-2xl font-bold text-muted-foreground">
                     {history.started_at && history.stopped_at
-                      ? `${Math.round((history.stopped_at - history.started_at) / 1000)}s`
+                      ? `${Math.round((history.stopped_at - history.started_at))}s`
                       : "N/A"}
                   </p>
                 </div>
               </div>
 
-              {history.frames.length > 0 && (
-                <div className="max-h-48 overflow-y-auto rounded border border-border bg-secondary/10 p-3 font-mono text-xs">
-                  {history.frames.slice(-50).map((frame, i) => (
+              {history.frames && history.frames.length > 0 && (
+                <div className="max-h-96 overflow-y-auto rounded border border-border bg-secondary/10 p-3 font-mono text-xs">
+                  <div className="mb-2 text-muted-foreground">
+                    Affichage de toutes les {history.frames.length} trames envoyées
+                  </div>
+                  {history.frames.map((frame, i) => (
                     <div key={i} className="flex items-center gap-3 py-0.5">
-                      <span className="text-primary font-bold w-12">{frame.id}</span>
+                      <span className="text-muted-foreground w-12">#{frame.index || i+1}</span>
+                      <span className="text-primary font-bold w-16">{frame.id}</span>
                       <span className="text-muted-foreground">#</span>
                       <span className="text-foreground">{frame.data}</span>
                     </div>
                   ))}
-                  {history.frames.length > 50 && (
-                    <p className="text-muted-foreground mt-2">... et {history.frames.length - 50} autres trames</p>
-                  )}
                 </div>
               )}
             </>

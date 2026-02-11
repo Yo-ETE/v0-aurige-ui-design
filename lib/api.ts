@@ -407,6 +407,7 @@ export async function getLogsAnalysis(missionId: string, logId?: string): Promis
 // =============================================================================
 
 export interface FuzzingHistoryFrame {
+  index?: number
   id: string
   data: string
   timestamp: number
@@ -465,6 +466,41 @@ export async function compareLogsWithFuzzing(
   return fetchApi(`/fuzzing/compare-logs?mission_id=${missionId}&log_id=${logId}`, {
     method: "POST",
   })
+}
+
+export interface CrashAnomaly {
+  type: "disappeared" | "zeroed" | "new_error"
+  id: string
+  severity: "critical" | "high" | "medium"
+  description: string
+}
+
+export interface CrashCulprit {
+  anomaly: CrashAnomaly
+  suspect_frames: FuzzingHistoryFrame[]
+  timing_delta: number
+}
+
+export interface CrashAnalysisResult {
+  mission_id: string
+  anomalies: CrashAnomaly[]
+  disappeared_ids: string[]
+  new_error_ids: string[]
+  culprits: CrashCulprit[]
+  pre_fuzz_ids: string[]
+  during_fuzz_ids: string[]
+  message: string
+}
+
+export async function analyzeCrash(
+  missionId: string,
+  preFuzzLogId: string,
+  duringFuzzLogId: string
+): Promise<CrashAnalysisResult> {
+  return fetchApi(
+    `/fuzzing/analyze-crash?mission_id=${missionId}&pre_fuzz_log_id=${preFuzzLogId}&during_fuzz_log_id=${duringFuzzLogId}`,
+    { method: "POST" }
+  )
 }
 
 // =============================================================================

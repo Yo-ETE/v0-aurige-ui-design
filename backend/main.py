@@ -1583,12 +1583,22 @@ async def start_fuzzing(request: FuzzingRequest):
     # For "target_ids" mode with specific IDs
     target_ids = request.target_ids or []
     
+    # Prepare mission log paths for during-fuzz capture
+    during_fuzz_log_path = None
+    if request.mission_id:
+        from datetime import datetime
+        logs_dir = get_mission_logs_dir(request.mission_id)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        during_fuzz_log_path = logs_dir / f"during_fuzz_{{timestamp}}.log"
+    
     script_content = f'''#!/usr/bin/env python3
 import subprocess
 import time
 import random
 import sys
 import json
+import signal
+import os
 
 INTERFACE = "{request.interface}"
 ID_START = 0x{request.id_start}
@@ -1600,16 +1610,46 @@ MODE = "{mode}"
 DATA_TEMPLATE = "{request.data_template or ''}"
 TARGET_IDS = {json.dumps(target_ids)}
 HISTORY_FILE = "/tmp/aurige_fuzz_history.json"
+DURING_FUZZ_LOG = "{during_fuzz_log_path}" if "{during_fuzz_log_path}" != "None" else None
 {log_samples_code}
 {byte_ranges_code}
 
-# Initialize history
+# Initialize history with ALL frames (sent + metadata)
 history = {{
     "started_at": time.time(),
     "stopped_at": None,
     "total_sent": 0,
-    "frames": []
+    "frames_sent": [],  # Frames we sent
+    "during_fuzz_log": DURING_FUZZ_LOG,
 }}
+
+# Start candump in background to record all CAN traffic during fuzzing
+candump_process = None
+if DURING_FUZZ_LOG:
+    try:
+        candump_log_file = open(DURING_FUZZ_LOG, "w")
+        candump_process = subprocess.Popen(
+            ["candump", INTERFACE, "-L"],
+            stdout=candump_log_file,
+            stderr=subprocess.DEVNULL
+        )
+        print(f"[FUZZ] Recording CAN traffic to {{DURING_FUZZ_LOG}}")
+    except Exception as e:
+        print(f"[FUZZ] Warning: Could not start candump: {{e}}")
+
+def cleanup():
+    """Stop candump on exit"""
+    if candump_process:
+        candump_process.terminate()
+        try:
+            candump_process.wait(timeout=2)
+        except:
+            candump_process.kill()
+    if 'candump_log_file' in globals():
+        candump_log_file.close()
+
+signal.signal(signal.SIGTERM, lambda s, f: cleanup())
+signal.signal(signal.SIGINT, lambda s, f: cleanup())
 
 def generate_data_static():
     """Same static data for every frame"""
@@ -1682,14 +1722,13 @@ def main():
             subprocess.run(["cansend", INTERFACE, frame], capture_output=True)
             sent += 1
             
-            # Record in history (last 1000 frames)
-            history["frames"].append({{
+            # Record EVERY frame sent
+            history["frames_sent"].append({{
+                "index": sent,
                 "id": can_id_hex,
                 "data": data,
                 "timestamp": time.time()
             }})
-            if len(history["frames"]) > 1000:
-                history["frames"].pop(0)
             
             if sent % 50 == 0:
                 sys.stdout.write(f"\\rSent {{sent}}/{{ITERATIONS}} frames")
@@ -1715,27 +1754,31 @@ def main():
             subprocess.run(["cansend", INTERFACE, frame], capture_output=True)
             sent += 1
             
-            # Record in history (last 1000 frames)
-            history["frames"].append({{
+            # Record EVERY frame sent
+            history["frames_sent"].append({{
+                "index": sent,
                 "id": can_id_hex,
                 "data": data,
                 "timestamp": time.time()
             }})
-            if len(history["frames"]) > 1000:
-                history["frames"].pop(0)
             
             if sent % 50 == 0:
                 sys.stdout.write(f"\\rSent {{sent}}/{{ITERATIONS}} frames")
                 sys.stdout.flush()
             time.sleep(DELAY_SEC)
     
-    # Save history to file
+    # Stop candump and save history
+    cleanup()
+    
     history["stopped_at"] = time.time()
     history["total_sent"] = sent
     with open(HISTORY_FILE, "w") as f:
         json.dump(history, f)
     
-    print(f"\\nFuzzing complete: {{sent}} frames sent. History saved to {{HISTORY_FILE}}")
+    print(f"\\nFuzzing complete: {{sent}} frames sent.")
+    print(f"History saved to {{HISTORY_FILE}}")
+    if DURING_FUZZ_LOG:
+        print(f"CAN traffic recorded to {{DURING_FUZZ_LOG}}")
 
 if __name__ == "__main__":
     main()
@@ -1853,6 +1896,149 @@ async def get_fuzzing_history():
             "error": str(e),
             "frames": [],
         }
+
+
+@app.post("/api/fuzzing/analyze-crash")
+async def analyze_crash(mission_id: str, pre_fuzz_log_id: str, during_fuzz_log_id: str):
+    """
+    Advanced crash analysis: compare pre-fuzz and during-fuzz logs
+    to detect anomalies and identify the culprit frame.
+    
+    Detects:
+    - IDs that disappeared (critical systems stopped responding)
+    - Sudden value drops (RPM → 0, speed → 0)
+    - New error IDs that appeared
+    - Timing anomalies
+    """
+    logs_dir = get_mission_logs_dir(mission_id)
+    pre_log = logs_dir / f"{{pre_fuzz_log_id}}.log"
+    during_log = logs_dir / f"{{during_fuzz_log_id}}.log"
+    
+    if not pre_log.exists() or not during_log.exists():
+        raise HTTPException(status_code=404, detail="Log files not found")
+    
+    # Parse pre-fuzz baseline
+    pre_data = {{}}  # {{id: [payloads...]}}
+    try:
+        with open(pre_log, "r") as f:
+            for line in f:
+                parts = line.strip().split()
+                if len(parts) >= 3:
+                    frame_parts = parts[2].split("#")
+                    if len(frame_parts) == 2:
+                        cid = frame_parts[0].upper()
+                        payload = frame_parts[1].upper()
+                        if cid not in pre_data:
+                            pre_data[cid] = []
+                        pre_data[cid].append(payload)
+    except:
+        pass
+    
+    # Parse during-fuzz traffic
+    during_data = {{}}
+    during_timeline = []  # [(timestamp, id, payload)]
+    try:
+        with open(during_log, "r") as f:
+            for line in f:
+                parts = line.strip().split()
+                if len(parts) >= 3:
+                    timestamp = float(parts[0].strip("()"))
+                    frame_parts = parts[2].split("#")
+                    if len(frame_parts) == 2:
+                        cid = frame_parts[0].upper()
+                        payload = frame_parts[1].upper()
+                        if cid not in during_data:
+                            during_data[cid] = []
+                        during_data[cid].append(payload)
+                        during_timeline.append((timestamp, cid, payload))
+    except:
+        pass
+    
+    # Detect anomalies
+    anomalies = []
+    
+    # 1. IDs that disappeared
+    disappeared_ids = set(pre_data.keys()) - set(during_data.keys())
+    for cid in disappeared_ids:
+        anomalies.append({{
+            "type": "disappeared",
+            "id": cid,
+            "severity": "critical",
+            "description": f"ID {{cid}} stopped responding during fuzzing"
+        }})
+    
+    # 2. IDs with all-zero payloads (likely crash)
+    for cid, payloads in during_data.items():
+        if cid in pre_data:
+            pre_non_zero = any(p != "0" * len(p) for p in pre_data[cid][:50])
+            during_all_zero = all(p == "0" * len(p) for p in payloads[-20:])
+            if pre_non_zero and during_all_zero:
+                anomalies.append({{
+                    "type": "zeroed",
+                    "id": cid,
+                    "severity": "critical",
+                    "description": f"ID {{cid}} data went to all zeros"
+                }})
+    
+    # 3. New error IDs (5xx, 7xx ranges)
+    new_error_ids = []
+    for cid in during_data.keys():
+        if cid not in pre_data:
+            cid_int = int(cid, 16)
+            if (0x500 <= cid_int <= 0x5FF) or (0x700 <= cid_int <= 0x7FF):
+                new_error_ids.append(cid)
+                anomalies.append({{
+                    "type": "new_error",
+                    "id": cid,
+                    "severity": "high",
+                    "description": f"New error ID {{cid}} appeared during fuzzing"
+                }})
+    
+    # Load fuzzing history to correlate
+    history_file = Path("/tmp/aurige_fuzz_history.json")
+    fuzz_frames = []
+    if history_file.exists():
+        with open(history_file, "r") as f:
+            data = json.load(f)
+            fuzz_frames = data.get("frames_sent", [])
+    
+    # Find the culprit: correlate anomaly timing with sent frames
+    culprits = []
+    if anomalies and fuzz_frames:
+        for anomaly in anomalies[:5]:  # Top 5 anomalies
+            # Find when the anomaly ID went bad in timeline
+            anom_id = anomaly["id"]
+            bad_timestamp = None
+            for ts, cid, payload in during_timeline:
+                if cid == anom_id:
+                    if anomaly["type"] == "zeroed" and payload == "0" * len(payload):
+                        bad_timestamp = ts
+                        break
+            
+            if bad_timestamp:
+                # Find frames sent just before
+                suspects = []
+                for frame in fuzz_frames:
+                    if abs(frame["timestamp"] - bad_timestamp) < 1.0:
+                        suspects.append(frame)
+                
+                if suspects:
+                    culprits.append({{
+                        "anomaly": anomaly,
+                        "suspect_frames": suspects[:10],
+                        "timing_delta": bad_timestamp - suspects[0]["timestamp"] if suspects else 0
+                    }})
+    
+    return {{
+        "mission_id": mission_id,
+        "anomalies": anomalies,
+        "disappeared_ids": list(disappeared_ids),
+        "new_error_ids": new_error_ids,
+        "culprits": culprits,
+        "pre_fuzz_ids": sorted(list(pre_data.keys())),
+        "during_fuzz_ids": sorted(list(during_data.keys())),
+        "message": f"Found {{len(anomalies)}} anomalies, {{len(culprits)}} culprits identified"
+    }}
 
 
 @app.post("/api/fuzzing/compare-logs")
