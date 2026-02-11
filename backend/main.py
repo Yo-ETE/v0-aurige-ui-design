@@ -69,15 +69,16 @@ async def lifespan(app: FastAPI):
   log_info("AURIGE Backend starting up")
   
   yield
-    # Stop all processes
-    for proc in [state.candump_process, state.capture_process, 
-                 state.cangen_process, state.canplayer_process, state.fuzzing_process]:
-        if proc and proc.returncode is None:
-            proc.terminate()
-            try:
-                await asyncio.wait_for(proc.wait(), timeout=2.0)
-            except asyncio.TimeoutError:
-                proc.kill()
+  
+  # Stop all processes on shutdown
+  for proc in [state.candump_process, state.capture_process, 
+               state.cangen_process, state.canplayer_process, state.fuzzing_process]:
+    if proc and proc.returncode is None:
+      proc.terminate()
+      try:
+        proc.wait(timeout=2.0)
+      except:
+        proc.kill()
 
 
 app = FastAPI(
