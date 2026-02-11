@@ -33,6 +33,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from error_logger import log_error, log_info, setup_error_logging
+from dbc_parser import parse_dbc_file
+
 # =============================================================================
 # Configuration
 # =============================================================================
@@ -60,6 +63,8 @@ state = ProcessState()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
   """Startup and cleanup"""
+  setup_error_logging(DATA_DIR)
+  log_info("AURIGE Backend starting up")
   yield
   
   # Stop all processes on shutdown
@@ -5388,6 +5393,88 @@ async def get_mission_dbc(mission_id: str) -> MissionDBC:
         data = json.load(f)
     
     return MissionDBC(**data)
+
+@app.post("/api/missions/{mission_id}/dbc/import")
+async def import_dbc_file_endpoint(mission_id: str, file: UploadFile = File(...)):
+  """Import an official .dbc file (Vector format) into mission DBC."""
+  try:
+    if not file.filename.endswith('.dbc'):
+      raise HTTPException(status_code=400, detail="File must be a .dbc file")
+
+    content = await file.read()
+    dbc_content = content.decode('utf-8', errors='ignore')
+
+    log_info(f"Importing DBC file: {file.filename} for mission {mission_id}")
+    parsed = parse_dbc_file(dbc_content)
+
+    dbc_file = Path(MISSIONS_DIR) / mission_id / "dbc.json"
+    if dbc_file.exists():
+      with open(dbc_file, 'r') as f:
+        existing_dbc = json.load(f)
+    else:
+      existing_dbc = {
+        "mission_id": mission_id,
+        "messages": [],
+        "created_at": datetime.now().isoformat(),
+        "updated_at": ""
+      }
+
+    imported_count = 0
+    for msg in parsed['messages']:
+      existing_msg = next((m for m in existing_dbc['messages'] if m['can_id'] == msg['id']), None)
+      if not existing_msg:
+        existing_msg = {
+          "can_id": msg['id'],
+          "name": msg['name'],
+          "dlc": msg['dlc'],
+          "sender": msg.get('sender', ''),
+          "comment": msg.get('comment', ''),
+          "signals": []
+        }
+        existing_dbc['messages'].append(existing_msg)
+
+      for sig in msg['signals']:
+        signal_dict = {
+          "id": f"{msg['id']}_{sig['name']}",
+          "name": sig['name'],
+          "start_bit": sig['start_bit'],
+          "bit_length": sig['bit_length'],
+          "byte_order": sig.get('byte_order', 'little'),
+          "is_signed": sig.get('value_type') == 'signed',
+          "factor": sig.get('factor', 1),
+          "offset": sig.get('offset', 0),
+          "min": sig.get('min', 0),
+          "max": sig.get('max', 0),
+          "unit": sig.get('unit', ''),
+          "comment": sig.get('comment', ''),
+          "values": sig.get('value_table', {})
+        }
+        existing_idx = next((i for i, s in enumerate(existing_msg['signals'])
+                           if s.get('name') == sig['name']), None)
+        if existing_idx is not None:
+          existing_msg['signals'][existing_idx] = signal_dict
+        else:
+          existing_msg['signals'].append(signal_dict)
+        imported_count += 1
+
+    existing_dbc['updated_at'] = datetime.now().isoformat()
+    dbc_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(dbc_file, 'w') as f:
+      json.dump(existing_dbc, f, indent=2)
+
+    log_info(f"Imported {imported_count} signals from {file.filename}")
+    return {
+      "status": "success",
+      "imported_signals": imported_count,
+      "total_messages": len(parsed['messages']),
+      "filename": file.filename
+    }
+  except HTTPException:
+    raise
+  except Exception as e:
+    log_error(f"DBC import failed: {str(e)}", e)
+    raise HTTPException(status_code=500, detail=f"Failed to import DBC: {str(e)}")
+
 
 @app.post("/api/missions/{mission_id}/dbc/signal")
 async def add_dbc_signal(mission_id: str, signal: DBCSignal):

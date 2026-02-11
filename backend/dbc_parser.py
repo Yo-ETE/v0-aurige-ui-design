@@ -237,3 +237,46 @@ class DBCParser:
             if match:
                 return match.group(1)
         return ""
+
+
+def parse_dbc_file(content: str) -> dict:
+    """
+    Parse DBC content string and return a dict with messages, ecus, version.
+    Each message contains its signals with all attributes.
+    """
+    parser = DBCParser()
+    db = parser.parse_content(content)
+
+    messages = []
+    for msg in db.messages:
+        signals = []
+        for sig in msg.signals:
+            signals.append({
+                "name": sig.name,
+                "start_bit": sig.bit_start,
+                "bit_length": sig.bit_length,
+                "byte_order": sig.byte_order,
+                "value_type": sig.value_type,
+                "factor": sig.factor,
+                "offset": sig.offset,
+                "min": sig.minimum,
+                "max": sig.maximum,
+                "unit": sig.unit,
+                "receivers": sig.receivers,
+                "comment": sig.comment,
+                "value_table": sig.value_table or {},
+            })
+        messages.append({
+            "id": "{:03X}".format(msg.can_id),
+            "name": msg.name,
+            "dlc": msg.dlc,
+            "sender": msg.sender,
+            "comment": msg.comment,
+            "signals": signals,
+        })
+
+    return {
+        "messages": messages,
+        "ecus": db.ecus,
+        "version": db.version,
+    }
