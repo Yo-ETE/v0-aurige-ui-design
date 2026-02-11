@@ -1659,9 +1659,9 @@ if DURING_FUZZ_LOG:
             stdout=candump_log_file,
             stderr=subprocess.DEVNULL
         )
-        print(f"[FUZZ] Recording CAN traffic to {{DURING_FUZZ_LOG}}")
+        print("[FUZZ] Recording CAN traffic to {{}}".format(DURING_FUZZ_LOG))
     except Exception as e:
-        print(f"[FUZZ] Warning: Could not start candump: {{e}}")
+        print("[FUZZ] Warning: Could not start candump: {{}}".format(e))
 
 def cleanup():
     """Stop candump on exit"""
