@@ -275,7 +275,14 @@ export default function ConfigurationPage() {
       if (!selectedBranch && data.current) {
         setSelectedBranch(data.current)
       }
-    } catch {
+    } catch (error: unknown) {
+      // Silently handle network errors
+      if (error && typeof error === "object" && "message" in error) {
+        const msg = String(error.message)
+        if (!msg.includes("network") && !msg.includes("fetch") && !msg.includes("timeout")) {
+          console.error("[v0] Unexpected branches fetch error:", error)
+        }
+      }
       setGitBranches(null)
     } finally {
       setIsFetchingBranches(false)
@@ -444,7 +451,14 @@ export default function ConfigurationPage() {
     try {
       const status = await getTailscaleStatus()
       setTsStatus(status)
-    } catch {
+    } catch (error: unknown) {
+      // Silently handle network errors
+      if (error && typeof error === "object" && "message" in error) {
+        const msg = String(error.message)
+        if (!msg.includes("network") && !msg.includes("fetch") && !msg.includes("timeout")) {
+          console.error("[v0] Unexpected tailscale fetch error:", error)
+        }
+      }
       setTsStatus(null)
     } finally {
       setTsLoading(false)
