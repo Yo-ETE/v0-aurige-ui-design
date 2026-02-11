@@ -1491,67 +1491,69 @@ async def get_generator_status():
 @app.post("/api/fuzzing/start")
 async def start_fuzzing(request: FuzzingRequest):
     """
-    Start fuzzing with flexible data generation modes.
-    Generates random, static, range-constrained, or log-based CAN frames.
+    Start fuzzing with smart data generation modes:
+    - static: send same data_template for all frames
+    - random: random bytes for each frame (true fuzzing)
+    - range: random bytes within per-byte min/max from log analysis
+    - logs: replay actual observed data from mission logs, varying byte by byte
     """
-    try:
-        if state.fuzzing_process and state.fuzzing_process.returncode is None:
-            raise HTTPException(status_code=409, detail="Fuzzing already running")
-        
-        # Validate inputs
-        if not re.match(r'^[0-9A-Fa-f]{1,8}$', request.id_start):
-            raise HTTPException(status_code=400, detail=f"ID start invalide: {request.id_start}")
-        if not re.match(r'^[0-9A-Fa-f]{1,8}$', request.id_end):
-            raise HTTPException(status_code=400, detail=f"ID end invalide: {request.id_end}")
-        if request.data_template and not re.match(r'^[0-9A-Fa-f]*$', request.data_template):
-            raise HTTPException(status_code=400, detail=f"Data template invalide: {request.data_template}")
-        if request.interface not in ["can0", "can1", "vcan0"]:
-            raise HTTPException(status_code=400, detail="Invalid interface")
-        if not (1 <= request.iterations <= 100000):
-            raise HTTPException(status_code=400, detail="Iterations must be between 1 and 100000")
-        if not (0.1 <= request.delay_ms <= 10000):
-            raise HTTPException(status_code=400, detail="Delay must be between 0.1ms and 10000ms")
-        
-        dlc = max(1, min(request.dlc, 8))
-        mode = request.data_mode
+    if state.fuzzing_process and state.fuzzing_process.returncode is None:
+        raise HTTPException(status_code=409, detail="Fuzzing already running")
     
-        # PRE-FUZZ CAPTURE: Record baseline traffic before fuzzing
-        pre_fuzz_log_path = None
-        if request.enable_pre_fuzz_capture and request.mission_id:
-            try:
-                from datetime import datetime
-                logs_dir = get_mission_logs_dir(request.mission_id)
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                pre_fuzz_log_path = logs_dir / f"pre_fuzz_{timestamp}.log"
-                
-                # Run candump for N seconds to capture baseline
-                duration = request.pre_fuzz_duration_sec
-                candump_cmd = [
-                    "timeout", str(duration),
-                    "candump", request.interface,
-                    "-L"
-                ]
-                
-                with open(pre_fuzz_log_path, "w") as log_f:
-                    result = run_command(candump_cmd, check=False, stdout=log_f)
-                
-                # Create metadata
-                meta_path = logs_dir / f"pre_fuzz_{timestamp}.meta.json"
-                with open(meta_path, "w") as meta_f:
-                    json.dump({
-                        "type": "pre_fuzz_capture",
-                        "duration": duration,
-                        "interface": request.interface,
-                        "timestamp": timestamp,
-                    }, meta_f)
-                
-                print(f"Pre-fuzz capture saved: {pre_fuzz_log_path}")
-            except Exception as e:
-                print(f"Pre-fuzz capture failed: {e}")
-                # Continue anyway - not critical
-        
-        # Build Python fuzzing script (more flexible than bash for data generation)
-        # Pre-compute data based on mode
+    # Validate inputs
+    if not re.match(r'^[0-9A-Fa-f]{1,8}$', request.id_start):
+        raise HTTPException(status_code=400, detail=f"ID start invalide: {request.id_start}")
+    if not re.match(r'^[0-9A-Fa-f]{1,8}$', request.id_end):
+        raise HTTPException(status_code=400, detail=f"ID end invalide: {request.id_end}")
+    if request.data_template and not re.match(r'^[0-9A-Fa-f]*$', request.data_template):
+        raise HTTPException(status_code=400, detail=f"Data template invalide: {request.data_template}")
+    if request.interface not in ["can0", "can1", "vcan0"]:
+        raise HTTPException(status_code=400, detail="Invalid interface")
+    if not (1 <= request.iterations <= 100000):
+        raise HTTPException(status_code=400, detail="Iterations must be between 1 and 100000")
+    if not (0.1 <= request.delay_ms <= 10000):
+        raise HTTPException(status_code=400, detail="Delay must be between 0.1ms and 10000ms")
+    
+    dlc = max(1, min(request.dlc, 8))
+    mode = request.data_mode
+    
+    # PRE-FUZZ CAPTURE: Record baseline traffic before fuzzing
+    pre_fuzz_log_path = None
+    if request.enable_pre_fuzz_capture and request.mission_id:
+        try:
+            from datetime import datetime
+            logs_dir = get_mission_logs_dir(request.mission_id)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            pre_fuzz_log_path = logs_dir / f"pre_fuzz_{timestamp}.log"
+            
+            # Run candump for N seconds to capture baseline
+            duration = request.pre_fuzz_duration_sec
+            candump_cmd = [
+                "timeout", str(duration),
+                "candump", request.interface,
+                "-L"
+            ]
+            
+            with open(pre_fuzz_log_path, "w") as log_f:
+                result = run_command(candump_cmd, check=False, stdout=log_f)
+            
+            # Create metadata
+            meta_path = logs_dir / f"pre_fuzz_{timestamp}.meta.json"
+            with open(meta_path, "w") as meta_f:
+                json.dump({
+                    "type": "pre_fuzz_capture",
+                    "duration": duration,
+                    "interface": request.interface,
+                    "timestamp": timestamp,
+                }, meta_f)
+            
+            print(f"Pre-fuzz capture saved: {pre_fuzz_log_path}")
+        except Exception as e:
+            print(f"Pre-fuzz capture failed: {e}")
+            # Continue anyway - not critical
+    
+    # Build Python fuzzing script (more flexible than bash for data generation)
+    # Pre-compute data based on mode
     
     # For "logs" mode, extract real samples from mission logs
     log_samples_code = ""
@@ -1593,12 +1595,12 @@ async def start_fuzzing(request: FuzzingRequest):
                 continue
         
         # Serialize samples into the script
-        log_samples_code = "LOG_SAMPLES = " + json.dumps(id_samples) + "\n"
+        log_samples_code = f"LOG_SAMPLES = {json.dumps(id_samples)}\n"
     
     # For "range" mode, build per-byte constraints
     byte_ranges_code = ""
     if mode == "range" and request.byte_ranges:
-        byte_ranges_code = "BYTE_RANGES = " + json.dumps(request.byte_ranges) + "\n"
+        byte_ranges_code = f"BYTE_RANGES = {json.dumps(request.byte_ranges)}\n"
     
     # For "target_ids" mode with specific IDs
     target_ids = request.target_ids or []
@@ -1659,9 +1661,9 @@ if DURING_FUZZ_LOG:
             stdout=candump_log_file,
             stderr=subprocess.DEVNULL
         )
-        print("[FUZZ] Recording CAN traffic to {{}}".format(DURING_FUZZ_LOG))
+        print(f"[FUZZ] Recording CAN traffic to {{DURING_FUZZ_LOG}}")
     except Exception as e:
-        print("[FUZZ] Warning: Could not start candump: {{}}".format(e))
+        print(f"[FUZZ] Warning: Could not start candump: {{e}}")
 
 def cleanup():
     """Stop candump on exit"""
@@ -1789,25 +1791,14 @@ finally:
     script_path.chmod(0o755)
     
     # Start process
-        state.fuzzing_process = subprocess.Popen(
-            ["python3", str(script_path)],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True
-        )
-        
-        return {{"status": "started", "iterations": request.iterations}}
+    state.fuzzing_process = subprocess.Popen(
+        ["python3", str(script_path)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True
+    )
     
-    except HTTPException:
-        raise
-    except Exception as e:
-        import traceback
-        error_details = traceback.format_exc()
-        print(f"[ERROR] Fuzzing start failed: {{error_details}}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to start fuzzing: {{str(e)}}"
-        )
+    return {{"status": "started", "iterations": request.iterations}}
 
 
 @app.post("/api/fuzzing/stop")
