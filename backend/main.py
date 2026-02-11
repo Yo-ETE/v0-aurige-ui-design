@@ -1593,12 +1593,12 @@ async def start_fuzzing(request: FuzzingRequest):
                 continue
         
         # Serialize samples into the script
-        log_samples_code = f"LOG_SAMPLES = {json.dumps(id_samples)}\n"
+        log_samples_code = "LOG_SAMPLES = " + json.dumps(id_samples) + "\n"
     
     # For "range" mode, build per-byte constraints
     byte_ranges_code = ""
     if mode == "range" and request.byte_ranges:
-        byte_ranges_code = f"BYTE_RANGES = {json.dumps(request.byte_ranges)}\n"
+        byte_ranges_code = "BYTE_RANGES = " + json.dumps(request.byte_ranges) + "\n"
     
     # For "target_ids" mode with specific IDs
     target_ids = request.target_ids or []
