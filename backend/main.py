@@ -33,9 +33,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-# Import DBC parser
-from dbc_parser import parse_dbc_file
-
 # =============================================================================
 # Configuration
 # =============================================================================
@@ -5391,89 +5388,6 @@ async def get_mission_dbc(mission_id: str) -> MissionDBC:
         data = json.load(f)
     
     return MissionDBC(**data)
-
-@app.post("/api/missions/{mission_id}/dbc/import")
-async def import_dbc_file(mission_id: str, file: UploadFile = File(...)):
-  """
-  Import an official .dbc file (Vector format) into mission DBC.
-  Parses messages, signals, ECUs, comments and value tables.
-  """
-  try:
-    # Validate file extension
-    if not file.filename.endswith('.dbc'):
-      raise HTTPException(status_code=400, detail="File must be a .dbc file")
-    
-    # Read file content
-    content = await file.read()
-    dbc_content = content.decode('utf-8', errors='ignore')
-    
-    # Parse DBC file
-    print(f"[INFO] Importing DBC file: {file.filename} for mission {mission_id}")
-    parsed_dbc = parse_dbc_file(dbc_content)
-    
-    # Get existing DBC or create new
-    dbc_file = Path(MISSIONS_DIR) / mission_id / "dbc.json"
-    if dbc_file.exists():
-      with open(dbc_file, 'r') as f:
-        existing_dbc = json.load(f)
-    else:
-      existing_dbc = {"signals": [], "ecus": [], "messages": []}
-    
-    # Convert parsed signals to DBCSignal format
-    imported_count = 0
-    for msg in parsed_dbc['messages']:
-      for sig in msg['signals']:
-        # Create signal in our format
-        signal_dict = {
-          "id": f"{msg['id']}_{sig['name']}",
-          "can_id": msg['id'],
-          "name": sig['name'],
-          "start_bit": sig['start_bit'],
-          "bit_length": sig['bit_length'],
-          "byte_order": sig['byte_order'],
-          "value_type": sig['value_type'],
-          "factor": sig['factor'],
-          "offset": sig['offset'],
-          "min": sig['min'],
-          "max": sig['max'],
-          "unit": sig['unit'],
-          "comment": sig['comment'],
-          "value_table": sig['value_table']
-        }
-        
-        # Check if signal already exists (by id)
-        existing_idx = next((i for i, s in enumerate(existing_dbc['signals']) 
-                           if s.get('id') == signal_dict['id']), None)
-        
-        if existing_idx is not None:
-          # Update existing signal
-          existing_dbc['signals'][existing_idx] = signal_dict
-        else:
-          # Add new signal
-          existing_dbc['signals'].append(signal_dict)
-        
-        imported_count += 1
-    
-    # Save updated DBC
-    dbc_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(dbc_file, 'w') as f:
-      json.dump(existing_dbc, f, indent=2)
-    
-    print(f"[INFO] Successfully imported {imported_count} signals from {file.filename}")
-    
-    return {
-      "status": "success",
-      "imported_signals": imported_count,
-      "total_messages": len(parsed_dbc['messages']),
-      "filename": file.filename
-    }
-  
-  except HTTPException:
-    raise
-  except Exception as e:
-    print(f"[ERROR] DBC import failed: {str(e)}")
-    raise HTTPException(status_code=500, detail=f"Failed to import DBC: {str(e)}")
-
 
 @app.post("/api/missions/{mission_id}/dbc/signal")
 async def add_dbc_signal(mission_id: str, signal: DBCSignal):
