@@ -223,11 +223,18 @@ export default function ConfigurationPage() {
       try {
         const output = await getAptOutput()
         setAptOutput(output)
-      } catch {
-        // Ignore
+      } catch (error: unknown) {
+        // Silently ignore network errors (ERR_NETWORK_CHANGED, timeouts, etc.)
+        // Only log unexpected errors for debugging
+        if (error && typeof error === "object" && "message" in error) {
+          const msg = String(error.message)
+          if (!msg.includes("network") && !msg.includes("fetch") && !msg.includes("timeout")) {
+            console.error("[v0] Unexpected apt polling error:", error)
+          }
+        }
       }
     }
-
+    
     pollApt()
     const interval = setInterval(pollApt, 1000)
     return () => clearInterval(interval)
@@ -339,20 +346,28 @@ export default function ConfigurationPage() {
             }, 3000)
           }
         }
-      } catch {
-        errorCount++
-        // If we get multiple errors in a row during an update, services are restarting
-        // Try to reload the page after a delay
-        if (errorCount >= 3 && updateOutput.running && !reloadScheduled) {
-          reloadScheduled = true
-          setUpdateOutput(prev => ({
-            ...prev,
-            lines: [...prev.lines, ">>> Services en cours de redemarrage...", ">>> Rechargement automatique dans 5 secondes..."],
-            running: false
-          }))
-          setTimeout(() => {
-            window.location.reload()
-          }, 5000)
+      } catch (error: unknown) {
+        // Silently handle network errors, only count real API failures
+        const isNetworkError = error && typeof error === "object" && "message" in error &&
+          (String(error.message).includes("network") || 
+           String(error.message).includes("fetch") || 
+           String(error.message).includes("timeout"))
+        
+        if (!isNetworkError) {
+          errorCount++
+          // If we get multiple errors in a row during an update, services are restarting
+          // Try to reload the page after a delay
+          if (errorCount >= 3 && updateOutput.running && !reloadScheduled) {
+            reloadScheduled = true
+            setUpdateOutput(prev => ({
+              ...prev,
+              lines: [...prev.lines, ">>> Services en cours de redemarrage...", ">>> Rechargement automatique dans 5 secondes..."],
+              running: false
+            }))
+            setTimeout(() => {
+              window.location.reload()
+            }, 5000)
+          }
         }
       }
     }
