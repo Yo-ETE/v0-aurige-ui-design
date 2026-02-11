@@ -1605,13 +1605,16 @@ async def start_fuzzing(request: FuzzingRequest):
     # For "target_ids" mode with specific IDs
     target_ids = request.target_ids or []
     
-    # Prepare mission log paths for during-fuzz capture
+    # Prepare mission log paths for during-fuzz capture and history
     during_fuzz_log_path = None
+    history_file_path = "/tmp/aurige_fuzz_history.json"  # Fallback
+    
     if request.mission_id:
         from datetime import datetime
         logs_dir = get_mission_logs_dir(request.mission_id)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        during_fuzz_log_path = logs_dir / f"during_fuzz_{{timestamp}}.log"
+        during_fuzz_log_path = logs_dir / f"during_fuzz_{timestamp}.log"
+        history_file_path = str(logs_dir / f"fuzz_history_{timestamp}.json")
     
     script_content = f'''#!/usr/bin/env python3
 import subprocess
@@ -1631,195 +1634,21 @@ DLC = {dlc}
 MODE = "{mode}"
 DATA_TEMPLATE = "{request.data_template or ''}"
 TARGET_IDS = {json.dumps(target_ids)}
-HISTORY_FILE = "/tmp/aurige_fuzz_history.json"
+MISSION_ID = "{request.mission_id or ''}"
+HISTORY_FILE = "{history_file_path}"
 DURING_FUZZ_LOG = "{during_fuzz_log_path}" if "{during_fuzz_log_path}" != "None" else None
 {log_samples_code}
 {byte_ranges_code}
 
 # Initialize history with ALL frames (sent + metadata)
-history = {{
+history = {
+    "mission_id": MISSION_ID,
     "started_at": time.time(),
     "stopped_at": None,
     "total_sent": 0,
     "frames_sent": [],  # Frames we sent
     "during_fuzz_log": DURING_FUZZ_LOG,
-}}
-
-# Start candump in background to record all CAN traffic during fuzzing
-candump_process = None
-if DURING_FUZZ_LOG:
-    try:
-        candump_log_file = open(DURING_FUZZ_LOG, "w")
-        candump_process = subprocess.Popen(
-            ["candump", INTERFACE, "-L"],
-            stdout=candump_log_file,
-            stderr=subprocess.DEVNULL
-        )
-        print(f"[FUZZ] Recording CAN traffic to {{DURING_FUZZ_LOG}}")
-    except Exception as e:
-        print(f"[FUZZ] Warning: Could not start candump: {{e}}")
-
-def cleanup():
-    """Stop candump on exit"""
-    if candump_process:
-        candump_process.terminate()
-        try:
-            candump_process.wait(timeout=2)
-        except:
-            candump_process.kill()
-    if 'candump_log_file' in globals():
-        candump_log_file.close()
-
-signal.signal(signal.SIGTERM, lambda s, f: cleanup())
-signal.signal(signal.SIGINT, lambda s, f: cleanup())
-
-def generate_data_static():
-    """Same static data for every frame"""
-    tpl = DATA_TEMPLATE if DATA_TEMPLATE else "00" * DLC
-    # Pad or truncate to DLC
-    tpl = tpl.ljust(DLC * 2, "0")[:DLC * 2]
-    return tpl.upper()
-
-def generate_data_random():
-    """Fully random bytes"""
-    return "".join(f"{{random.randint(0, 255):02X}}" for _ in range(DLC))
-
-def generate_data_range():
-    """Random bytes within per-byte min/max constraints"""
-    data = []
-    for i in range(DLC):
-        found = False
-        if "BYTE_RANGES" in dir() or "BYTE_RANGES" in globals():
-            for br in BYTE_RANGES:
-                if br.get("index") == i:
-                    bmin = br.get("min", 0)
-                    bmax = br.get("max", 255)
-                    data.append(f"{{random.randint(bmin, bmax):02X}}")
-                    found = True
-                    break
-        if not found:
-            data.append(f"{{random.randint(0, 255):02X}}")
-    return "".join(data)
-
-def generate_data_logs(can_id_hex):
-    """Pick from real observed data, with random mutation on 1-2 bytes"""
-    if "LOG_SAMPLES" not in dir() and "LOG_SAMPLES" not in globals():
-        return generate_data_random()
-    samples = LOG_SAMPLES.get(can_id_hex, [])
-    if not samples:
-        return generate_data_random()
-    base = random.choice(samples)
-    # Mutate 1-2 random bytes while keeping the structure
-    base_bytes = [base[i:i+2] for i in range(0, len(base), 2)]
-    if len(base_bytes) == 0:
-        return generate_data_random()
-    # Mutate 1-2 bytes
-    n_mutate = random.randint(1, min(2, len(base_bytes)))
-    indices = random.sample(range(len(base_bytes)), n_mutate)
-    for idx in indices:
-        original = int(base_bytes[idx], 16)
-        # Mutate within +/- 30% of original range, or random
-        delta = random.randint(-40, 40)
-        new_val = max(0, min(255, original + delta))
-        base_bytes[idx] = f"{{new_val:02X}}"
-    return "".join(base_bytes).upper()
-
-def main():
-    sent = 0
-    
-    if TARGET_IDS:
-        # Targeted mode: cycle through specific IDs
-        for i in range(ITERATIONS):
-            can_id_hex = TARGET_IDS[i % len(TARGET_IDS)]
-            if MODE == "static":
-                data = generate_data_static()
-            elif MODE == "range":
-                data = generate_data_range()
-            elif MODE == "logs":
-                data = generate_data_logs(can_id_hex)
-            else:
-                data = generate_data_random()
-            
-            frame = f"{{can_id_hex}}#{{data}}"
-            subprocess.run(["cansend", INTERFACE, frame], capture_output=True)
-            sent += 1
-            
-            # Record EVERY frame sent
-            history["frames_sent"].append({{
-                "index": sent,
-                "id": can_id_hex,
-                "data": data,
-                "timestamp": time.time()
-            }})
-            
-            if sent % 50 == 0:
-                sys.stdout.write(f"\\rSent {{sent}}/{{ITERATIONS}} frames")
-                sys.stdout.flush()
-            time.sleep(DELAY_SEC)
-    else:
-        # Sweep mode: increment through ID range
-        id_range = max(1, ID_END - ID_START + 1)
-        for i in range(ITERATIONS):
-            current_id = ID_START + (i % id_range)
-            can_id_hex = f"{{current_id:03X}}"
-            
-            if MODE == "static":
-                data = generate_data_static()
-            elif MODE == "range":
-                data = generate_data_range()
-            elif MODE == "logs":
-                data = generate_data_logs(can_id_hex)
-            else:
-                data = generate_data_random()
-            
-            frame = f"{{can_id_hex}}#{{data}}"
-            subprocess.run(["cansend", INTERFACE, frame], capture_output=True)
-            sent += 1
-            
-            # Record EVERY frame sent
-            history["frames_sent"].append({{
-                "index": sent,
-                "id": can_id_hex,
-                "data": data,
-                "timestamp": time.time()
-            }})
-            
-            if sent % 50 == 0:
-                sys.stdout.write(f"\\rSent {{sent}}/{{ITERATIONS}} frames")
-                sys.stdout.flush()
-            time.sleep(DELAY_SEC)
-    
-    # Stop candump and save history
-    cleanup()
-    
-    history["stopped_at"] = time.time()
-    history["total_sent"] = sent
-    with open(HISTORY_FILE, "w") as f:
-        json.dump(history, f)
-    
-    print(f"\\nFuzzing complete: {{sent}} frames sent.")
-    print(f"History saved to {{HISTORY_FILE}}")
-    if DURING_FUZZ_LOG:
-        print(f"CAN traffic recorded to {{DURING_FUZZ_LOG}}")
-
-if __name__ == "__main__":
-    main()
-'''
-    
-    script_path = Path("/tmp/aurige_fuzz.py")
-    with open(script_path, "w") as f:
-        f.write(script_content)
-    script_path.chmod(0o755)
-    
-    state.fuzzing_process = await run_command_async(["python3", str(script_path)])
-    
-    return {
-        "status": "started",
-        "interface": request.interface,
-        "idRange": f"{request.id_start}-{request.id_end}",
-        "iterations": request.iterations,
-        "dataMode": mode,
-    }
+}
 
 
 @app.post("/api/fuzzing/stop")
@@ -1912,16 +1741,32 @@ async def attempt_crash_recovery(request: CrashRecoveryRequest):
 
 
 @app.get("/api/fuzzing/history")
-async def get_fuzzing_history():
+async def get_fuzzing_history(mission_id: Optional[str] = None):
     """
     Get the last fuzzing history (frames sent before potential crash).
-    This reads from /tmp/aurige_fuzz_history.json if it exists.
+    If mission_id provided, reads the most recent history file from that mission's logs.
+    Otherwise falls back to /tmp/aurige_fuzz_history.json.
     """
-    history_file = Path("/tmp/aurige_fuzz_history.json")
+    history_file = None
+    
+    # Try mission-specific history first
+    if mission_id:
+        try:
+            logs_dir = get_mission_logs_dir(mission_id)
+            history_files = sorted(logs_dir.glob("fuzz_history_*.json"), reverse=True)
+            if history_files:
+                history_file = history_files[0]  # Most recent
+        except:
+            pass
+    
+    # Fallback to global temp file
+    if not history_file or not history_file.exists():
+        history_file = Path("/tmp/aurige_fuzz_history.json")
+    
     if not history_file.exists():
         return {
             "exists": False,
-            "frames": [],
+            "frames_sent": [],
             "message": "No fuzzing history found. Run fuzzing with crash detection enabled.",
         }
     
@@ -1930,16 +1775,18 @@ async def get_fuzzing_history():
             data = json.load(f)
         return {
             "exists": True,
-            "frames": data.get("frames", []),
+            "frames_sent": data.get("frames_sent", data.get("frames", [])),
             "started_at": data.get("started_at"),
             "stopped_at": data.get("stopped_at"),
             "total_sent": data.get("total_sent", 0),
+            "mission_id": data.get("mission_id"),
+            "during_fuzz_log": data.get("during_fuzz_log"),
         }
     except Exception as e:
         return {
             "exists": True,
             "error": str(e),
-            "frames": [],
+            "frames_sent": [],
         }
 
 

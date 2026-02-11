@@ -439,6 +439,7 @@ export interface FuzzingHistory {
   stopped_at?: number
   total_sent?: number
   message?: string
+  mission_id?: string
   during_fuzz_log?: string
 }
 
@@ -475,8 +476,9 @@ export async function attemptCrashRecovery(
   })
 }
 
-export async function getFuzzingHistory(): Promise<FuzzingHistory> {
-  return fetchApi("/fuzzing/history")
+export async function getFuzzingHistory(missionId?: string): Promise<FuzzingHistory> {
+  const params = missionId ? `?mission_id=${missionId}` : ""
+  return fetchApi(`/fuzzing/history${params}`)
 }
 
 export async function compareLogsWithFuzzing(

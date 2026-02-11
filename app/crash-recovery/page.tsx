@@ -66,9 +66,13 @@ export default function CrashRecoveryPage() {
   }
 
   const loadHistory = async () => {
+    if (!currentMission?.id) {
+      setHistory(null)
+      return
+    }
     setIsLoadingHistory(true)
     try {
-      const data = await getFuzzingHistory()
+      const data = await getFuzzingHistory(currentMission.id)
       setHistory(data)
     } catch (error) {
       console.error("Failed to load fuzzing history:", error)
@@ -138,6 +142,16 @@ export default function CrashRecoveryPage() {
           Detection et recuperation apres crash CAN / fuzzing
         </p>
       </div>
+
+      {/* Mission warning */}
+      {!currentMission && (
+        <Alert className="border-warning bg-warning/10">
+          <AlertTriangle className="h-4 w-4 text-warning" />
+          <AlertDescription>
+            Aucune mission active. Selectionnez une mission pour acceder a l'historique de fuzzing et a l'analyse de crash.
+          </AlertDescription>
+        </Alert>
+      )}
 
       {/* Interface selector */}
       <Card>
