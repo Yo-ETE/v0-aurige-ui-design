@@ -49,24 +49,28 @@ function SnifferRow({
   dbcEnabled,
   decodeSignals,
   highlightChangesEnabled,
+  ignoreNoisy,
 }: { 
   frame: SnifferFrame
   dbcEntry?: { messageName: string } | null
   dbcEnabled: boolean
   decodeSignals: (canId: string, bytes: string[]) => DecodedSignal[]
   highlightChangesEnabled: boolean
+  ignoreNoisy: boolean
 }) {
   const [expanded, setExpanded] = useState(false)
   const [flashKey, setFlashKey] = useState(0)
   const isKnown = !!dbcEntry
   const decoded = expanded && dbcEnabled && isKnown ? decodeSignals(frame.canId, frame.bytes) : []
+  
+  const shouldFlash = highlightChangesEnabled && frame.payloadChanged && !(ignoreNoisy && frame.isNoisy)
 
   // Trigger flash animation when payload changes
   useEffect(() => {
-    if (highlightChangesEnabled && frame.payloadChanged && !frame.isNoisy) {
+    if (shouldFlash) {
       setFlashKey(prev => prev + 1)
     }
-  }, [frame.payloadChanged, frame.changedAt, highlightChangesEnabled, frame.isNoisy])
+  }, [frame.payloadChanged, frame.changedAt, shouldFlash])
 
   return (
     <div>
@@ -139,13 +143,20 @@ function SnifferRow({
           {frame.count}
         </span>
         {/* Delta badge for changed frames */}
-        {highlightChangesEnabled && frame.payloadChanged && !frame.isNoisy && (
-          <span className="flex-shrink-0 inline-flex items-center gap-0.5 rounded bg-warning/20 px-1 py-px text-[9px] font-bold text-warning leading-tight">
-            Δ{frame.deltaBytes > 0 && frame.deltaBytes}
+        {highlightChangesEnabled && frame.payloadChanged && shouldFlash && (
+          <span 
+            className="flex-shrink-0 inline-flex items-center gap-0.5 rounded bg-warning/20 px-1 py-px text-[9px] font-bold text-warning leading-tight"
+            title={frame.changedSignalNames.length > 0 ? `Signaux: ${frame.changedSignalNames.join(", ")}` : undefined}
+          >
+            {frame.signalChanged && frame.changedSignalNames.length > 0 ? (
+              <>SIG</>
+            ) : (
+              <>Δ{frame.deltaBytes > 0 && frame.deltaBytes}</>
+            )}
           </span>
         )}
         {/* Noisy badge */}
-        {frame.isNoisy && (
+        {frame.isNoisy && !ignoreNoisy && (
           <span className="flex-shrink-0 inline-flex items-center rounded bg-muted/40 px-1 py-px text-[9px] font-medium text-muted-foreground leading-tight">
             noisy
           </span>
@@ -188,6 +199,8 @@ export function FloatingTerminal() {
     highlightChangesEnabled,
     changedOnlyMode,
     changedWindowMs,
+    highlightMode,
+    ignoreNoisy,
     setInterface,
     setIdFilter,
     start,
@@ -203,6 +216,8 @@ export function FloatingTerminal() {
     toggleHighlightChanges,
     toggleChangedOnly,
     setChangedWindow,
+    setHighlightMode,
+    toggleIgnoreNoisy,
   } = useSnifferStore()
 
   const currentMission = useMissionStore((state) => state.getCurrentMission())
@@ -374,6 +389,19 @@ export function FloatingTerminal() {
           >
             <Zap className="h-4 w-4" />
           </Button>
+          {highlightChangesEnabled && (
+            <select
+              value={highlightMode}
+              onChange={(e) => setHighlightMode(e.target.value as "payload" | "signal" | "both")}
+              onMouseDown={(e) => e.stopPropagation()}
+              className="h-7 rounded border border-border bg-secondary px-2 text-[10px] text-foreground"
+              title="Mode de detection"
+            >
+              <option value="payload">Payload</option>
+              <option value="signal">Signal</option>
+              <option value="both">Both</option>
+            </select>
+          )}
           <Button
             size="icon"
             variant="ghost"
@@ -532,6 +560,7 @@ export function FloatingTerminal() {
                   dbcEnabled={dbcEnabled}
                   decodeSignals={decodeSignals}
                   highlightChangesEnabled={highlightChangesEnabled}
+                  ignoreNoisy={ignoreNoisy}
                 />
               )
             })}

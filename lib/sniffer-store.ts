@@ -55,6 +55,10 @@ export interface SnifferFrame {
   changedAt: number
   /** Noisy flag (changes too frequently) */
   isNoisy: boolean
+  /** Changed signal names (DBC-level detection) */
+  changedSignalNames: string[]
+  /** Signal values changed (more precise than payload) */
+  signalChanged: boolean
 }
 
 interface SnifferState {
@@ -83,7 +87,10 @@ interface SnifferState {
   highlightChangesEnabled: boolean
   changedOnlyMode: boolean
   changedWindowMs: number
+  highlightMode: "payload" | "signal" | "both"
+  ignoreNoisy: boolean
   lastPayloadById: Map<string, string>
+  lastDecodedSignalsById: Map<string, Record<string, number>>
   changeCountById: Map<string, { count: number; lastResetTs: number }>
   
   // Terminal state
@@ -111,6 +118,8 @@ interface SnifferState {
   toggleHighlightChanges: () => void
   toggleChangedOnly: () => void
   setChangedWindow: (ms: number) => void
+  setHighlightMode: (mode: "payload" | "signal" | "both") => void
+  toggleIgnoreNoisy: () => void
 }
 
 export const useSnifferStore = create<SnifferState>((set, get) => ({
@@ -129,7 +138,10 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
   highlightChangesEnabled: true,
   changedOnlyMode: false,
   changedWindowMs: 5000,
+  highlightMode: "both",
+  ignoreNoisy: true,
   lastPayloadById: new Map(),
+  lastDecodedSignalsById: new Map(),
   changeCountById: new Map(),
   isPaused: false,
   isMinimized: false,
@@ -185,9 +197,13 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
             frameMap, 
             sortedIds, 
             totalMessages, 
-            lastPayloadById, 
+            lastPayloadById,
+            lastDecodedSignalsById,
             changeCountById,
             highlightChangesEnabled,
+            highlightMode,
+            dbcEnabled,
+            dbcLookup,
           } = get()
           if (isPaused) return
           
@@ -248,6 +264,49 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
             }
           }
           
+          // Signal-level change detection (DBC-aware)
+          let signalChanged = false
+          const changedSignalNames: string[] = []
+          
+          if (highlightChangesEnabled && dbcEnabled && (highlightMode === "signal" || highlightMode === "both")) {
+            const dbcEntry = dbcLookup.get(id)
+            if (dbcEntry && dbcEntry.signals.length > 0) {
+              // Decode current signals
+              const currentSignals: Record<string, number> = {}
+              const decoded = get().decodeSignals(id, newBytes)
+              for (const sig of decoded) {
+                currentSignals[sig.name] = sig.value
+              }
+              
+              // Compare with previous
+              const prevSignals = lastDecodedSignalsById.get(id)
+              if (prevSignals) {
+                for (const sigName in currentSignals) {
+                  const curr = currentSignals[sigName]
+                  const prev = prevSignals[sigName]
+                  if (prev !== undefined && curr !== prev) {
+                    signalChanged = true
+                    changedSignalNames.push(sigName)
+                  }
+                }
+              }
+              
+              // Update memory
+              lastDecodedSignalsById.set(id, currentSignals)
+            }
+          }
+          
+          // Determine final change status based on mode
+          let finalPayloadChanged = false
+          if (highlightMode === "payload") {
+            finalPayloadChanged = payloadChanged
+          } else if (highlightMode === "signal") {
+            finalPayloadChanged = signalChanged
+          } else {
+            // both
+            finalPayloadChanged = payloadChanged || signalChanged
+          }
+          
           // Update payload memory
           lastPayloadById.set(id, payloadHex)
           
@@ -271,10 +330,12 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
             dlc: newBytes.length,
             cycleMs,
             _lastRawTs: now,
-            payloadChanged,
+            payloadChanged: finalPayloadChanged,
             deltaBytes,
-            changedAt: payloadChanged ? nowMs : (existing?.changedAt || 0),
+            changedAt: finalPayloadChanged ? nowMs : (existing?.changedAt || 0),
             isNoisy,
+            changedSignalNames,
+            signalChanged,
           }
           
           const newMap = new Map(frameMap)
@@ -295,6 +356,7 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
             sortedIds: newSortedIds,
             totalMessages: totalMessages + 1,
             lastPayloadById,
+            lastDecodedSignalsById,
             changeCountById,
           })
         },
@@ -439,4 +501,8 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
   toggleChangedOnly: () => set((state) => ({ changedOnlyMode: !state.changedOnlyMode })),
   
   setChangedWindow: (ms: number) => set({ changedWindowMs: ms }),
+  
+  setHighlightMode: (mode) => set({ highlightMode: mode }),
+  
+  toggleIgnoreNoisy: () => set((state) => ({ ignoreNoisy: !state.ignoreNoisy })),
 }))
