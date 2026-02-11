@@ -25,6 +25,7 @@ import {
   X,
   Cog,
   FileCode,
+  ShieldAlert,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
@@ -88,6 +89,7 @@ const baseNavigation: NavSection[] = [
     title: "Tests Avancés",
     items: [
       { name: "Fuzzing", href: "/fuzzing", icon: Flame },
+      { name: "Crash Recovery", href: "/crash-recovery", icon: ShieldAlert },
       { name: "Générateur", href: "/generateur", icon: Cpu },
     ],
   },
