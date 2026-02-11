@@ -347,10 +347,26 @@ export default function ConfigurationPage() {
           )
           if (hasSuccess) {
             reloadScheduled = true
-            // Wait 3 seconds then reload
-            setTimeout(() => {
-              window.location.reload()
-            }, 3000)
+            setNeedsRestart(true)
+            // Auto restart services and reload
+            setTimeout(async () => {
+              try {
+                await restartServices()
+                setUpdateOutput(prev => ({
+                  ...prev,
+                  lines: [...prev.lines, ">>> Services redemarres, rechargement de la page..."],
+                }))
+                setTimeout(() => {
+                  window.location.reload()
+                }, 2000)
+              } catch {
+                // If auto restart fails, show manual button
+                setUpdateOutput(prev => ({
+                  ...prev,
+                  lines: [...prev.lines, ">>> Veuillez redemarrer les services manuellement"],
+                }))
+              }
+            }, 1000)
           }
         }
       } catch (error: unknown) {
