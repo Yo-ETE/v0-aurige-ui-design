@@ -8,6 +8,7 @@ import { useExportStore } from "@/lib/export-store"
 import {
   getMissionDBC,
   deleteDBCSignal,
+  clearMissionDBC,
   getDBCExportUrl,
   addDBCSignal,
   sendCANFrame,
@@ -110,6 +111,22 @@ export default function DBCPage() {
     unit: "",
     comment: "",
   })
+
+  // Clear all DBC signals
+  const handleClearAll = async () => {
+    if (!missionId) return
+    const totalSignals = dbcData?.messages.reduce((acc, m) => acc + m.signals.length, 0) || 0
+    if (!confirm(`Supprimer tous les signaux (${totalSignals}) ? Cette action est irreversible.`)) return
+    
+    try {
+      await clearMissionDBC(missionId)
+      await loadDBC()
+      setImportResult({ success: true, message: "Tous les signaux ont ete supprimes" })
+    } catch (error) {
+      console.error("Failed to clear DBC:", error)
+      setImportResult({ success: false, message: "Erreur lors de la suppression" })
+    }
+  }
 
   // Import DBC file
   const handleImportDBC = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -424,6 +441,16 @@ export default function DBCPage() {
               OpenDBC
             </a>
           </Button>
+          {dbcData && dbcData.messages.length > 0 && (
+            <Button 
+              variant="outline" 
+              className="bg-transparent gap-2 text-destructive hover:bg-destructive/10" 
+              onClick={handleClearAll}
+            >
+              <Trash2 className="h-4 w-4" />
+              Tout supprimer
+            </Button>
+          )}
         </div>
       </div>
 

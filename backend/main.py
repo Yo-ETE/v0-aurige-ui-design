@@ -5602,6 +5602,27 @@ async def delete_dbc_signal(mission_id: str, signal_id: str):
     
     return {"status": "ok"}
 
+@app.delete("/api/missions/{mission_id}/dbc")
+async def clear_mission_dbc(mission_id: str):
+  """Delete all signals and messages from the mission DBC"""
+  dbc_file = Path(MISSIONS_DIR) / mission_id / "dbc.json"
+  
+  if not dbc_file.exists():
+    raise HTTPException(status_code=404, detail="DBC non trouve")
+  
+  data = {
+    "mission_id": mission_id,
+    "messages": [],
+    "created_at": datetime.now().isoformat(),
+    "updated_at": datetime.now().isoformat()
+  }
+  
+  with open(dbc_file, "w") as f:
+    json.dump(data, f, indent=2)
+  
+  return {"status": "ok", "message": "All signals cleared"}
+
+
 @app.get("/api/missions/{mission_id}/dbc/export")
 async def export_dbc(mission_id: str):
     """Export mission DBC to .dbc file format"""
