@@ -5407,9 +5407,9 @@ async def import_dbc_file(mission_id: str, file: UploadFile = File(...)):
     content = await file.read()
     dbc_content = content.decode('utf-8', errors='ignore')
     
-  # Parse DBC file
-  print(f"[INFO] Importing DBC file: {file.filename} for mission {mission_id}")
-  parsed_dbc = parse_dbc_file(dbc_content)
+    # Parse DBC file
+    print(f"[INFO] Importing DBC file: {file.filename} for mission {mission_id}")
+    parsed_dbc = parse_dbc_file(dbc_content)
     
     # Get existing DBC or create new
     dbc_file = Path(MISSIONS_DIR) / mission_id / "dbc.json"
