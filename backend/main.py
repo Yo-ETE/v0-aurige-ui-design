@@ -5392,6 +5392,38 @@ async def get_mission_dbc(mission_id: str) -> MissionDBC:
     with open(dbc_file, "r") as f:
         data = json.load(f)
     
+    # Normalize signal fields from DBC import format to internal format
+    for msg in data.get("messages", []):
+        for sig in msg.get("signals", []):
+            # bit_length -> length
+            if "bit_length" in sig and "length" not in sig:
+                sig["length"] = sig.pop("bit_length")
+            # factor -> scale
+            if "factor" in sig and "scale" not in sig:
+                sig["scale"] = sig.pop("factor")
+            # min -> min_val
+            if "min" in sig and "min_val" not in sig:
+                sig["min_val"] = sig.pop("min")
+            # max -> max_val
+            if "max" in sig and "max_val" not in sig:
+                sig["max_val"] = sig.pop("max")
+            # Normalize byte_order
+            bo = sig.get("byte_order", "little_endian")
+            if bo in ("little", "1"):
+                sig["byte_order"] = "little_endian"
+            elif bo in ("big", "0"):
+                sig["byte_order"] = "big_endian"
+            # Ensure can_id exists on signal
+            if "can_id" not in sig:
+                sig["can_id"] = msg.get("can_id", "")
+            # Remove extra fields not in model
+            for key in list(sig.keys()):
+                if key not in ("id", "can_id", "name", "start_bit", "length",
+                               "byte_order", "is_signed", "scale", "offset",
+                               "min_val", "max_val", "unit", "comment",
+                               "sample_before", "sample_ack", "sample_status"):
+                    del sig[key]
+    
     return MissionDBC(**data)
 
 @app.post("/api/missions/{mission_id}/dbc/import")
@@ -5434,20 +5466,27 @@ async def import_dbc_file_endpoint(mission_id: str, file: UploadFile = File(...)
         existing_dbc['messages'].append(existing_msg)
 
       for sig in msg['signals']:
+        # Map DBC parser fields to DBCSignal model fields
+        byte_order_raw = sig.get('byte_order', 'little_endian')
+        if byte_order_raw in ('little', 'little_endian', '1'):
+          byte_order_val = 'little_endian'
+        else:
+          byte_order_val = 'big_endian'
+
         signal_dict = {
           "id": f"{msg['id']}_{sig['name']}",
+          "can_id": msg['id'],
           "name": sig['name'],
           "start_bit": sig['start_bit'],
-          "bit_length": sig['bit_length'],
-          "byte_order": sig.get('byte_order', 'little'),
+          "length": sig['bit_length'],
+          "byte_order": byte_order_val,
           "is_signed": sig.get('value_type') == 'signed',
-          "factor": sig.get('factor', 1),
+          "scale": sig.get('factor', 1),
           "offset": sig.get('offset', 0),
-          "min": sig.get('min', 0),
-          "max": sig.get('max', 0),
+          "min_val": sig.get('min', 0),
+          "max_val": sig.get('max', 0),
           "unit": sig.get('unit', ''),
           "comment": sig.get('comment', ''),
-          "values": sig.get('value_table', {})
         }
         existing_idx = next((i for i, s in enumerate(existing_msg['signals'])
                            if s.get('name') == sig['name']), None)
