@@ -12,10 +12,11 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   Search, Play, Square, Loader2, AlertCircle, CheckCircle2, Activity,
-  Trash2, Plus, Upload, Copy, Save, Radio, FileSearch, Database, Info, Crosshair,
+  Trash2, Plus, Upload, Copy, Save, Radio, FileSearch, Database, Info, Crosshair, Zap,
 } from "lucide-react"
 import {
   correlateOBDWithCAN,
+  extractOBDFromLog,
   listMissionLogs,
   addDBCSignal,
   getSignalFinderWsUrl,
@@ -493,6 +494,8 @@ export default function SignalFinderPage() {
   const [obdSamples, setObdSamples] = useState<OBDSample[]>([])
   const [correlating, setCorrelating] = useState(false)
   const [correlationResult, setCorrelationResult] = useState<CorrelationResult | null>(null)
+  const [extracting, setExtracting] = useState(false)
+  const [extractInfo, setExtractInfo] = useState<string | null>(null)
 
   // Live state
   const [liveRunning, setLiveRunning] = useState(false)
@@ -570,6 +573,38 @@ export default function SignalFinderPage() {
       setCorrelating(false)
     }
   }, [obdSamples, selectedMissionId, windowMs, selectedPid])
+
+  // ==========================================================================
+  // Auto-extract OBD samples from log
+  // ==========================================================================
+
+  const autoExtractFromLog = useCallback(async () => {
+    setExtracting(true)
+    setError(null)
+    setExtractInfo(null)
+    try {
+      const result = await extractOBDFromLog({
+        missionId: selectedMissionId || undefined,
+        pid: selectedPid,
+      })
+      if (result.samples.length > 0) {
+        setObdSamples(result.samples)
+        setExtractInfo(
+          `${result.count} echantillons ${result.name} (${result.unit}) extraits automatiquement du log`
+        )
+      } else {
+        setExtractInfo(
+          `Aucune reponse OBD pour le PID ${result.pid} (${result.name}) trouvee dans ce log. ` +
+          `Le log ne contient probablement pas de trames OBD (7E8-7EF). ` +
+          `Utilisez le mode Live ou ajoutez les echantillons manuellement.`
+        )
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur lors de l'extraction")
+    } finally {
+      setExtracting(false)
+    }
+  }, [selectedMissionId, selectedPid])
 
   // ==========================================================================
   // Live Mode WebSocket
@@ -823,6 +858,33 @@ export default function SignalFinderPage() {
                             ))}
                           </SelectContent>
                         </Select>
+                      </div>
+                    )}
+
+                    {/* Auto-extract OBD from log */}
+                    {selectedMissionId && (
+                      <div className="flex flex-col gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={autoExtractFromLog}
+                          disabled={extracting || correlating || !selectedMissionId}
+                          className="w-full text-xs border-primary/30 hover:border-primary/60"
+                        >
+                          {extracting ? (
+                            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Zap className="mr-1.5 h-3.5 w-3.5 text-primary" />
+                          )}
+                          Auto-extraire les echantillons OBD du log
+                        </Button>
+                        {extractInfo && (
+                          <Alert variant={obdSamples.length > 0 ? "default" : undefined} className="py-2">
+                            <AlertDescription className="text-xs">
+                              {extractInfo}
+                            </AlertDescription>
+                          </Alert>
+                        )}
                       </div>
                     )}
 

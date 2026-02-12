@@ -7073,6 +7073,106 @@ async def correlate_obd_endpoint(request: SignalFinderCorrelationRequest):
     }
 
 
+OBD_RESPONSE_IDS = {"7E8", "7E9", "7EA", "7EB", "7EC", "7ED", "7EE", "7EF"}
+
+
+def _extract_obd_samples_from_log(log_file_path: str, pid: str) -> list:
+    """
+    Parse a candump log and extract decoded OBD-II response values for a given PID.
+    Looks for 7E8-7EF response frames containing service 01 responses (0x41).
+    Returns list of { timestamp, value } samples.
+    """
+    pid_upper = pid.upper()
+    decoder = OBD_PID_DECODERS.get(pid_upper)
+    samples = []
+
+    with open(log_file_path, "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            match = re.match(r"\((\d+\.\d+)\)\s+\w+\s+([0-9A-Fa-f]+)#([0-9A-Fa-f]*)", line)
+            if not match:
+                continue
+            ts = float(match.group(1))
+            can_id = match.group(2).upper()
+            data_hex = match.group(3).upper()
+
+            if can_id not in OBD_RESPONSE_IDS:
+                continue
+
+            byte_list = []
+            for i in range(0, len(data_hex), 2):
+                if i + 2 <= len(data_hex):
+                    byte_list.append(int(data_hex[i:i + 2], 16))
+
+            # OBD response format: [length, 0x41, PID, A, B, ...]
+            if len(byte_list) < 4:
+                continue
+            if byte_list[1] != 0x41:
+                continue
+            resp_pid = f"{byte_list[2]:02X}"
+            if resp_pid != pid_upper:
+                continue
+
+            a_val = byte_list[3] if len(byte_list) > 3 else 0
+            b_val = byte_list[4] if len(byte_list) > 4 else 0
+
+            if decoder:
+                try:
+                    value = round(decoder[2](a_val, b_val), 2)
+                except Exception:
+                    value = float(a_val)
+            else:
+                value = float(a_val)
+
+            samples.append({"timestamp": ts, "value": value})
+
+    return samples
+
+
+@app.post("/api/signal-finder/extract-obd-from-log")
+async def extract_obd_from_log(
+    mission_id: Optional[str] = None,
+    log_path: Optional[str] = None,
+    pid: str = "0C",
+):
+    """
+    Parse a CAN log file and extract OBD-II response samples for a given PID.
+    Returns decoded timestamp + value pairs that can be used directly for correlation.
+    """
+    resolved_path = None
+
+    if log_path:
+        resolved_path = Path(log_path)
+    elif mission_id:
+        mission_dir = MISSIONS_DIR / mission_id
+        if not mission_dir.exists():
+            raise HTTPException(status_code=404, detail=f"Mission non trouvee: {mission_id}")
+        logs_dir = mission_dir / "logs"
+        if logs_dir.exists():
+            log_files = sorted(logs_dir.glob("*.log"), key=lambda f: f.stat().st_mtime, reverse=True)
+            if log_files:
+                resolved_path = log_files[0]
+
+    if not resolved_path or not resolved_path.exists():
+        raise HTTPException(status_code=400, detail="Aucun fichier log CAN trouve.")
+
+    samples = _extract_obd_samples_from_log(str(resolved_path), pid)
+
+    decoder = OBD_PID_DECODERS.get(pid.upper())
+
+    return {
+        "status": "success",
+        "pid": pid.upper(),
+        "name": decoder[0] if decoder else f"PID {pid.upper()}",
+        "unit": decoder[1] if decoder else "",
+        "samples": samples,
+        "count": len(samples),
+        "log_file": str(resolved_path),
+    }
+
+
 @app.post("/api/signal-finder/read-pid")
 async def signal_finder_read_pid(
     interface: str = "can0",

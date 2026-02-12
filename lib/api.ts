@@ -1473,6 +1473,30 @@ export async function readOBDPidDecoded(
   )
 }
 
+export interface ExtractOBDFromLogResult {
+  status: string
+  pid: string
+  name: string
+  unit: string
+  samples: OBDSample[]
+  count: number
+  log_file: string
+}
+
+export async function extractOBDFromLog(params: {
+  missionId?: string
+  logPath?: string
+  pid: string
+}): Promise<ExtractOBDFromLogResult> {
+  const qs = new URLSearchParams()
+  if (params.missionId) qs.set("mission_id", params.missionId)
+  if (params.logPath) qs.set("log_path", params.logPath)
+  qs.set("pid", params.pid)
+  return fetchApi(`/signal-finder/extract-obd-from-log?${qs.toString()}`, {
+    method: "POST",
+  })
+}
+
 export function getSignalFinderWsUrl(iface: CANInterface = "can0"): string {
   const base = getApiBaseUrl().replace(/^http/, "ws")
   return `${base}/ws/signal-finder?interface=${iface}`
