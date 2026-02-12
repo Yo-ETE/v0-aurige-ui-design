@@ -9,9 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   Search, Play, Square, Loader2, AlertCircle, CheckCircle2, Activity,
   Trash2, Plus, Upload, Copy, Save, Radio, FileSearch, Database, Info, Crosshair,
@@ -656,7 +654,6 @@ export default function SignalFinderPage() {
       title="Signal Finder"
       description="Correlation OBD-II / CAN - Identifiez l'ID CAN, les bytes et le facteur d'echelle correspondant a un PID OBD"
     >
-      <TooltipProvider>
         <div className="flex flex-col gap-6">
           {/* Error banner */}
           {error && (
@@ -694,16 +691,30 @@ export default function SignalFinderPage() {
                 </CardHeader>
                 <CardContent className="flex flex-col gap-4">
                   {/* Mode toggle */}
-                  <Tabs value={mode} onValueChange={(v) => setMode(v as "offline" | "live")}>
-                    <TabsList className="w-full">
-                      <TabsTrigger value="offline" className="flex-1 gap-1.5 text-xs" disabled={liveRunning}>
-                        <FileSearch className="h-3.5 w-3.5" /> Offline
-                      </TabsTrigger>
-                      <TabsTrigger value="live" className="flex-1 gap-1.5 text-xs" disabled={correlating}>
-                        <Radio className="h-3.5 w-3.5" /> Live
-                      </TabsTrigger>
-                    </TabsList>
-                  </Tabs>
+                  <div className="flex rounded-lg border border-border bg-muted p-0.5 gap-0.5">
+                    <button
+                      onClick={() => setMode("offline")}
+                      disabled={liveRunning}
+                      className={`flex-1 flex items-center justify-center gap-1.5 text-xs rounded-md px-3 py-1.5 font-medium transition-colors disabled:opacity-50 ${
+                        mode === "offline"
+                          ? "bg-background text-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      <FileSearch className="h-3.5 w-3.5" /> Offline
+                    </button>
+                    <button
+                      onClick={() => setMode("live")}
+                      disabled={correlating}
+                      className={`flex-1 flex items-center justify-center gap-1.5 text-xs rounded-md px-3 py-1.5 font-medium transition-colors disabled:opacity-50 ${
+                        mode === "live"
+                          ? "bg-background text-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      <Radio className="h-3.5 w-3.5" /> Live
+                    </button>
+                  </div>
 
                   {/* Interface */}
                   <div className="flex flex-col gap-1.5">
@@ -741,14 +752,10 @@ export default function SignalFinderPage() {
                   <div className="flex flex-col gap-1.5">
                     <Label className="text-xs text-muted-foreground">
                       Fenetre d{"'"}alignement (ms)
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Info className="inline h-3 w-3 ml-1 text-muted-foreground" />
-                        </TooltipTrigger>
-                        <TooltipContent side="right" className="max-w-xs text-xs">
-                          Tolerance temporelle pour associer un echantillon OBD a une trame CAN. Augmentez si le bus est lent ou les echantillons espaces.
-                        </TooltipContent>
-                      </Tooltip>
+                      <Info
+                        className="inline h-3 w-3 ml-1 text-muted-foreground cursor-help"
+                        title="Tolerance temporelle pour associer un echantillon OBD a une trame CAN. Augmentez si le bus est lent ou les echantillons espaces."
+                      />
                     </Label>
                     <Input
                       type="number"
@@ -937,7 +944,6 @@ export default function SignalFinderPage() {
             </div>
           </div>
         </div>
-      </TooltipProvider>
     </AppShell>
   )
 }
