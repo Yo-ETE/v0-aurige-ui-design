@@ -1605,23 +1605,4 @@ export async function getByteHeatmap(params: {
   })
 }
 
-export async function autoDetectSignals(params: {
-  missionId?: string
-  logPath?: string
-  logId?: string
-  targetIds?: string[]
-  minEntropy?: number
-  correlationThreshold?: number
-}): Promise<AutoDetectResult> {
-  return fetchApi("/analysis/auto-detect-signals", {
-    method: "POST",
-    body: JSON.stringify({
-      mission_id: params.missionId || null,
-      log_path: params.logPath || null,
-      log_id: params.logId || null,
-      target_ids: params.targetIds || null,
-      min_entropy: params.minEntropy ?? 0.5,
-      correlation_threshold: params.correlationThreshold ?? 0.85,
-    }),
-  })
-}
+
