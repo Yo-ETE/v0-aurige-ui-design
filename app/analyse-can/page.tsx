@@ -37,6 +37,7 @@ import {
   type DependencyEdge,
   type DependencyNode,
   type CausalityResult,
+  type CANInterface,
   type LogEntry,
 } from "@/lib/api"
 import { useMissionStore } from "@/lib/mission-store"
@@ -294,6 +295,7 @@ export default function AnalyseCANPage() {
   const [causalityEdge, setCausalityEdge] = useState<{ source: string; target: string } | null>(null)
   const [showCausalityWarning, setShowCausalityWarning] = useState(false)
   const [pendingCausalityEdge, setPendingCausalityEdge] = useState<DependencyEdge | null>(null)
+  const [causalityIface, setCausalityIface] = useState<CANInterface>("can0")
 
   // Fetch missions on mount
   useEffect(() => {
@@ -417,7 +419,7 @@ export default function AnalyseCANPage() {
       const result = await validateCausality({
         sourceId: edge.source,
         targetId: edge.target,
-        iface: activeMission?.canConfig?.interface || "can0",
+        iface: causalityIface,
         windowMs: depWindowMs,
         repeat: 5,
         missionId: selectedMissionId || undefined,
@@ -1495,6 +1497,18 @@ export default function AnalyseCANPage() {
                             le bus CAN et observer si <span className="font-mono text-foreground">{pendingCausalityEdge.target}</span> reagit.
                             Utilisez uniquement en environnement de test, jamais sur un vehicule en circulation.
                           </p>
+                          <div className="mt-3 flex items-center gap-2">
+                            <Label className="text-xs text-muted-foreground whitespace-nowrap">Interface :</Label>
+                            <select
+                              value={causalityIface}
+                              onChange={(e) => setCausalityIface(e.target.value as CANInterface)}
+                              className="h-7 rounded-md border border-border bg-background px-2 text-xs font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                            >
+                              <option value="can0">can0</option>
+                              <option value="can1">can1</option>
+                              <option value="vcan0">vcan0</option>
+                            </select>
+                          </div>
                           <div className="flex gap-2 mt-3">
                             <Button
                               size="sm"
@@ -1502,7 +1516,7 @@ export default function AnalyseCANPage() {
                               onClick={runCausalityValidation}
                             >
                               <FlaskConical className="h-3 w-3 mr-1.5" />
-                              Confirmer (5 injections)
+                              Confirmer (5 injections sur {causalityIface})
                             </Button>
                             <Button
                               size="sm"
