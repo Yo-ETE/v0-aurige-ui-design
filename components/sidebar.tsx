@@ -27,6 +27,7 @@ import {
   FileCode,
   ShieldAlert,
   Search,
+  BarChart3,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
@@ -79,6 +80,7 @@ const baseNavigation: NavSection[] = [
       { name: "Replay Rapide", href: "/replay-rapide", icon: Zap },
 { name: "Isolation", href: "/isolation", icon: GitBranch },
   { name: "Comparaison", href: "/comparaison", icon: GitCompare },
+  { name: "Analyse CAN", href: "/analyse-can", icon: BarChart3 },
   { name: "DBC", href: "/dbc", icon: FileCode },
     ],
   },

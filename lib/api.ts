@@ -1501,3 +1501,93 @@ export function getSignalFinderWsUrl(iface: CANInterface = "can0"): string {
   const base = getApiBaseUrl().replace(/^http/, "ws")
   return `${base}/ws/signal-finder?interface=${iface}`
 }
+
+// =============================================================================
+// Analyse CAN - Heatmap + Auto-Detect
+// =============================================================================
+
+export interface HeatmapByteInfo {
+  index: number
+  change_rate: number
+  entropy: number
+  min: number
+  max: number
+  unique_count: number
+  is_constant: boolean
+}
+
+export interface HeatmapIdEntry {
+  can_id: string
+  frame_count: number
+  dlc: number
+  frequency_hz: number
+  bytes: HeatmapByteInfo[]
+}
+
+export interface HeatmapResult {
+  status: string
+  ids: HeatmapIdEntry[]
+  total_frames: number
+  total_ids: number
+  elapsed_ms: number
+}
+
+export interface DetectedSignal {
+  can_id: string
+  name: string
+  start_byte: number
+  length_bytes: number
+  start_bit: number
+  bit_length: number
+  byte_order: "big_endian" | "little_endian"
+  is_signed: boolean
+  entropy: number
+  change_rate: number
+  value_range: [number, number]
+  sample_values: number[]
+  confidence: number
+}
+
+export interface AutoDetectResult {
+  status: string
+  detected_signals: DetectedSignal[]
+  total_ids_analyzed: number
+  total_signals_found: number
+  elapsed_ms: number
+}
+
+export async function getByteHeatmap(params: {
+  missionId?: string
+  logPath?: string
+  logId?: string
+}): Promise<HeatmapResult> {
+  return fetchApi("/analysis/byte-heatmap", {
+    method: "POST",
+    body: JSON.stringify({
+      mission_id: params.missionId || null,
+      log_path: params.logPath || null,
+      log_id: params.logId || null,
+    }),
+  })
+}
+
+export async function autoDetectSignals(params: {
+  missionId?: string
+  logPath?: string
+  logId?: string
+  targetIds?: string[]
+  minEntropy?: number
+  correlationThreshold?: number
+}): Promise<AutoDetectResult> {
+  return fetchApi("/analysis/auto-detect-signals", {
+    method: "POST",
+    body: JSON.stringify({
+      mission_id: params.missionId || null,
+      log_path: params.logPath || null,
+      log_id: params.logId || null,
+      target_ids: params.targetIds || null,
+      min_entropy: params.minEntropy ?? 0.5,
+      correlation_threshold: params.correlationThreshold ?? 0.85,
+    }),
+  })
+}

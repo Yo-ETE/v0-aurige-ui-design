@@ -7469,6 +7469,336 @@ async def websocket_signal_finder(websocket: WebSocket, interface: str = Query(d
                 candump_proc.kill()
 
 
+# =============================================================================
+# Analyse CAN - Heatmap de variabilite + Auto-detection de signaux
+# =============================================================================
+
+import math as _math
+
+class HeatmapRequest(BaseModel):
+    mission_id: Optional[str] = None
+    log_path: Optional[str] = None
+    log_id: Optional[str] = None
+    sample_limit: int = 50000
+
+
+class AutoDetectRequest(BaseModel):
+    mission_id: Optional[str] = None
+    log_path: Optional[str] = None
+    log_id: Optional[str] = None
+    target_ids: Optional[List[str]] = None
+    min_entropy: float = 0.5
+    correlation_threshold: float = 0.85
+
+
+def _resolve_log_path(mission_id: Optional[str], log_path: Optional[str], log_id: Optional[str]) -> Path:
+    """Helper to find the log file from various input combos."""
+    if log_path:
+        p = Path(log_path)
+        if p.exists():
+            return p
+    if mission_id:
+        mission_dir = MISSIONS_DIR / mission_id
+        if not mission_dir.exists():
+            raise HTTPException(status_code=404, detail=f"Mission non trouvee: {mission_id}")
+        logs_dir = mission_dir / "logs"
+        if logs_dir.exists():
+            if log_id:
+                # match by filename
+                for f in logs_dir.glob("*.log"):
+                    if f.name == log_id or f.stem == log_id:
+                        return f
+            # fallback: latest log
+            log_files = sorted(logs_dir.glob("*.log"), key=lambda f: f.stat().st_mtime, reverse=True)
+            if log_files:
+                return log_files[0]
+    raise HTTPException(status_code=400, detail="Aucun fichier log CAN trouve.")
+
+
+def _shannon_entropy(values: list) -> float:
+    """Shannon entropy in bits (0 = constant, 8 = uniform over 256 values)."""
+    n = len(values)
+    if n == 0:
+        return 0.0
+    freq = {}
+    for v in values:
+        freq[v] = freq.get(v, 0) + 1
+    ent = 0.0
+    for count in freq.values():
+        p = count / n
+        if p > 0:
+            ent -= p * _math.log2(p)
+    return round(ent, 4)
+
+
+def _change_rate(values: list) -> float:
+    """Fraction of consecutive frames where the value changes."""
+    if len(values) < 2:
+        return 0.0
+    changes = sum(1 for i in range(1, len(values)) if values[i] != values[i - 1])
+    return round(changes / (len(values) - 1), 4)
+
+
+@app.post("/api/analysis/byte-heatmap")
+async def byte_heatmap_endpoint(request: HeatmapRequest):
+    """
+    Analyse un log CAN et retourne une matrice de variabilite par (CAN_ID, byte).
+    Pour chaque byte: change_rate, entropie de Shannon, min/max, nb unique.
+    """
+    start_time = time.time()
+    log_path = _resolve_log_path(request.mission_id, request.log_path, request.log_id)
+
+    # Parse log
+    can_data = _parse_log_for_correlation(str(log_path))
+
+    total_frames = sum(len(frames) for frames in can_data.values())
+
+    ids_result = []
+    for can_id in sorted(can_data.keys()):
+        frames = can_data[can_id]
+        if not frames:
+            continue
+        # Limit frames if needed
+        if len(frames) > request.sample_limit:
+            frames = frames[:request.sample_limit]
+
+        dlc = max(len(f["bytes"]) for f in frames)
+        frame_count = len(frames)
+
+        # frequency estimation
+        if frame_count >= 2:
+            duration = frames[-1]["timestamp"] - frames[0]["timestamp"]
+            freq_hz = round(frame_count / duration, 1) if duration > 0 else 0.0
+        else:
+            freq_hz = 0.0
+
+        bytes_info = []
+        for bi in range(dlc):
+            byte_vals = [f["bytes"][bi] for f in frames if bi < len(f["bytes"])]
+            if not byte_vals:
+                bytes_info.append({
+                    "index": bi, "change_rate": 0, "entropy": 0,
+                    "min": 0, "max": 0, "unique_count": 0, "is_constant": True,
+                })
+                continue
+            cr = _change_rate(byte_vals)
+            ent = _shannon_entropy(byte_vals)
+            bytes_info.append({
+                "index": bi,
+                "change_rate": cr,
+                "entropy": round(ent, 4),
+                "min": min(byte_vals),
+                "max": max(byte_vals),
+                "unique_count": len(set(byte_vals)),
+                "is_constant": cr == 0,
+            })
+
+        ids_result.append({
+            "can_id": can_id,
+            "frame_count": frame_count,
+            "dlc": dlc,
+            "frequency_hz": freq_hz,
+            "bytes": bytes_info,
+        })
+
+    # Sort by frequency descending
+    ids_result.sort(key=lambda x: x["frequency_hz"], reverse=True)
+
+    elapsed = round((time.time() - start_time) * 1000, 1)
+    return {
+        "status": "success",
+        "ids": ids_result,
+        "total_frames": total_frames,
+        "total_ids": len(ids_result),
+        "elapsed_ms": elapsed,
+    }
+
+
+@app.post("/api/analysis/auto-detect-signals")
+async def auto_detect_signals_endpoint(request: AutoDetectRequest):
+    """
+    Detecte automatiquement les frontieres de signaux dans les messages CAN
+    en utilisant l'entropie, le change_rate, et la correlation temporelle entre bytes adjacents.
+    """
+    start_time = time.time()
+    log_path = _resolve_log_path(request.mission_id, request.log_path, request.log_id)
+
+    can_data = _parse_log_for_correlation(str(log_path))
+
+    ids_to_analyze = request.target_ids if request.target_ids else sorted(can_data.keys())
+
+    detected_signals = []
+
+    for can_id in ids_to_analyze:
+        if can_id not in can_data:
+            continue
+        frames = can_data[can_id]
+        if len(frames) < 10:
+            continue
+
+        dlc = max(len(f["bytes"]) for f in frames)
+
+        # --- Step 1: per-byte metrics ---
+        byte_series = {}
+        for bi in range(dlc):
+            byte_series[bi] = [f["bytes"][bi] for f in frames if bi < len(f["bytes"])]
+
+        byte_metrics = {}
+        for bi in range(dlc):
+            vals = byte_series[bi]
+            if not vals:
+                continue
+            ent = _shannon_entropy(vals)
+            cr = _change_rate(vals)
+            byte_metrics[bi] = {"entropy": ent, "change_rate": cr, "values": vals}
+
+        # --- Step 2: identify active bytes (above entropy threshold) ---
+        active_bytes = []
+        for bi in range(dlc):
+            if bi in byte_metrics and byte_metrics[bi]["entropy"] >= request.min_entropy:
+                active_bytes.append(bi)
+
+        if not active_bytes:
+            continue
+
+        # --- Step 3: compute temporal correlation between adjacent active bytes ---
+        # Two bytes belong to the same multi-byte signal if they change at the same time
+        adjacency_corr = {}
+        for i in range(len(active_bytes) - 1):
+            bi = active_bytes[i]
+            bj = active_bytes[i + 1]
+            if bj != bi + 1:
+                # Non-adjacent: skip
+                continue
+            vals_i = byte_metrics[bi]["values"]
+            vals_j = byte_metrics[bj]["values"]
+            n = min(len(vals_i), len(vals_j))
+            if n < 5:
+                continue
+            # Compute change correlation: do they change at the same frames?
+            changes_i = [1 if vals_i[k] != vals_i[k - 1] else 0 for k in range(1, n)]
+            changes_j = [1 if vals_j[k] != vals_j[k - 1] else 0 for k in range(1, n)]
+            # Jaccard similarity of change positions
+            both = sum(1 for a, b in zip(changes_i, changes_j) if a == 1 and b == 1)
+            either = sum(1 for a, b in zip(changes_i, changes_j) if a == 1 or b == 1)
+            corr = both / either if either > 0 else 0.0
+            adjacency_corr[(bi, bj)] = corr
+
+        # --- Step 4: Cluster adjacent correlated bytes into signal groups ---
+        groups = []
+        visited = set()
+        for bi in active_bytes:
+            if bi in visited:
+                continue
+            group = [bi]
+            visited.add(bi)
+            current = bi
+            while True:
+                nxt = current + 1
+                if nxt in visited or nxt not in active_bytes:
+                    break
+                corr = adjacency_corr.get((current, nxt), 0)
+                if corr >= request.correlation_threshold:
+                    group.append(nxt)
+                    visited.add(nxt)
+                    current = nxt
+                else:
+                    break
+            groups.append(group)
+
+        # --- Step 5: For each signal group, determine properties ---
+        for group in groups:
+            start_byte = group[0]
+            length_bytes = len(group)
+            bit_length = length_bytes * 8
+            start_bit = start_byte * 8
+
+            # Gather all values from the group
+            all_vals_be = []
+            all_vals_le = []
+            for frame in frames:
+                b = frame["bytes"]
+                if start_byte + length_bytes > len(b):
+                    continue
+                # Big Endian
+                val_be = 0
+                for gi, gbi in enumerate(group):
+                    val_be = (val_be << 8) | b[gbi]
+                all_vals_be.append(val_be)
+                # Little Endian
+                val_le = 0
+                for gi, gbi in enumerate(reversed(group)):
+                    val_le = (val_le << 8) | b[gbi]
+                all_vals_le.append(val_le)
+
+            if not all_vals_be:
+                continue
+
+            # Determine endianness: prefer the one with smoother transitions
+            def _smoothness(vals):
+                if len(vals) < 2:
+                    return 0.0
+                diffs = [abs(vals[i] - vals[i - 1]) for i in range(1, len(vals))]
+                return sum(diffs) / len(diffs) if diffs else 0.0
+
+            smooth_be = _smoothness(all_vals_be)
+            smooth_le = _smoothness(all_vals_le)
+            # Lower avg diff = smoother = more likely correct
+            if smooth_le < smooth_be and length_bytes > 1:
+                byte_order = "little_endian"
+                all_vals = all_vals_le
+            else:
+                byte_order = "big_endian"
+                all_vals = all_vals_be
+
+            # Signed detection: if values span the upper half of range, might be signed
+            max_unsigned = (1 << bit_length) - 1
+            threshold_sign = max_unsigned * 0.6
+            is_signed = any(v > threshold_sign for v in all_vals) and min(all_vals) < max_unsigned * 0.3
+
+            val_min = min(all_vals)
+            val_max = max(all_vals)
+
+            # Confidence based on entropy + change_rate of constituent bytes
+            avg_entropy = sum(byte_metrics[bi]["entropy"] for bi in group) / len(group)
+            avg_cr = sum(byte_metrics[bi]["change_rate"] for bi in group) / len(group)
+            confidence = round(0.5 * min(avg_entropy / 8.0, 1.0) + 0.5 * avg_cr, 4)
+
+            # Sample values (evenly spaced, max 8)
+            step = max(1, len(all_vals) // 8)
+            sample_vals = [all_vals[i] for i in range(0, len(all_vals), step)][:8]
+
+            name = f"Sig_{can_id}_B{start_byte}_{bit_length}b"
+
+            detected_signals.append({
+                "can_id": can_id,
+                "name": name,
+                "start_byte": start_byte,
+                "length_bytes": length_bytes,
+                "start_bit": start_bit,
+                "bit_length": bit_length,
+                "byte_order": byte_order,
+                "is_signed": is_signed,
+                "entropy": round(avg_entropy, 4),
+                "change_rate": round(avg_cr, 4),
+                "value_range": [val_min, val_max],
+                "sample_values": sample_vals,
+                "confidence": confidence,
+            })
+
+    # Sort by confidence descending
+    detected_signals.sort(key=lambda s: s["confidence"], reverse=True)
+
+    elapsed = round((time.time() - start_time) * 1000, 1)
+    return {
+        "status": "success",
+        "detected_signals": detected_signals,
+        "total_ids_analyzed": len(ids_to_analyze),
+        "total_signals_found": len(detected_signals),
+        "elapsed_ms": elapsed,
+    }
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
