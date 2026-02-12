@@ -475,7 +475,7 @@ export default function AnalyseCANPage() {
                         <SelectContent>
                           {missionLogs.map((log) => (
                             <SelectItem key={log.filename} value={log.filename}>
-                              {log.filename} ({log.frame_count?.toLocaleString() ?? "?"} trames)
+                              {log.filename} ({log.framesCount?.toLocaleString() ?? "?"} trames)
                             </SelectItem>
                           ))}
                         </SelectContent>
