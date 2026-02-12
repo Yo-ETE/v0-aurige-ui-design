@@ -8112,6 +8112,198 @@ async def inter_id_dependencies_endpoint(request: DependencyRequest):
     }
 
 
+# =============================================================================
+# Causality Validation (inject source, observe target reaction)
+# =============================================================================
+
+class CausalityRequest(BaseModel):
+    source_id: str
+    target_id: str
+    interface: str = "can0"
+    window_ms: float = 50.0
+    repeat: int = 5
+    pause_ms: float = 200.0
+    mission_id: Optional[str] = None
+    log_id: Optional[str] = None
+
+
+@app.post("/api/analysis/validate-causality")
+async def validate_causality_endpoint(request: CausalityRequest):
+    """
+    Experimentally validate a causal dependency A -> B.
+    For each iteration:
+      1. Start monitoring candump for target_id changes
+      2. Inject source_id frame (last known payload from log)
+      3. Wait window_ms for target_id to react
+      4. Record success/failure + lag
+    """
+    if request.interface not in ["can0", "can1", "vcan0"]:
+        raise HTTPException(status_code=400, detail="Interface invalide")
+    if request.repeat < 1 or request.repeat > 20:
+        raise HTTPException(status_code=400, detail="repeat doit etre entre 1 et 20")
+
+    src = request.source_id.upper().replace("0X", "")
+    tgt = request.target_id.upper().replace("0X", "")
+
+    # Find last known payload for source_id from log
+    source_payload = None
+    target_baseline = None
+    try:
+        log_path = _resolve_log_path(request.mission_id, None, request.log_id)
+        with open(str(log_path), "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                match = re.match(r"\([\d.]+\)\s+\w+\s+([0-9A-Fa-f]+)#([0-9A-Fa-f]*)", line)
+                if not match:
+                    continue
+                cid = match.group(1).upper()
+                payload = match.group(2).upper()
+                if cid == src:
+                    source_payload = payload
+                if cid == tgt:
+                    target_baseline = payload
+    except Exception:
+        pass
+
+    if not source_payload:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Aucun payload trouve pour l'ID source {src} dans le log. Impossible d'injecter."
+        )
+
+    window_s = request.window_ms / 1000.0
+    pause_s = request.pause_ms / 1000.0
+    results = []
+
+    for attempt in range(request.repeat):
+        # Start candump to monitor target
+        monitor = await asyncio.create_subprocess_exec(
+            "candump", "-ta", request.interface,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        # Small delay to let candump start
+        await asyncio.sleep(0.02)
+
+        # Record time and inject
+        t_inject = time.time()
+        success, error = can_send_frame(request.interface, src, source_payload)
+
+        if not success:
+            monitor.terminate()
+            await monitor.wait()
+            results.append({
+                "attempt": attempt + 1,
+                "injected": False,
+                "error": error,
+                "reaction": False,
+                "lag_ms": None,
+            })
+            await asyncio.sleep(pause_s)
+            continue
+
+        # Monitor for target reaction within window
+        reaction = False
+        lag_ms = None
+        deadline = t_inject + window_s
+
+        try:
+            while time.time() < deadline:
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    break
+                try:
+                    line_bytes = await asyncio.wait_for(
+                        monitor.stdout.readline(),
+                        timeout=remaining
+                    )
+                except asyncio.TimeoutError:
+                    break
+
+                if not line_bytes:
+                    break
+
+                decoded = line_bytes.decode().strip()
+                if not decoded:
+                    continue
+
+                # Parse: (timestamp) interface ID#DATA
+                parts = decoded.split()
+                if len(parts) < 3:
+                    continue
+                frame_ts_str = parts[0].strip("()")
+                frame_parts = parts[2].split("#")
+                if len(frame_parts) != 2:
+                    continue
+
+                frame_id = frame_parts[0].upper()
+                frame_payload = frame_parts[1].upper()
+
+                # Check if this is our target AND payload changed from baseline
+                if frame_id == tgt:
+                    if target_baseline is None or frame_payload != target_baseline:
+                        reaction = True
+                        try:
+                            frame_ts = float(frame_ts_str)
+                            lag_ms = round((frame_ts - t_inject) * 1000, 2)
+                        except ValueError:
+                            lag_ms = round((time.time() - t_inject) * 1000, 2)
+                        break
+                    # Update baseline for next check
+                    target_baseline = frame_payload
+        finally:
+            monitor.terminate()
+            await monitor.wait()
+
+        results.append({
+            "attempt": attempt + 1,
+            "injected": True,
+            "error": None,
+            "reaction": reaction,
+            "lag_ms": lag_ms,
+        })
+
+        # Pause between attempts
+        if attempt < request.repeat - 1:
+            await asyncio.sleep(pause_s)
+
+    # Aggregate
+    successes = [r for r in results if r["reaction"]]
+    attempts_ok = [r for r in results if r["injected"]]
+    lags = [r["lag_ms"] for r in successes if r["lag_ms"] is not None]
+
+    success_rate = len(successes) / len(attempts_ok) if attempts_ok else 0
+    median_lag = sorted(lags)[len(lags) // 2] if lags else None
+    min_lag = min(lags) if lags else None
+    max_lag = max(lags) if lags else None
+
+    # Classification
+    if success_rate >= 0.7:
+        classification = "high"
+    elif success_rate >= 0.4:
+        classification = "moderate"
+    else:
+        classification = "low"
+
+    return {
+        "status": "success",
+        "source_id": src,
+        "target_id": tgt,
+        "source_payload": source_payload,
+        "attempts": len(attempts_ok),
+        "successes": len(successes),
+        "success_rate": round(success_rate, 4),
+        "median_lag_ms": median_lag,
+        "min_lag_ms": min_lag,
+        "max_lag_ms": max_lag,
+        "classification": classification,
+        "details": results,
+    }
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

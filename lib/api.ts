@@ -1638,6 +1638,58 @@ export interface DependencyResult {
   elapsed_ms: number
 }
 
+// =============================================================================
+// Causality Validation
+// =============================================================================
+
+export interface CausalityAttempt {
+  attempt: number
+  injected: boolean
+  error: string | null
+  reaction: boolean
+  lag_ms: number | null
+}
+
+export interface CausalityResult {
+  status: string
+  source_id: string
+  target_id: string
+  source_payload: string
+  attempts: number
+  successes: number
+  success_rate: number
+  median_lag_ms: number | null
+  min_lag_ms: number | null
+  max_lag_ms: number | null
+  classification: "high" | "moderate" | "low"
+  details: CausalityAttempt[]
+}
+
+export async function validateCausality(params: {
+  sourceId: string
+  targetId: string
+  iface?: string
+  windowMs?: number
+  repeat?: number
+  pauseMs?: number
+  missionId?: string
+  logId?: string
+}): Promise<CausalityResult> {
+  return fetchApi("/analysis/validate-causality", {
+    method: "POST",
+    body: JSON.stringify({
+      source_id: params.sourceId,
+      target_id: params.targetId,
+      interface: params.iface ?? "can0",
+      window_ms: params.windowMs ?? 50,
+      repeat: params.repeat ?? 5,
+      pause_ms: params.pauseMs ?? 200,
+      mission_id: params.missionId || null,
+      log_id: params.logId || null,
+    }),
+  })
+}
+
 export async function getInterIdDependencies(params: {
   missionId?: string
   logPath?: string

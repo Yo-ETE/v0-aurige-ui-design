@@ -18,11 +18,13 @@ import {
   BarChart3, Loader2, AlertCircle, Database, Cpu, Search,
   Download, Save, Eye, EyeOff, Filter, ArrowUpDown, CheckCircle2,
   Zap, ChevronDown, ChevronRight, Info, GitBranch, ArrowRight,
+  FlaskConical, AlertTriangle, Check, X,
 } from "lucide-react"
 import {
   getByteHeatmap,
   autoDetectSignals,
   getInterIdDependencies,
+  validateCausality,
   listMissionLogs,
   addDBCSignal,
   type HeatmapResult,
@@ -34,6 +36,7 @@ import {
   type DependencyResult,
   type DependencyEdge,
   type DependencyNode,
+  type CausalityResult,
   type LogEntry,
 } from "@/lib/api"
 import { useMissionStore } from "@/lib/mission-store"
@@ -284,6 +287,14 @@ export default function AnalyseCANPage() {
   const [depMinScore, setDepMinScore] = useState(0.1)
   const [depSelectedEdge, setDepSelectedEdge] = useState<DependencyEdge | null>(null)
 
+  // Causality validation state
+  const [causalityResult, setCausalityResult] = useState<CausalityResult | null>(null)
+  const [causalityLoading, setCausalityLoading] = useState(false)
+  const [causalityError, setCausalityError] = useState<string | null>(null)
+  const [causalityEdge, setCausalityEdge] = useState<{ source: string; target: string } | null>(null)
+  const [showCausalityWarning, setShowCausalityWarning] = useState(false)
+  const [pendingCausalityEdge, setPendingCausalityEdge] = useState<DependencyEdge | null>(null)
+
   // Fetch missions on mount
   useEffect(() => {
     fetchMissions()
@@ -385,6 +396,40 @@ export default function AnalyseCANPage() {
       setDepLoading(false)
     }
   }, [selectedMissionId, selectedLogId, depWindowMs, depMinScore])
+
+  // Causality: request validation (shows warning first)
+  const requestCausalityValidation = useCallback((edge: DependencyEdge) => {
+    setPendingCausalityEdge(edge)
+    setShowCausalityWarning(true)
+  }, [])
+
+  // Causality: confirm and run
+  const runCausalityValidation = useCallback(async () => {
+    if (!pendingCausalityEdge) return
+    setShowCausalityWarning(false)
+    const edge = pendingCausalityEdge
+    setPendingCausalityEdge(null)
+    setCausalityLoading(true)
+    setCausalityError(null)
+    setCausalityResult(null)
+    setCausalityEdge({ source: edge.source, target: edge.target })
+    try {
+      const result = await validateCausality({
+        sourceId: edge.source,
+        targetId: edge.target,
+        iface: activeMission?.canConfig?.interface || "can0",
+        windowMs: depWindowMs,
+        repeat: 5,
+        missionId: selectedMissionId || undefined,
+        logId: selectedLogId || undefined,
+      })
+      setCausalityResult(result)
+    } catch (err: unknown) {
+      setCausalityError(err instanceof Error ? err.message : "Erreur inconnue")
+    } finally {
+      setCausalityLoading(false)
+    }
+  }, [pendingCausalityEdge, activeMission, depWindowMs, selectedMissionId, selectedLogId])
 
   // Filter heatmap IDs
   const filteredHeatmapIds = useMemo(() => {
@@ -1272,6 +1317,7 @@ export default function AnalyseCANPage() {
                                 <TableHead className="text-[10px]">P(react)</TableHead>
                                 <TableHead className="text-[10px]">Lift</TableHead>
                                 <TableHead className="text-[10px]">Score</TableHead>
+                                <TableHead className="text-[10px] w-8"></TableHead>
                               </TableRow>
                             </TableHeader>
                             <TableBody>
@@ -1320,6 +1366,24 @@ export default function AnalyseCANPage() {
                                       >
                                         {(edge.score * 100).toFixed(0)}%
                                       </Badge>
+                                    </TableCell>
+                                    <TableCell>
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          requestCausalityValidation(edge)
+                                        }}
+                                        disabled={causalityLoading}
+                                        className={cn(
+                                          "p-1 rounded hover:bg-muted/50 transition-colors",
+                                          causalityLoading && causalityEdge?.source === edge.source && causalityEdge?.target === edge.target
+                                            ? "text-primary animate-pulse"
+                                            : "text-muted-foreground hover:text-foreground"
+                                        )}
+                                        title="Valider la causalite par injection"
+                                      >
+                                        <FlaskConical className="h-3.5 w-3.5" />
+                                      </button>
                                     </TableCell>
                                   </TableRow>
                                 )
@@ -1397,6 +1461,199 @@ export default function AnalyseCANPage() {
                           (vs. <span className="font-semibold text-foreground">{depSelectedEdge.lift > 0 ? ((depSelectedEdge.p_react / depSelectedEdge.lift) * 100).toFixed(1) : "0"}%</span> attendu par hasard).
                         </p>
                       </div>
+                      {/* Validate causality button in edge detail */}
+                      <div className="mt-3 pt-3 border-t border-border/30">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="text-xs"
+                          onClick={() => requestCausalityValidation(depSelectedEdge)}
+                          disabled={causalityLoading}
+                        >
+                          {causalityLoading && causalityEdge?.source === depSelectedEdge.source && causalityEdge?.target === depSelectedEdge.target ? (
+                            <Loader2 className="h-3 w-3 animate-spin mr-1.5" />
+                          ) : (
+                            <FlaskConical className="h-3 w-3 mr-1.5" />
+                          )}
+                          Valider causalite par injection
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Injection warning dialog */}
+                {showCausalityWarning && pendingCausalityEdge && (
+                  <Card className="border-amber-600/50 bg-amber-900/10 xl:col-span-2">
+                    <CardContent className="pt-5">
+                      <div className="flex gap-3">
+                        <AlertTriangle className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
+                        <div className="flex-1">
+                          <p className="text-sm font-semibold text-amber-400">Injection active sur le bus CAN</p>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Cette operation va injecter la trame <span className="font-mono text-foreground">{pendingCausalityEdge.source}</span> sur
+                            le bus CAN et observer si <span className="font-mono text-foreground">{pendingCausalityEdge.target}</span> reagit.
+                            Utilisez uniquement en environnement de test, jamais sur un vehicule en circulation.
+                          </p>
+                          <div className="flex gap-2 mt-3">
+                            <Button
+                              size="sm"
+                              className="text-xs bg-amber-600 hover:bg-amber-700 text-white"
+                              onClick={runCausalityValidation}
+                            >
+                              <FlaskConical className="h-3 w-3 mr-1.5" />
+                              Confirmer (5 injections)
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="text-xs"
+                              onClick={() => { setShowCausalityWarning(false); setPendingCausalityEdge(null) }}
+                            >
+                              Annuler
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Causality validation results */}
+                {(causalityLoading || causalityResult || causalityError) && causalityEdge && (
+                  <Card className="border-border/60 xl:col-span-2">
+                    <CardHeader className="pb-3">
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="text-sm flex items-center gap-2">
+                          <FlaskConical className="h-4 w-4 text-primary" />
+                          Validation causale : {causalityEdge.source} <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" /> {causalityEdge.target}
+                        </CardTitle>
+                        {!causalityLoading && (
+                          <button
+                            onClick={() => { setCausalityResult(null); setCausalityError(null); setCausalityEdge(null) }}
+                            className="text-muted-foreground hover:text-foreground text-xs"
+                          >
+                            Fermer
+                          </button>
+                        )}
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      {causalityLoading && (
+                        <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+                          <Loader2 className="h-8 w-8 animate-spin mb-3 opacity-40" />
+                          <p className="text-sm">Injection en cours... observation des reactions</p>
+                          <p className="text-[10px] mt-1">5 tentatives avec pause entre chaque injection</p>
+                        </div>
+                      )}
+                      {causalityError && (
+                        <Alert variant="destructive">
+                          <AlertCircle className="h-4 w-4" />
+                          <AlertTitle>Erreur</AlertTitle>
+                          <AlertDescription>{causalityError}</AlertDescription>
+                        </Alert>
+                      )}
+                      {causalityResult && !causalityLoading && (
+                        <>
+                          {/* Classification banner */}
+                          <div className={cn(
+                            "rounded-lg border p-3 mb-4 flex items-center gap-3",
+                            causalityResult.classification === "high"
+                              ? "bg-emerald-900/15 border-emerald-600/40"
+                              : causalityResult.classification === "moderate"
+                                ? "bg-amber-900/15 border-amber-600/40"
+                                : "bg-red-900/15 border-red-600/40"
+                          )}>
+                            <div className={cn(
+                              "h-10 w-10 rounded-full flex items-center justify-center shrink-0",
+                              causalityResult.classification === "high"
+                                ? "bg-emerald-600/20"
+                                : causalityResult.classification === "moderate"
+                                  ? "bg-amber-600/20"
+                                  : "bg-red-600/20"
+                            )}>
+                              {causalityResult.classification === "high" ? (
+                                <Check className="h-5 w-5 text-emerald-400" />
+                              ) : causalityResult.classification === "moderate" ? (
+                                <AlertTriangle className="h-5 w-5 text-amber-400" />
+                              ) : (
+                                <X className="h-5 w-5 text-red-400" />
+                              )}
+                            </div>
+                            <div>
+                              <p className={cn(
+                                "text-sm font-semibold",
+                                causalityResult.classification === "high"
+                                  ? "text-emerald-400"
+                                  : causalityResult.classification === "moderate"
+                                    ? "text-amber-400"
+                                    : "text-red-400"
+                              )}>
+                                Causalite {causalityResult.classification === "high" ? "ELEVEE" : causalityResult.classification === "moderate" ? "MODEREE" : "FAIBLE"}
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                {causalityResult.successes} / {causalityResult.attempts} reactions observees ({(causalityResult.success_rate * 100).toFixed(0)}%)
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Stats grid */}
+                          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                            <div className="bg-muted/30 rounded-lg p-3 border border-border/30">
+                              <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Taux de succes</p>
+                              <p className="font-mono text-sm font-semibold text-foreground">{(causalityResult.success_rate * 100).toFixed(0)}%</p>
+                            </div>
+                            <div className="bg-muted/30 rounded-lg p-3 border border-border/30">
+                              <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Lag median</p>
+                              <p className="font-mono text-sm font-semibold text-foreground">
+                                {causalityResult.median_lag_ms != null ? `${causalityResult.median_lag_ms.toFixed(1)} ms` : "--"}
+                              </p>
+                            </div>
+                            <div className="bg-muted/30 rounded-lg p-3 border border-border/30">
+                              <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Lag min / max</p>
+                              <p className="font-mono text-sm font-semibold text-foreground">
+                                {causalityResult.min_lag_ms != null ? `${causalityResult.min_lag_ms.toFixed(1)}` : "--"}
+                                {" / "}
+                                {causalityResult.max_lag_ms != null ? `${causalityResult.max_lag_ms.toFixed(1)} ms` : "--"}
+                              </p>
+                            </div>
+                            <div className="bg-muted/30 rounded-lg p-3 border border-border/30">
+                              <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Payload injecte</p>
+                              <p className="font-mono text-sm font-semibold text-primary">{causalityResult.source_payload}</p>
+                            </div>
+                          </div>
+
+                          {/* Per-attempt detail */}
+                          <div className="mt-4">
+                            <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-2">Detail par tentative</p>
+                            <div className="flex gap-1.5 flex-wrap">
+                              {causalityResult.details.map((d) => (
+                                <div
+                                  key={d.attempt}
+                                  className={cn(
+                                    "flex items-center gap-1 px-2 py-1 rounded border text-[10px] font-mono",
+                                    !d.injected
+                                      ? "bg-red-900/20 border-red-600/30 text-red-400"
+                                      : d.reaction
+                                        ? "bg-emerald-900/20 border-emerald-600/30 text-emerald-400"
+                                        : "bg-muted/30 border-border/30 text-muted-foreground"
+                                  )}
+                                  title={d.error || (d.reaction ? `Reaction en ${d.lag_ms?.toFixed(1)} ms` : "Pas de reaction")}
+                                >
+                                  #{d.attempt}
+                                  {!d.injected ? (
+                                    <X className="h-2.5 w-2.5" />
+                                  ) : d.reaction ? (
+                                    <><Check className="h-2.5 w-2.5" /> {d.lag_ms?.toFixed(1)} ms</>
+                                  ) : (
+                                    <X className="h-2.5 w-2.5" />
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </>
+                      )}
                     </CardContent>
                   </Card>
                 )}
