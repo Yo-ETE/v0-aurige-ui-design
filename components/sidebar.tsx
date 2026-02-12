@@ -26,6 +26,7 @@ import {
   Cog,
   FileCode,
   ShieldAlert,
+  Search,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
@@ -83,7 +84,10 @@ const baseNavigation: NavSection[] = [
   },
   {
     title: "Diagnostic",
-    items: [{ name: "OBD-II", href: "/obd-ii", icon: Activity }],
+    items: [
+      { name: "OBD-II", href: "/obd-ii", icon: Activity },
+      { name: "Signal Finder", href: "/signal-finder", icon: Search },
+    ],
   },
   {
     title: "Tests Avancés",

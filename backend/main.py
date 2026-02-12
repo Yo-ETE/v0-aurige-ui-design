@@ -6755,6 +6755,620 @@ Exported: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
         raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
 
 
+# =============================================================================
+# Signal Finder - OBD/CAN Correlation Engine
+# =============================================================================
+
+# PID decode formulas: { pid_hex: (name, unit, decode_fn(A, B)) }
+OBD_PID_DECODERS = {
+    "05": ("Coolant Temp", "C", lambda a, b: a - 40),
+    "0C": ("RPM", "tr/min", lambda a, b: ((a * 256) + b) / 4),
+    "0D": ("Speed", "km/h", lambda a, b: a),
+    "0F": ("Intake Air Temp", "C", lambda a, b: a - 40),
+    "10": ("MAF", "g/s", lambda a, b: ((a * 256) + b) / 100),
+    "11": ("Throttle", "%", lambda a, b: (a * 100) / 255),
+    "2F": ("Fuel Level", "%", lambda a, b: (a * 100) / 255),
+    "04": ("Engine Load", "%", lambda a, b: (a * 100) / 255),
+    "06": ("Short Fuel Trim 1", "%", lambda a, b: (a / 1.28) - 100),
+    "0A": ("Fuel Pressure", "kPa", lambda a, b: a * 3),
+    "0B": ("MAP", "kPa", lambda a, b: a),
+    "0E": ("Timing Advance", "deg", lambda a, b: (a / 2) - 64),
+    "1F": ("Run Time", "s", lambda a, b: (a * 256) + b),
+    "21": ("Dist with MIL", "km", lambda a, b: (a * 256) + b),
+    "33": ("Baro Pressure", "kPa", lambda a, b: a),
+    "42": ("Control Module V", "V", lambda a, b: ((a * 256) + b) / 1000),
+    "46": ("Ambient Temp", "C", lambda a, b: a - 40),
+}
+
+# IDs OBD a exclure du trafic broadcast CAN
+OBD_FILTER_IDS = {"7DF", "7E0", "7E1", "7E2", "7E3", "7E4", "7E5", "7E6", "7E7",
+                   "7E8", "7E9", "7EA", "7EB", "7EC", "7ED", "7EE", "7EF"}
+
+
+class SignalFinderOBDSample(BaseModel):
+    timestamp: float
+    value: float
+
+class SignalFinderCorrelationRequest(BaseModel):
+    mission_id: Optional[str] = None
+    log_path: Optional[str] = None
+    obd_samples: List[SignalFinderOBDSample]
+    window_ms: int = 50
+    target_ids: Optional[List[str]] = None
+    pid: Optional[str] = None
+
+
+def _pearson(x: list, y: list) -> float:
+    """Pearson correlation coefficient (pure Python, no numpy)."""
+    n = len(x)
+    if n < 3:
+        return 0.0
+    mx = sum(x) / n
+    my = sum(y) / n
+    sx = sum((xi - mx) ** 2 for xi in x)
+    sy = sum((yi - my) ** 2 for yi in y)
+    if sx == 0 or sy == 0:
+        return 0.0
+    sxy = sum((xi - mx) * (yi - my) for xi, yi in zip(x, y))
+    return sxy / (sx * sy) ** 0.5
+
+
+def _rank(data: list) -> list:
+    """Compute ranks for Spearman correlation."""
+    indexed = sorted(enumerate(data), key=lambda t: t[1])
+    ranks = [0.0] * len(data)
+    i = 0
+    while i < len(indexed):
+        j = i
+        while j < len(indexed) - 1 and indexed[j + 1][1] == indexed[j][1]:
+            j += 1
+        avg_rank = (i + j) / 2.0 + 1
+        for k in range(i, j + 1):
+            ranks[indexed[k][0]] = avg_rank
+        i = j + 1
+    return ranks
+
+
+def _spearman(x: list, y: list) -> float:
+    """Spearman rank correlation coefficient."""
+    if len(x) < 3:
+        return 0.0
+    rx = _rank(x)
+    ry = _rank(y)
+    return _pearson(rx, ry)
+
+
+def _linear_fit(x: list, y: list) -> tuple:
+    """Simple linear regression: returns (scale, offset)."""
+    n = len(x)
+    if n < 2:
+        return (1.0, 0.0)
+    mx = sum(x) / n
+    my = sum(y) / n
+    sx2 = sum((xi - mx) ** 2 for xi in x)
+    if sx2 == 0:
+        return (1.0, my - mx)
+    sxy = sum((xi - mx) * (yi - my) for xi, yi in zip(x, y))
+    scale = sxy / sx2
+    offset = my - scale * mx
+    return (round(scale, 6), round(offset, 4))
+
+
+def _parse_log_for_correlation(log_file_path: str) -> dict:
+    """
+    Parse a candump log file and extract per-ID, per-byte time series.
+    Returns: { can_id: [ { timestamp, bytes: [b0, b1, ...] }, ... ] }
+    """
+    result = {}
+    with open(log_file_path, "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            match = re.match(r"\((\d+\.\d+)\)\s+\w+\s+([0-9A-Fa-f]+)#([0-9A-Fa-f]*)", line)
+            if not match:
+                continue
+            ts = float(match.group(1))
+            can_id = match.group(2).upper()
+            data_hex = match.group(3).upper()
+            if can_id in OBD_FILTER_IDS:
+                continue
+            byte_values = []
+            for i in range(0, len(data_hex), 2):
+                if i + 2 <= len(data_hex):
+                    byte_values.append(int(data_hex[i:i+2], 16))
+            if not byte_values:
+                continue
+            if can_id not in result:
+                result[can_id] = []
+            result[can_id].append({"timestamp": ts, "bytes": byte_values})
+    return result
+
+
+def _correlate_obd_with_can(
+    can_data: dict,
+    obd_samples: list,
+    window_ms: int = 50,
+    target_ids: list = None,
+) -> list:
+    """
+    Core correlation algorithm.
+    For each (can_id, byte_model) candidate, align CAN values with OBD timestamps,
+    compute Pearson/Spearman, fit linear regression.
+    Returns list of candidates sorted by confidence.
+    """
+    window_s = window_ms / 1000.0
+    obd_ts = [s["timestamp"] for s in obd_samples]
+    obd_vals = [s["value"] for s in obd_samples]
+    
+    if len(obd_samples) < 3:
+        return []
+    
+    ids_to_test = target_ids if target_ids else list(can_data.keys())
+    
+    candidates = []
+    
+    for can_id in ids_to_test:
+        if can_id not in can_data:
+            continue
+        frames = can_data[can_id]
+        if len(frames) < 5:
+            continue
+        
+        can_timestamps = [f["timestamp"] for f in frames]
+        dlc = max(len(f["bytes"]) for f in frames)
+        
+        # Test models for each byte position
+        models_to_test = []
+        for byte_i in range(dlc):
+            models_to_test.append(("single_byte", byte_i, byte_i))
+        for byte_i in range(dlc - 1):
+            models_to_test.append(("two_byte_be", byte_i, byte_i + 1))
+            models_to_test.append(("two_byte_le", byte_i, byte_i + 1))
+        
+        for model_type, bi, bj in models_to_test:
+            aligned_obd = []
+            aligned_can = []
+            aligned_ts = []
+            
+            for idx, ots in enumerate(obd_ts):
+                # Find closest CAN frame within window
+                best_frame = None
+                best_dist = float("inf")
+                for frame in frames:
+                    dist = abs(frame["timestamp"] - ots)
+                    if dist < best_dist and dist <= window_s:
+                        best_dist = dist
+                        best_frame = frame
+                
+                if best_frame is not None and bi < len(best_frame["bytes"]):
+                    if model_type == "single_byte":
+                        can_val = best_frame["bytes"][bi]
+                    elif model_type == "two_byte_be":
+                        if bj < len(best_frame["bytes"]):
+                            can_val = (best_frame["bytes"][bi] << 8) | best_frame["bytes"][bj]
+                        else:
+                            continue
+                    elif model_type == "two_byte_le":
+                        if bj < len(best_frame["bytes"]):
+                            can_val = best_frame["bytes"][bi] | (best_frame["bytes"][bj] << 8)
+                        else:
+                            continue
+                    else:
+                        continue
+                    
+                    aligned_obd.append(obd_vals[idx])
+                    aligned_can.append(float(can_val))
+                    aligned_ts.append(ots)
+            
+            if len(aligned_obd) < 3:
+                continue
+            
+            # Check if CAN values have some variation
+            if len(set(aligned_can)) < 2:
+                continue
+            
+            pearson = _pearson(aligned_can, aligned_obd)
+            spearman = _spearman(aligned_can, aligned_obd)
+            
+            abs_pearson = abs(pearson)
+            abs_spearman = abs(spearman)
+            
+            if abs_pearson < 0.3 and abs_spearman < 0.3:
+                continue
+            
+            scale, offset = _linear_fit(aligned_can, aligned_obd)
+            can_transformed = [round(scale * c + offset, 4) for c in aligned_can]
+            
+            confidence = round(0.6 * abs_pearson + 0.4 * abs_spearman, 4)
+            
+            model_label = model_type
+            if model_type == "two_byte_be":
+                model_label = f"2 bytes BE [{bi}:{bj}]"
+            elif model_type == "two_byte_le":
+                model_label = f"2 bytes LE [{bi}:{bj}]"
+            else:
+                model_label = f"1 byte [{bi}]"
+            
+            candidates.append({
+                "can_id": can_id,
+                "byte_index": bi,
+                "byte_end": bj,
+                "model": model_label,
+                "model_type": model_type,
+                "scale": scale,
+                "offset": offset,
+                "pearson": round(pearson, 4),
+                "spearman": round(spearman, 4),
+                "confidence": confidence,
+                "n_samples": len(aligned_obd),
+                "obd_values": [round(v, 4) for v in aligned_obd],
+                "can_values": [round(v, 4) for v in aligned_can],
+                "can_transformed": can_transformed,
+                "timestamps": [round(t, 6) for t in aligned_ts],
+            })
+    
+    # Sort by confidence descending, take top 20
+    candidates.sort(key=lambda c: c["confidence"], reverse=True)
+    return candidates[:20]
+
+
+@app.post("/api/analysis/correlate-obd")
+async def correlate_obd_endpoint(request: SignalFinderCorrelationRequest):
+    """
+    Offline correlation: match OBD-II samples with CAN log data.
+    Accepts OBD samples + either a mission log path or a raw log path.
+    Returns top correlation candidates with visualization data.
+    """
+    start_time = time.time()
+    
+    log_path = None
+    
+    # Find the log file
+    if request.log_path:
+        log_path = Path(request.log_path)
+    elif request.mission_id:
+        mission_dir = MISSIONS_DIR / request.mission_id
+        if not mission_dir.exists():
+            raise HTTPException(status_code=404, detail=f"Mission non trouvee: {request.mission_id}")
+        logs_dir = mission_dir / "logs"
+        if logs_dir.exists():
+            log_files = sorted(logs_dir.glob("*.log"), key=lambda f: f.stat().st_mtime, reverse=True)
+            if log_files:
+                log_path = log_files[0]
+    
+    if not log_path or not log_path.exists():
+        raise HTTPException(status_code=400, detail="Aucun fichier log CAN trouve. Fournissez log_path ou mission_id avec des logs.")
+    
+    obd_samples = [{"timestamp": s.timestamp, "value": s.value} for s in request.obd_samples]
+    
+    if len(obd_samples) < 3:
+        raise HTTPException(status_code=400, detail="Minimum 3 echantillons OBD requis pour la correlation.")
+    
+    # Parse the CAN log
+    can_data = _parse_log_for_correlation(str(log_path))
+    
+    total_ids = len(can_data)
+    total_frames = sum(len(frames) for frames in can_data.values())
+    
+    target_ids = request.target_ids if request.target_ids else None
+    
+    candidates = _correlate_obd_with_can(
+        can_data,
+        obd_samples,
+        window_ms=request.window_ms,
+        target_ids=target_ids,
+    )
+    
+    elapsed = round((time.time() - start_time) * 1000, 1)
+    
+    return {
+        "status": "success",
+        "candidates": candidates,
+        "total_ids_analyzed": total_ids,
+        "total_frames_processed": total_frames,
+        "elapsed_ms": elapsed,
+        "log_file": str(log_path),
+        "obd_sample_count": len(obd_samples),
+    }
+
+
+@app.post("/api/signal-finder/read-pid")
+async def signal_finder_read_pid(
+    interface: str = "can0",
+    pid: str = "0C",
+    service: str = "01",
+):
+    """
+    Read a specific OBD-II PID and return the decoded value.
+    Used by Signal Finder to collect OBD samples in live mode.
+    """
+    ts = time.time()
+    
+    pid_upper = pid.upper()
+    decoder = OBD_PID_DECODERS.get(pid_upper)
+    
+    data = f"02{service}{pid_upper}0000000000"[:16]
+    
+    result = await obd_send_with_flow_control(
+        interface, "7DF", data, "7E8"
+    )
+    
+    if not result["success"]:
+        return {
+            "success": False,
+            "timestamp": ts,
+            "pid": pid_upper,
+            "raw_hex": "",
+            "decoded_value": None,
+            "unit": decoder[1] if decoder else "",
+            "name": decoder[0] if decoder else f"PID {pid_upper}",
+            "error": result["error"],
+        }
+    
+    # Parse response to extract data bytes
+    decoded_value = None
+    raw_hex = ""
+    for resp_line in result["responses"]:
+        parsed = parse_candump_line(resp_line) if isinstance(resp_line, str) else resp_line
+        if parsed and parsed["id"] in ("7E8", "7E9", "7EA", "7EB"):
+            data_hex = parsed["data"]
+            raw_hex = data_hex
+            byte_list = [int(data_hex[i:i+2], 16) for i in range(0, len(data_hex), 2)]
+            
+            # Check response: byte[1] should be 0x41 (response to service 01)
+            # Format: [length, 0x41, PID, A, B, ...]
+            if len(byte_list) >= 3 and byte_list[1] == 0x41:
+                resp_pid = f"{byte_list[2]:02X}"
+                if resp_pid == pid_upper:
+                    a_val = byte_list[3] if len(byte_list) > 3 else 0
+                    b_val = byte_list[4] if len(byte_list) > 4 else 0
+                    if decoder:
+                        try:
+                            decoded_value = round(decoder[2](a_val, b_val), 2)
+                        except Exception:
+                            decoded_value = a_val
+                    else:
+                        decoded_value = a_val
+                    break
+    
+    return {
+        "success": decoded_value is not None,
+        "timestamp": ts,
+        "pid": pid_upper,
+        "raw_hex": raw_hex,
+        "decoded_value": decoded_value,
+        "unit": decoder[1] if decoder else "",
+        "name": decoder[0] if decoder else f"PID {pid_upper}",
+        "error": None if decoded_value is not None else "Pas de reponse OBD valide",
+        "frames": result["responses"],
+    }
+
+
+# =============================================================================
+# Signal Finder WebSocket - Live correlation
+# =============================================================================
+
+class SignalFinderState:
+    """Tracks active Signal Finder live sessions."""
+    active: bool = False
+    process: Optional[asyncio.subprocess.Process] = None
+
+signal_finder_state = SignalFinderState()
+
+
+@app.websocket("/ws/signal-finder")
+async def websocket_signal_finder(websocket: WebSocket, interface: str = Query(default="can0")):
+    """
+    WebSocket for live OBD/CAN correlation.
+    
+    Client sends:
+      { "action": "start", "pid": "0C", "interface": "can0", "intervalMs": 200 }
+      { "action": "stop" }
+    
+    Server sends:
+      { "type": "obd_sample", "timestamp": ..., "value": ..., "unit": "...", "pid": "..." }
+      { "type": "can_frame", ... }
+      { "type": "correlation_update", "candidates": [...], "sampleCount": N }
+      { "type": "status", "message": "..." }
+    """
+    await websocket.accept()
+    
+    candump_proc = None
+    running = False
+    obd_samples = []
+    can_buffer = {}  # { can_id: [ { timestamp, bytes } ] }
+    
+    async def capture_can_traffic(iface: str):
+        """Background task to capture CAN frames."""
+        nonlocal candump_proc, can_buffer
+        try:
+            candump_proc = await asyncio.create_subprocess_exec(
+                "candump", "-ta", iface,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            while running and candump_proc and candump_proc.stdout:
+                line = await candump_proc.stdout.readline()
+                if not line:
+                    break
+                decoded = line.decode().strip()
+                if not decoded:
+                    continue
+                parts = decoded.split()
+                if len(parts) < 4:
+                    continue
+                try:
+                    timestamp = float(parts[0].strip("()"))
+                    can_id = parts[2].upper()
+                    if can_id in OBD_FILTER_IDS:
+                        continue
+                    dlc_idx = decoded.index("[")
+                    dlc_end = decoded.index("]")
+                    data_part = decoded[dlc_end+1:].strip().replace(" ", "").upper()
+                    byte_values = []
+                    for i in range(0, len(data_part), 2):
+                        if i + 2 <= len(data_part):
+                            byte_values.append(int(data_part[i:i+2], 16))
+                    if can_id not in can_buffer:
+                        can_buffer[can_id] = []
+                    can_buffer[can_id].append({"timestamp": timestamp, "bytes": byte_values})
+                    # Keep only last 500 frames per ID to limit memory
+                    if len(can_buffer[can_id]) > 500:
+                        can_buffer[can_id] = can_buffer[can_id][-500:]
+                    # Send frame to client
+                    await websocket.send_text(json.dumps({
+                        "type": "can_frame",
+                        "timestamp": timestamp,
+                        "canId": can_id,
+                        "data": data_part,
+                    }))
+                except Exception:
+                    pass
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            pass
+    
+    can_task = None
+    
+    try:
+        while True:
+            raw = await websocket.receive_text()
+            msg = json.loads(raw)
+            action = msg.get("action")
+            
+            if action == "start":
+                pid = msg.get("pid", "0C").upper()
+                iface = msg.get("interface", interface)
+                interval_ms = msg.get("intervalMs", 300)
+                interval_s = max(interval_ms / 1000.0, 0.15)
+                correlation_interval = msg.get("correlationIntervalS", 3)
+                
+                running = True
+                obd_samples.clear()
+                can_buffer.clear()
+                
+                await websocket.send_text(json.dumps({
+                    "type": "status",
+                    "message": f"Demarrage capture CAN + lecture PID {pid} toutes les {interval_ms}ms",
+                }))
+                
+                # Start CAN capture task
+                can_task = asyncio.create_task(capture_can_traffic(iface))
+                
+                # OBD read loop
+                last_correlation_time = time.time()
+                
+                while running:
+                    ts = time.time()
+                    decoder = OBD_PID_DECODERS.get(pid)
+                    data_str = f"02{msg.get('service', '01')}{pid}0000000000"[:16]
+                    
+                    result = await obd_send_with_flow_control(iface, "7DF", data_str, "7E8")
+                    
+                    if result["success"]:
+                        for resp_line in result["responses"]:
+                            parsed = parse_candump_line(resp_line) if isinstance(resp_line, str) else resp_line
+                            if parsed and parsed["id"] in ("7E8", "7E9", "7EA", "7EB"):
+                                data_hex = parsed["data"]
+                                byte_list = [int(data_hex[i:i+2], 16) for i in range(0, len(data_hex), 2)]
+                                if len(byte_list) >= 3 and byte_list[1] == 0x41:
+                                    resp_pid = f"{byte_list[2]:02X}"
+                                    if resp_pid == pid:
+                                        a_val = byte_list[3] if len(byte_list) > 3 else 0
+                                        b_val = byte_list[4] if len(byte_list) > 4 else 0
+                                        if decoder:
+                                            try:
+                                                val = round(decoder[2](a_val, b_val), 2)
+                                            except Exception:
+                                                val = float(a_val)
+                                        else:
+                                            val = float(a_val)
+                                        
+                                        sample = {"timestamp": ts, "value": val}
+                                        obd_samples.append(sample)
+                                        
+                                        await websocket.send_text(json.dumps({
+                                            "type": "obd_sample",
+                                            "timestamp": ts,
+                                            "value": val,
+                                            "unit": decoder[1] if decoder else "",
+                                            "pid": pid,
+                                            "name": decoder[0] if decoder else f"PID {pid}",
+                                            "sampleCount": len(obd_samples),
+                                        }))
+                                        break
+                    
+                    # Periodic correlation
+                    if time.time() - last_correlation_time >= correlation_interval and len(obd_samples) >= 5:
+                        last_correlation_time = time.time()
+                        corr_candidates = _correlate_obd_with_can(
+                            can_buffer, obd_samples,
+                            window_ms=100,
+                        )
+                        await websocket.send_text(json.dumps({
+                            "type": "correlation_update",
+                            "candidates": corr_candidates[:10],
+                            "sampleCount": len(obd_samples),
+                            "canIdsCount": len(can_buffer),
+                        }))
+                    
+                    # Check for stop command (non-blocking)
+                    try:
+                        check_msg = await asyncio.wait_for(websocket.receive_text(), timeout=interval_s)
+                        check_data = json.loads(check_msg)
+                        if check_data.get("action") == "stop":
+                            running = False
+                            # Final correlation
+                            if len(obd_samples) >= 3:
+                                final_candidates = _correlate_obd_with_can(
+                                    can_buffer, obd_samples, window_ms=100,
+                                )
+                                await websocket.send_text(json.dumps({
+                                    "type": "correlation_update",
+                                    "candidates": final_candidates[:10],
+                                    "sampleCount": len(obd_samples),
+                                    "canIdsCount": len(can_buffer),
+                                    "final": True,
+                                }))
+                            await websocket.send_text(json.dumps({
+                                "type": "status",
+                                "message": f"Arret - {len(obd_samples)} echantillons collectes",
+                            }))
+                    except asyncio.TimeoutError:
+                        pass
+            
+            elif action == "stop":
+                running = False
+                await websocket.send_text(json.dumps({
+                    "type": "status",
+                    "message": "Session arretee",
+                }))
+    
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        try:
+            await websocket.send_text(json.dumps({"type": "error", "message": str(e)}))
+        except Exception:
+            pass
+    finally:
+        running = False
+        if can_task and not can_task.done():
+            can_task.cancel()
+            try:
+                await can_task
+            except asyncio.CancelledError:
+                pass
+        if candump_proc and candump_proc.returncode is None:
+            candump_proc.terminate()
+            try:
+                await asyncio.wait_for(candump_proc.wait(), timeout=2.0)
+            except asyncio.TimeoutError:
+                candump_proc.kill()
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -1391,3 +1391,89 @@ export async function importLog(
   
   return response.json()
 }
+
+// =============================================================================
+// Signal Finder - OBD/CAN Correlation API
+// =============================================================================
+
+export interface OBDSample {
+  timestamp: number
+  value: number
+}
+
+export interface CorrelationCandidate {
+  can_id: string
+  byte_index: number
+  byte_end: number
+  model: string
+  model_type: string
+  scale: number
+  offset: number
+  pearson: number
+  spearman: number
+  confidence: number
+  n_samples: number
+  obd_values: number[]
+  can_values: number[]
+  can_transformed: number[]
+  timestamps: number[]
+}
+
+export interface CorrelationResult {
+  status: string
+  candidates: CorrelationCandidate[]
+  total_ids_analyzed: number
+  total_frames_processed: number
+  elapsed_ms: number
+  log_file: string
+  obd_sample_count: number
+}
+
+export interface OBDPidReading {
+  success: boolean
+  timestamp: number
+  pid: string
+  raw_hex: string
+  decoded_value: number | null
+  unit: string
+  name: string
+  error?: string | null
+  frames?: string[]
+}
+
+export async function correlateOBDWithCAN(params: {
+  missionId?: string
+  logPath?: string
+  obdSamples: OBDSample[]
+  windowMs?: number
+  targetIds?: string[]
+  pid?: string
+}): Promise<CorrelationResult> {
+  return fetchApi("/analysis/correlate-obd", {
+    method: "POST",
+    body: JSON.stringify({
+      mission_id: params.missionId || null,
+      log_path: params.logPath || null,
+      obd_samples: params.obdSamples,
+      window_ms: params.windowMs ?? 50,
+      target_ids: params.targetIds || null,
+      pid: params.pid || null,
+    }),
+  })
+}
+
+export async function readOBDPidDecoded(
+  iface: CANInterface,
+  pid: string,
+  service: string = "01"
+): Promise<OBDPidReading> {
+  return fetchApi(
+    `/signal-finder/read-pid?interface=${iface}&pid=${pid}&service=${service}`,
+    { method: "POST" }
+  )
+}
+
+export function getSignalFinderWsUrl(iface: CANInterface = "can0"): string {
+  const base = getApiBaseUrl().replace(/^http/, "ws")
+  return `${base}/ws/signal-finder?interface=${iface}`
+}
