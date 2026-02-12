@@ -7543,12 +7543,37 @@ def _detect_checksum_bytes(byte_series: dict, dlc: int, threshold: float = 0.70)
     if n_frames < 10:
         return checksums
 
+    # Guard 1: enough payload diversity (unique full payloads >= 4)
+    payloads_set = set()
+    for fi in range(min(n_frames, 500)):
+        payload = tuple(byte_series.get(bi, [0])[fi] if fi < len(byte_series.get(bi, [])) else 0 for bi in range(dlc))
+        payloads_set.add(payload)
+    if len(payloads_set) < 4:
+        return checksums
+
+    # Guard 2: at least one non-candidate byte must have entropy > 0.5
+    byte_entropies = {}
+    for bi in range(dlc):
+        vals = byte_series.get(bi, [])
+        byte_entropies[bi] = _shannon_entropy(vals) if vals else 0.0
+
+    max_other_entropy = max((byte_entropies.get(bi, 0) for bi in range(dlc)), default=0)
+    if max_other_entropy < 0.5:
+        return checksums
+
     best_k = -1
     best_algo = ""
     best_rate = 0.0
 
     for k in range(dlc):
         if k not in byte_series or not byte_series[k]:
+            continue
+        # Guard 3: candidate byte must have entropy > 0.5 (not constant)
+        if byte_entropies.get(k, 0) < 0.5:
+            continue
+        # Guard 4: at least one OTHER byte must vary (entropy > 0.5)
+        other_max_ent = max((byte_entropies.get(bi, 0) for bi in range(dlc) if bi != k), default=0)
+        if other_max_ent < 0.5:
             continue
         match_xor = 0
         match_sum = 0
