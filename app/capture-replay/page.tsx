@@ -484,12 +484,12 @@ const handleDeleteLog = async (logId: string) => {
                     const renderLogItem = (log: LogEntry, isChild = false, depth = 0) => (
                       <div
                         key={log.id}
-                        className={`flex items-center justify-between rounded-lg border border-border p-2 ${
-                          isChild ? "bg-background/50 ml-4" : "bg-secondary/50"
+                        className={`flex flex-col gap-1.5 rounded-lg border border-border p-2 ${
+                          isChild ? "bg-background/50" : "bg-secondary/50"
                         }`}
-                        style={isChild ? { marginLeft: `${depth * 16}px` } : undefined}
+                        style={isChild ? { marginLeft: `${Math.min(depth, 3) * 16}px` } : undefined}
                       >
-                        <div className="min-w-0 flex-1">
+                        <div className="min-w-0">
                           {renamingLogId === log.id ? (
                             <div className="flex items-center gap-2">
                               <Input
@@ -508,7 +508,7 @@ const handleDeleteLog = async (logId: string) => {
                           ) : (
                             <div className="flex items-center gap-2">
                               {isChild && <ChevronRight className="h-3 w-3 text-muted-foreground shrink-0" />}
-                              <p className="truncate font-mono text-sm text-foreground">
+                              <p className="break-all font-mono text-sm text-foreground">
                                 {log.filename}
                               </p>
                             </div>
@@ -518,7 +518,7 @@ const handleDeleteLog = async (logId: string) => {
                             {log.durationSeconds && ` • ${formatTime(log.durationSeconds)}`}
                           </p>
                         </div>
-                        <div className="ml-2 flex items-center gap-1 shrink-0">
+                        <div className="flex items-center gap-1 flex-wrap">
                           {replayStatus.running && replayingLogId === log.id ? (
                             <Button 
                               size="icon" 

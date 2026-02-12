@@ -638,10 +638,9 @@ export default function AnalyseCANPage() {
                   <div className="flex flex-col gap-1.5">
                     <Label className="text-xs text-muted-foreground">
                       Seuil entropie min. (bits)
-                      <Info
-                        className="inline h-3 w-3 ml-1 text-muted-foreground cursor-help"
-                        title="Entropie de Shannon minimum pour considerer un byte comme actif. 0=constant, 8=distribution uniforme. Valeur recommandee: 0.5"
-                      />
+                      <span title="Entropie de Shannon minimum pour considerer un byte comme actif. 0=constant, 8=distribution uniforme. Valeur recommandee: 0.5">
+                        <Info className="inline h-3 w-3 ml-1 text-muted-foreground cursor-help" />
+                      </span>
                     </Label>
                     <div className="flex items-center gap-2">
                       <input
@@ -663,10 +662,9 @@ export default function AnalyseCANPage() {
                   <div className="flex flex-col gap-1.5">
                     <Label className="text-xs text-muted-foreground">
                       Seuil correlation adjacence
-                      <Info
-                        className="inline h-3 w-3 ml-1 text-muted-foreground cursor-help"
-                        title="Seuil de correlation (Jaccard) pour grouper des bytes adjacents en un signal multi-byte. Plus eleve = moins de groupements. Valeur recommandee: 0.85"
-                      />
+                      <span title="Seuil de correlation (Jaccard) pour grouper des bytes adjacents en un signal multi-byte. Plus eleve = moins de groupements. Valeur recommandee: 0.85">
+                        <Info className="inline h-3 w-3 ml-1 text-muted-foreground cursor-help" />
+                      </span>
                     </Label>
                     <div className="flex items-center gap-2">
                       <input
@@ -690,20 +688,18 @@ export default function AnalyseCANPage() {
                     <div className="flex items-center justify-between">
                       <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
                         Exclure counters
-                        <Info
-                          className="inline h-3 w-3 cursor-help"
-                          title="Detecte les bytes qui s'incrementent de 1 a chaque trame (rolling counter) et les exclut de l'analyse."
-                        />
+                        <span title="Detecte les bytes qui s'incrementent de 1 a chaque trame (rolling counter) et les exclut de l'analyse.">
+                          <Info className="inline h-3 w-3 cursor-help" />
+                        </span>
                       </Label>
                       <Switch checked={excludeCounters} onCheckedChange={setExcludeCounters} />
                     </div>
                     <div className="flex items-center justify-between">
                       <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
                         Exclure checksums
-                        <Info
-                          className="inline h-3 w-3 cursor-help"
-                          title="Detecte les bytes qui correspondent a un XOR8 ou SUM8 des autres bytes du message et les exclut."
-                        />
+                        <span title="Detecte les bytes qui correspondent a un XOR8 ou SUM8 des autres bytes du message et les exclut.">
+                          <Info className="inline h-3 w-3 cursor-help" />
+                        </span>
                       </Label>
                       <Switch checked={excludeChecksums} onCheckedChange={setExcludeChecksums} />
                     </div>
@@ -898,20 +894,27 @@ export default function AnalyseCANPage() {
                               <><Eye className="h-3 w-3 mr-1" /> Selectionner tout</>
                             )}
                           </Button>
-                          {hasMission && selectedSignals.size > 0 && (
+                          {hasMission && (
                             <Button
                               size="sm"
                               className="text-xs h-7"
                               onClick={saveSignalsToDBC}
-                              disabled={savingDBC}
+                              disabled={savingDBC || selectedSignals.size === 0}
                             >
                               {savingDBC ? (
                                 <Loader2 className="h-3 w-3 animate-spin mr-1" />
                               ) : (
                                 <Save className="h-3 w-3 mr-1" />
                               )}
-                              Sauvegarder {selectedSignals.size} signal(s) dans DBC
+                              {selectedSignals.size > 0
+                                ? `Sauvegarder ${selectedSignals.size} signal(s) dans DBC`
+                                : "Cochez des signaux pour sauvegarder"}
                             </Button>
+                          )}
+                          {!hasMission && (
+                            <span className="text-[10px] text-muted-foreground italic">
+                              Selectionnez une mission pour sauvegarder dans le DBC
+                            </span>
                           )}
                           <span className="text-xs text-muted-foreground ml-auto">
                             {selectedSignals.size} selectionne(s)
