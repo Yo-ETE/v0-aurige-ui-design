@@ -1548,12 +1548,46 @@ export interface DetectedSignal {
   confidence: number
 }
 
+export interface ExcludedByteInfo {
+  type: "counter" | "checksum"
+  mode?: string
+  ratio?: number
+  algo?: string
+  match_rate?: number
+}
+
 export interface AutoDetectResult {
   status: string
   detected_signals: DetectedSignal[]
+  excluded_bytes: Record<string, Record<string, ExcludedByteInfo>>
   total_ids_analyzed: number
   total_signals_found: number
   elapsed_ms: number
+}
+
+export async function autoDetectSignals(params: {
+  missionId?: string
+  logPath?: string
+  logId?: string
+  targetIds?: string[]
+  minEntropy?: number
+  correlationThreshold?: number
+  excludeCounters?: boolean
+  excludeChecksums?: boolean
+}): Promise<AutoDetectResult> {
+  return fetchApi("/analysis/auto-detect-signals", {
+    method: "POST",
+    body: JSON.stringify({
+      mission_id: params.missionId || null,
+      log_path: params.logPath || null,
+      log_id: params.logId || null,
+      target_ids: params.targetIds || null,
+      min_entropy: params.minEntropy ?? 0.5,
+      correlation_threshold: params.correlationThreshold ?? 0.85,
+      exclude_counters: params.excludeCounters ?? true,
+      exclude_checksums: params.excludeChecksums ?? true,
+    }),
+  })
 }
 
 export async function getByteHeatmap(params: {

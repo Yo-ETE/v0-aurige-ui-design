@@ -29,6 +29,7 @@ import {
   type HeatmapByteInfo,
   type AutoDetectResult,
   type DetectedSignal,
+  type ExcludedByteInfo,
   type LogEntry,
 } from "@/lib/api"
 import { useMissionStore } from "@/lib/mission-store"
@@ -181,27 +182,51 @@ function HeatmapRow({
 // Component: Signal Byte Map (visual representation of signal in 8-byte message)
 // =============================================================================
 
-function SignalByteMap({ signal }: { signal: DetectedSignal }) {
+function SignalByteMap({ signal, excludedBytes }: { signal: DetectedSignal; excludedBytes?: Record<string, ExcludedByteInfo> }) {
   const bytes = Array.from({ length: 8 }, (_, i) => {
     const inSignal = i >= signal.start_byte && i < signal.start_byte + signal.length_bytes
-    return { index: i, active: inSignal }
+    const excluded = excludedBytes?.[String(i)]
+    return { index: i, active: inSignal, excluded }
   })
 
   return (
-    <div className="flex gap-0.5">
-      {bytes.map((b) => (
-        <div
-          key={b.index}
-          className={cn(
-            "w-8 h-6 rounded text-[9px] font-mono flex items-center justify-center border transition-colors",
-            b.active
-              ? "bg-primary/30 border-primary/60 text-primary font-semibold"
-              : "bg-muted/30 border-border/30 text-muted-foreground"
-          )}
-        >
-          B{b.index}
+    <div className="flex flex-col gap-0.5">
+      <div className="flex gap-0.5">
+        {bytes.map((b) => (
+          <div
+            key={b.index}
+            className={cn(
+              "w-8 h-6 rounded text-[9px] font-mono flex items-center justify-center border transition-colors",
+              b.active
+                ? "bg-primary/30 border-primary/60 text-primary font-semibold"
+                : b.excluded
+                  ? "bg-amber-900/30 border-amber-600/40 text-amber-400"
+                  : "bg-muted/30 border-border/30 text-muted-foreground"
+            )}
+            title={
+              b.excluded
+                ? `${b.excluded.type === "counter" ? "Counter" : "Checksum"} (${b.excluded.type === "counter" ? `${((b.excluded.ratio ?? 0) * 100).toFixed(0)}% incr` : `${b.excluded.algo} ${((b.excluded.match_rate ?? 0) * 100).toFixed(0)}%`})`
+                : undefined
+            }
+          >
+            B{b.index}
+          </div>
+        ))}
+      </div>
+      {/* Show excluded byte labels */}
+      {excludedBytes && Object.keys(excludedBytes).length > 0 && (
+        <div className="flex gap-0.5">
+          {bytes.map((b) => (
+            <div key={b.index} className="w-8 text-center">
+              {b.excluded && (
+                <span className="text-[8px] text-amber-400 font-medium leading-none">
+                  {b.excluded.type === "counter" ? "CNT" : "CKS"}
+                </span>
+              )}
+            </div>
+          ))}
         </div>
-      ))}
+      )}
     </div>
   )
 }
@@ -240,6 +265,8 @@ export default function AnalyseCANPage() {
   const [detectError, setDetectError] = useState<string | null>(null)
   const [minEntropy, setMinEntropy] = useState(0.5)
   const [correlationThreshold, setCorrelationThreshold] = useState(0.85)
+  const [excludeCounters, setExcludeCounters] = useState(true)
+  const [excludeChecksums, setExcludeChecksums] = useState(true)
   const [selectedSignals, setSelectedSignals] = useState<Set<string>>(new Set())
   const [inspectedSignal, setInspectedSignal] = useState<DetectedSignal | null>(null)
   const [savingDBC, setSavingDBC] = useState(false)
@@ -314,6 +341,8 @@ export default function AnalyseCANPage() {
         logId: selectedLogId || undefined,
         minEntropy,
         correlationThreshold,
+        excludeCounters,
+        excludeChecksums,
       })
       setDetectResult(result)
       setSelectedSignals(new Set())
@@ -323,7 +352,7 @@ export default function AnalyseCANPage() {
     } finally {
       setDetectLoading(false)
     }
-  }, [selectedMissionId, selectedLogId, minEntropy, correlationThreshold])
+  }, [selectedMissionId, selectedLogId, minEntropy, correlationThreshold, excludeCounters, excludeChecksums])
 
   // Filter heatmap IDs
   const filteredHeatmapIds = useMemo(() => {
@@ -655,6 +684,31 @@ export default function AnalyseCANPage() {
                     </div>
                   </div>
 
+                  {/* Pre-scan toggles */}
+                  <div className="border-t border-border/40 pt-3 mt-1 flex flex-col gap-2.5">
+                    <Label className="text-xs text-muted-foreground font-semibold">Pre-filtrage</Label>
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
+                        Exclure counters
+                        <Info
+                          className="inline h-3 w-3 cursor-help"
+                          title="Detecte les bytes qui s'incrementent de 1 a chaque trame (rolling counter) et les exclut de l'analyse."
+                        />
+                      </Label>
+                      <Switch checked={excludeCounters} onCheckedChange={setExcludeCounters} />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
+                        Exclure checksums
+                        <Info
+                          className="inline h-3 w-3 cursor-help"
+                          title="Detecte les bytes qui correspondent a un XOR8 ou SUM8 des autres bytes du message et les exclut."
+                        />
+                      </Label>
+                      <Switch checked={excludeChecksums} onCheckedChange={setExcludeChecksums} />
+                    </div>
+                  </div>
+
                   {/* Run button */}
                   <Button
                     onClick={runAutoDetect}
@@ -789,13 +843,20 @@ export default function AnalyseCANPage() {
                       <CardTitle className="text-sm flex items-center gap-2">
                         <Cpu className="h-4 w-4 text-primary" /> Signaux detectes
                       </CardTitle>
-                      {detectResult && (
-                        <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                          <span>{detectResult.total_signals_found} signaux</span>
-                          <span>{detectResult.total_ids_analyzed} IDs analyses</span>
-                          <Badge variant="outline" className="text-[10px]">{detectResult.elapsed_ms} ms</Badge>
-                        </div>
+                  {detectResult && (
+                    <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
+                      <span>{detectResult.total_signals_found} signaux</span>
+                      <span>{detectResult.total_ids_analyzed} IDs analyses</span>
+                      {detectResult.excluded_bytes && Object.keys(detectResult.excluded_bytes).length > 0 && (
+                        <span className="text-amber-400">
+                          {Object.values(detectResult.excluded_bytes).reduce(
+                            (sum, byteMap) => sum + Object.keys(byteMap).length, 0
+                          )} bytes exclus
+                        </span>
                       )}
+                      <Badge variant="outline" className="text-[10px]">{detectResult.elapsed_ms} ms</Badge>
+                    </div>
+                  )}
                     </div>
                   </CardHeader>
                   <CardContent>
@@ -857,6 +918,46 @@ export default function AnalyseCANPage() {
                           </span>
                         </div>
 
+                        {/* Excluded bytes summary */}
+                        {detectResult.excluded_bytes && Object.keys(detectResult.excluded_bytes).length > 0 && (
+                          <div className="mb-3 rounded-lg border border-amber-600/30 bg-amber-900/10 p-3">
+                            <p className="text-xs font-semibold text-amber-400 mb-2">
+                              Bytes exclus (counters / checksums)
+                            </p>
+                            <div className="flex flex-wrap gap-x-4 gap-y-1">
+                              {Object.entries(detectResult.excluded_bytes).map(([canId, byteMap]) => (
+                                <div key={canId} className="flex items-center gap-1.5 text-[11px]">
+                                  <span className="font-mono text-primary font-semibold">{canId}</span>
+                                  {Object.entries(byteMap).map(([bi, info]) => (
+                                    <Badge
+                                      key={bi}
+                                      variant="outline"
+                                      className={cn(
+                                        "text-[9px] h-5 px-1.5",
+                                        info.type === "counter"
+                                          ? "border-amber-600/50 text-amber-400"
+                                          : "border-violet-600/50 text-violet-400"
+                                      )}
+                                      title={
+                                        info.type === "counter"
+                                          ? `Counter ${info.mode} (${((info.ratio ?? 0) * 100).toFixed(0)}% increments)`
+                                          : `Checksum ${info.algo} (${((info.match_rate ?? 0) * 100).toFixed(0)}% match)`
+                                      }
+                                    >
+                                      B{bi} {info.type === "counter" ? "CNT" : "CKS"}
+                                      <span className="ml-0.5 opacity-70">
+                                        {info.type === "counter"
+                                          ? `${((info.ratio ?? 0) * 100).toFixed(0)}%`
+                                          : `${info.algo} ${((info.match_rate ?? 0) * 100).toFixed(0)}%`}
+                                      </span>
+                                    </Badge>
+                                  ))}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
                         <ScrollArea className="max-h-[500px]">
                           <Table>
                             <TableHeader>
@@ -907,7 +1008,10 @@ export default function AnalyseCANPage() {
                                     </div>
                                   </TableCell>
                                   <TableCell>
-                                    <SignalByteMap signal={sig} />
+                                    <SignalByteMap
+                                      signal={sig}
+                                      excludedBytes={detectResult.excluded_bytes?.[sig.can_id]}
+                                    />
                                   </TableCell>
                                   <TableCell className="text-xs font-mono">
                                     {sig.bit_length}b

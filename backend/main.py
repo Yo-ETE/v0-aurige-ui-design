@@ -7489,6 +7489,103 @@ class AutoDetectRequest(BaseModel):
     target_ids: Optional[List[str]] = None
     min_entropy: float = 0.5
     correlation_threshold: float = 0.85
+    exclude_counters: bool = True
+    exclude_checksums: bool = True
+    counter_threshold: float = 0.75
+    checksum_threshold: float = 0.70
+
+
+def _detect_counter_bytes(byte_series: dict, dlc: int, threshold: float = 0.75) -> dict:
+    """
+    Detect rolling counter bytes/nibbles.
+    Returns { byte_index: { "type": "counter", "mode": "byte"|"nibble_lo", "ratio": float } }
+    """
+    counters = {}
+    for bi in range(dlc):
+        vals = byte_series.get(bi, [])
+        if len(vals) < 10:
+            continue
+        # Full byte increment: v[t+1] == (v[t]+1) % 256
+        inc_byte = sum(
+            1 for i in range(1, len(vals))
+            if vals[i] == (vals[i - 1] + 1) % 256
+        )
+        ratio_byte = inc_byte / (len(vals) - 1)
+        # Low nibble increment: (v[t+1] & 0x0F) == ((v[t] & 0x0F) + 1) % 16
+        inc_nib = sum(
+            1 for i in range(1, len(vals))
+            if (vals[i] & 0x0F) == ((vals[i - 1] & 0x0F) + 1) % 16
+        )
+        ratio_nib = inc_nib / (len(vals) - 1)
+        best_ratio = max(ratio_byte, ratio_nib)
+        if best_ratio >= threshold:
+            mode = "byte" if ratio_byte >= ratio_nib else "nibble_lo"
+            counters[bi] = {
+                "type": "counter",
+                "mode": mode,
+                "ratio": round(best_ratio, 4),
+            }
+    return counters
+
+
+def _detect_checksum_bytes(byte_series: dict, dlc: int, threshold: float = 0.70) -> dict:
+    """
+    Detect simple checksum bytes (XOR8 or SUM8).
+    For each byte k, test if XOR or SUM of all other bytes matches byte[k].
+    Returns { byte_index: { "type": "checksum", "algo": "xor8"|"sum8", "match_rate": float } }
+    """
+    checksums = {}
+    # Need at least 2 bytes to test checksum
+    if dlc < 2:
+        return checksums
+    # Build frame-level byte arrays
+    n_frames = min(len(v) for v in byte_series.values() if v) if byte_series else 0
+    if n_frames < 10:
+        return checksums
+
+    best_k = -1
+    best_algo = ""
+    best_rate = 0.0
+
+    for k in range(dlc):
+        if k not in byte_series or not byte_series[k]:
+            continue
+        match_xor = 0
+        match_sum = 0
+        for fi in range(n_frames):
+            xor_val = 0
+            sum_val = 0
+            valid = True
+            for bi in range(dlc):
+                if bi == k:
+                    continue
+                if bi not in byte_series or fi >= len(byte_series[bi]):
+                    valid = False
+                    break
+                xor_val ^= byte_series[bi][fi]
+                sum_val = (sum_val + byte_series[bi][fi]) & 0xFF
+            if not valid:
+                continue
+            target = byte_series[k][fi]
+            if xor_val == target:
+                match_xor += 1
+            if sum_val == target:
+                match_sum += 1
+        rate_xor = match_xor / n_frames if n_frames > 0 else 0
+        rate_sum = match_sum / n_frames if n_frames > 0 else 0
+        local_best = max(rate_xor, rate_sum)
+        if local_best >= threshold and local_best > best_rate:
+            best_rate = local_best
+            best_k = k
+            best_algo = "xor8" if rate_xor >= rate_sum else "sum8"
+
+    if best_k >= 0:
+        checksums[best_k] = {
+            "type": "checksum",
+            "algo": best_algo,
+            "match_rate": round(best_rate, 4),
+        }
+    return checksums
 
 
 def _resolve_log_path(mission_id: Optional[str], log_path: Optional[str], log_id: Optional[str]) -> Path:
@@ -7628,6 +7725,7 @@ async def auto_detect_signals_endpoint(request: AutoDetectRequest):
     ids_to_analyze = request.target_ids if request.target_ids else sorted(can_data.keys())
 
     detected_signals = []
+    all_excluded_bytes = {}  # { can_id: { byte_index: { type, ... } } }
 
     for can_id in ids_to_analyze:
         if can_id not in can_data:
@@ -7652,9 +7750,27 @@ async def auto_detect_signals_endpoint(request: AutoDetectRequest):
             cr = _change_rate(vals)
             byte_metrics[bi] = {"entropy": ent, "change_rate": cr, "values": vals}
 
-        # --- Step 2: identify active bytes (above entropy threshold) ---
+        # --- Step 1.5: Pre-scan for counters and checksums ---
+        excluded_set = set()
+        id_excluded = {}
+        if request.exclude_counters:
+            counters = _detect_counter_bytes(byte_series, dlc, request.counter_threshold)
+            for bi, info in counters.items():
+                excluded_set.add(bi)
+                id_excluded[bi] = info
+        if request.exclude_checksums:
+            checksums = _detect_checksum_bytes(byte_series, dlc, request.checksum_threshold)
+            for bi, info in checksums.items():
+                excluded_set.add(bi)
+                id_excluded[bi] = info
+        if id_excluded:
+            all_excluded_bytes[can_id] = id_excluded
+
+        # --- Step 2: identify active bytes (above entropy threshold), excluding counters/checksums ---
         active_bytes = []
         for bi in range(dlc):
+            if bi in excluded_set:
+                continue
             if bi in byte_metrics and byte_metrics[bi]["entropy"] >= request.min_entropy:
                 active_bytes.append(bi)
 
@@ -7793,6 +7909,7 @@ async def auto_detect_signals_endpoint(request: AutoDetectRequest):
     return {
         "status": "success",
         "detected_signals": detected_signals,
+        "excluded_bytes": all_excluded_bytes,
         "total_ids_analyzed": len(ids_to_analyze),
         "total_signals_found": len(detected_signals),
         "elapsed_ms": elapsed,
