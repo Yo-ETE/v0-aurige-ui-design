@@ -1061,96 +1061,106 @@ export default function AnalyseCANPage() {
                     )}
                   </CardContent>
                 </Card>
+              </>
+            )}
 
-                {/* Inspected signal detail */}
-                {inspectedSignal && (
-                  <Card className="border-primary/30 bg-primary/5">
-                    <CardHeader className="pb-3">
+            {/* Inspected signal detail -- rendered OUTSIDE the grid, full width below */}
+            {activeTab === "detect" && inspectedSignal && (
+              <div className="xl:col-span-2">
+                <Card className="border-primary/30 bg-primary/5">
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center justify-between">
                       <CardTitle className="text-sm flex items-center gap-2">
                         <Zap className="h-4 w-4 text-primary" />
                         Detail : {inspectedSignal.name}
                       </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                        <div className="bg-muted/30 rounded-lg p-3 border border-border/30">
-                          <p className="text-[10px] text-muted-foreground uppercase tracking-wide">CAN ID</p>
-                          <p className="font-mono text-sm font-semibold text-primary">{inspectedSignal.can_id}</p>
-                        </div>
-                        <div className="bg-muted/30 rounded-lg p-3 border border-border/30">
-                          <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Position</p>
-                          <p className="font-mono text-sm font-semibold text-foreground">
-                            Byte {inspectedSignal.start_byte} ({inspectedSignal.bit_length} bits)
-                          </p>
-                        </div>
-                        <div className="bg-muted/30 rounded-lg p-3 border border-border/30">
-                          <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Byte Order</p>
-                          <p className="text-sm font-semibold text-foreground">
-                            {inspectedSignal.byte_order === "big_endian" ? "Big Endian" : "Little Endian"}
-                            {inspectedSignal.is_signed && " (signe)"}
-                          </p>
-                        </div>
-                        <div className="bg-muted/30 rounded-lg p-3 border border-border/30">
-                          <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Confiance</p>
-                          <p className="text-sm font-semibold text-foreground">{(inspectedSignal.confidence * 100).toFixed(1)}%</p>
-                        </div>
+                      <button
+                        onClick={() => setInspectedSignal(null)}
+                        className="text-muted-foreground hover:text-foreground text-xs"
+                      >
+                        Fermer
+                      </button>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                      <div className="bg-muted/30 rounded-lg p-3 border border-border/30">
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">CAN ID</p>
+                        <p className="font-mono text-sm font-semibold text-primary">{inspectedSignal.can_id}</p>
                       </div>
+                      <div className="bg-muted/30 rounded-lg p-3 border border-border/30">
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Position</p>
+                        <p className="font-mono text-sm font-semibold text-foreground">
+                          Byte {inspectedSignal.start_byte} ({inspectedSignal.bit_length} bits)
+                        </p>
+                      </div>
+                      <div className="bg-muted/30 rounded-lg p-3 border border-border/30">
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Byte Order</p>
+                        <p className="text-sm font-semibold text-foreground">
+                          {inspectedSignal.byte_order === "big_endian" ? "Big Endian" : "Little Endian"}
+                          {inspectedSignal.is_signed && " (signe)"}
+                        </p>
+                      </div>
+                      <div className="bg-muted/30 rounded-lg p-3 border border-border/30">
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Confiance</p>
+                        <p className="text-sm font-semibold text-foreground">{(inspectedSignal.confidence * 100).toFixed(1)}%</p>
+                      </div>
+                    </div>
 
-                      {/* Byte map large */}
-                      <div className="mt-4">
-                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-2">Carte des bytes</p>
-                        <div className="flex gap-1">
-                          {Array.from({ length: 8 }, (_, i) => {
-                            const inSig = i >= inspectedSignal.start_byte && i < inspectedSignal.start_byte + inspectedSignal.length_bytes
-                            return (
-                              <div
-                                key={i}
-                                className={cn(
-                                  "flex-1 h-10 rounded-md flex flex-col items-center justify-center border text-xs font-mono transition-colors",
-                                  inSig
-                                    ? "bg-primary/25 border-primary/60 text-primary font-bold"
-                                    : "bg-muted/20 border-border/30 text-muted-foreground"
-                                )}
-                              >
-                                <span className="text-[9px] opacity-60">Byte</span>
-                                <span>{i}</span>
-                              </div>
-                            )
-                          })}
-                        </div>
+                    {/* Byte map large */}
+                    <div className="mt-4">
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-2">Carte des bytes</p>
+                      <div className="flex gap-1">
+                        {Array.from({ length: 8 }, (_, i) => {
+                          const inSig = i >= inspectedSignal.start_byte && i < inspectedSignal.start_byte + inspectedSignal.length_bytes
+                          return (
+                            <div
+                              key={i}
+                              className={cn(
+                                "flex-1 h-10 rounded-md flex flex-col items-center justify-center border text-xs font-mono transition-colors",
+                                inSig
+                                  ? "bg-primary/25 border-primary/60 text-primary font-bold"
+                                  : "bg-muted/20 border-border/30 text-muted-foreground"
+                              )}
+                            >
+                              <span className="text-[9px] opacity-60">Byte</span>
+                              <span>{i}</span>
+                            </div>
+                          )
+                        })}
                       </div>
+                    </div>
 
-                      {/* Sample values */}
-                      <div className="mt-4">
-                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-2">Echantillons de valeurs decodees</p>
-                        <div className="flex flex-wrap gap-1.5">
-                          {inspectedSignal.sample_values.map((v, i) => (
-                            <Badge key={i} variant="outline" className="font-mono text-xs">
-                              {v}
-                            </Badge>
-                          ))}
-                        </div>
+                    {/* Sample values */}
+                    <div className="mt-4">
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-2">Echantillons de valeurs decodees</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {inspectedSignal.sample_values.map((v, i) => (
+                          <Badge key={i} variant="outline" className="font-mono text-xs">
+                            {v}
+                          </Badge>
+                        ))}
                       </div>
+                    </div>
 
-                      {/* Metrics row */}
-                      <div className="mt-4 grid grid-cols-3 gap-3">
-                        <div className="text-center">
-                          <p className="text-[10px] text-muted-foreground">Entropie</p>
-                          <p className="font-mono text-sm font-semibold text-foreground">{inspectedSignal.entropy.toFixed(3)} bits</p>
-                        </div>
-                        <div className="text-center">
-                          <p className="text-[10px] text-muted-foreground">Change Rate</p>
-                          <p className="font-mono text-sm font-semibold text-foreground">{(inspectedSignal.change_rate * 100).toFixed(1)}%</p>
-                        </div>
-                        <div className="text-center">
-                          <p className="text-[10px] text-muted-foreground">Plage</p>
-                          <p className="font-mono text-sm font-semibold text-foreground">{inspectedSignal.value_range[0]} - {inspectedSignal.value_range[1]}</p>
-                        </div>
+                    {/* Metrics row */}
+                    <div className="mt-4 grid grid-cols-3 gap-3">
+                      <div className="text-center">
+                        <p className="text-[10px] text-muted-foreground">Entropie</p>
+                        <p className="font-mono text-sm font-semibold text-foreground">{inspectedSignal.entropy.toFixed(3)} bits</p>
                       </div>
-                    </CardContent>
-                  </Card>
-                )}
-              </>
+                      <div className="text-center">
+                        <p className="text-[10px] text-muted-foreground">Change Rate</p>
+                        <p className="font-mono text-sm font-semibold text-foreground">{(inspectedSignal.change_rate * 100).toFixed(1)}%</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-[10px] text-muted-foreground">Plage</p>
+                        <p className="font-mono text-sm font-semibold text-foreground">{inspectedSignal.value_range[0]} - {inspectedSignal.value_range[1]}</p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
             )}
           </div>
         </div>
