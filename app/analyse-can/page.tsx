@@ -961,9 +961,9 @@ export default function AnalyseCANPage() {
                           </div>
                         )}
 
-                        <ScrollArea className="max-h-[500px]">
+                        <div className="max-h-[500px] overflow-y-auto overflow-x-hidden rounded-md border border-border/30">
                           <Table>
-                            <TableHeader>
+                            <TableHeader className="sticky top-0 z-10 bg-card">
                               <TableRow>
                                 <TableHead className="w-8"></TableHead>
                                 <TableHead className="text-[10px]">CAN ID</TableHead>
@@ -1048,7 +1048,7 @@ export default function AnalyseCANPage() {
                               ))}
                             </TableBody>
                           </Table>
-                        </ScrollArea>
+                        </div>
                       </>
                     )}
 
