@@ -1065,7 +1065,7 @@ export default function AnalyseCANPage() {
             )}
 
             {/* Inspected signal detail -- rendered OUTSIDE the grid, full width below */}
-            {activeTab === "detect" && inspectedSignal && (
+            {tab === "autodetect" && inspectedSignal && (
               <div className="xl:col-span-2">
                 <Card className="border-primary/30 bg-primary/5">
                   <CardHeader className="pb-3">
