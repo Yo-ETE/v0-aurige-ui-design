@@ -17,11 +17,12 @@ import {
 import {
   BarChart3, Loader2, AlertCircle, Database, Cpu, Search,
   Download, Save, Eye, EyeOff, Filter, ArrowUpDown, CheckCircle2,
-  Zap, ChevronDown, ChevronRight, Info,
+  Zap, ChevronDown, ChevronRight, Info, GitBranch, ArrowRight,
 } from "lucide-react"
 import {
   getByteHeatmap,
   autoDetectSignals,
+  getInterIdDependencies,
   listMissionLogs,
   addDBCSignal,
   type HeatmapResult,
@@ -30,6 +31,9 @@ import {
   type AutoDetectResult,
   type DetectedSignal,
   type ExcludedByteInfo,
+  type DependencyResult,
+  type DependencyEdge,
+  type DependencyNode,
   type LogEntry,
 } from "@/lib/api"
 import { useMissionStore } from "@/lib/mission-store"
@@ -247,7 +251,7 @@ export default function AnalyseCANPage() {
   const activeMission = missions.find((m) => m.id === currentMissionId) ?? null
 
   // Tab state
-  const [tab, setTab] = useState<"heatmap" | "autodetect">("heatmap")
+  const [tab, setTab] = useState<"heatmap" | "autodetect" | "dependencies">("heatmap")
 
   // Heatmap state
   const [heatmapResult, setHeatmapResult] = useState<HeatmapResult | null>(null)
@@ -271,6 +275,14 @@ export default function AnalyseCANPage() {
   const [inspectedSignal, setInspectedSignal] = useState<DetectedSignal | null>(null)
   const [savingDBC, setSavingDBC] = useState(false)
   const [savedSignals, setSavedSignals] = useState<Set<string>>(new Set())
+
+  // Dependency state
+  const [depResult, setDepResult] = useState<DependencyResult | null>(null)
+  const [depLoading, setDepLoading] = useState(false)
+  const [depError, setDepError] = useState<string | null>(null)
+  const [depWindowMs, setDepWindowMs] = useState(10)
+  const [depMinScore, setDepMinScore] = useState(0.1)
+  const [depSelectedEdge, setDepSelectedEdge] = useState<DependencyEdge | null>(null)
 
   // Fetch missions on mount
   useEffect(() => {
@@ -353,6 +365,26 @@ export default function AnalyseCANPage() {
       setDetectLoading(false)
     }
   }, [selectedMissionId, selectedLogId, minEntropy, correlationThreshold, excludeCounters, excludeChecksums])
+
+  // Dependencies: run analysis
+  const runDependencies = useCallback(async () => {
+    setDepLoading(true)
+    setDepError(null)
+    try {
+      const result = await getInterIdDependencies({
+        missionId: selectedMissionId || undefined,
+        logId: selectedLogId || undefined,
+        windowMs: depWindowMs,
+        minScore: depMinScore,
+      })
+      setDepResult(result)
+      setDepSelectedEdge(null)
+    } catch (err: unknown) {
+      setDepError(err instanceof Error ? err.message : "Erreur inconnue")
+    } finally {
+      setDepLoading(false)
+    }
+  }, [selectedMissionId, selectedLogId, depWindowMs, depMinScore])
 
   // Filter heatmap IDs
   const filteredHeatmapIds = useMemo(() => {
@@ -539,6 +571,17 @@ export default function AnalyseCANPage() {
               >
                 <Cpu className="h-3.5 w-3.5" /> Auto-detect
               </button>
+              <button
+                onClick={() => setTab("dependencies")}
+                className={cn(
+                  "flex-1 flex items-center justify-center gap-1.5 text-xs rounded-md px-3 py-1.5 font-medium transition-colors",
+                  tab === "dependencies"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <GitBranch className="h-3.5 w-3.5" /> Dependances
+              </button>
             </div>
 
             {/* Heatmap config */}
@@ -717,6 +760,76 @@ export default function AnalyseCANPage() {
                       <Zap className="h-4 w-4 mr-2" />
                     )}
                     Lancer la detection
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Dependencies config */}
+            {tab === "dependencies" && (
+              <Card className="border-border/60">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm flex items-center gap-2">
+                    <GitBranch className="h-4 w-4 text-primary" /> Parametres dependances
+                  </CardTitle>
+                  <CardDescription className="text-xs">
+                    Detecte les IDs qui reagissent apres un changement de payload sur un ID source.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="flex flex-col gap-4">
+                  <div className="flex flex-col gap-1.5">
+                    <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
+                      Fenetre temporelle (ms)
+                      <span title="Duree apres un evenement source pendant laquelle on observe les reactions des autres IDs. 5-20 ms recommande.">
+                        <Info className="inline h-3 w-3 cursor-help" />
+                      </span>
+                    </Label>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="range"
+                        min={1}
+                        max={50}
+                        step={1}
+                        value={depWindowMs}
+                        onChange={(e) => setDepWindowMs(Number(e.target.value))}
+                        className="flex-1 accent-primary"
+                      />
+                      <span className="text-xs font-mono w-10 text-right">{depWindowMs} ms</span>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
+                      Score minimum
+                      <span title="Seuil de score pour afficher une arete. Plus eleve = moins de faux positifs. 0.1 = toutes les correlations detectees.">
+                        <Info className="inline h-3 w-3 cursor-help" />
+                      </span>
+                    </Label>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="range"
+                        min={0.05}
+                        max={0.8}
+                        step={0.05}
+                        value={depMinScore}
+                        onChange={(e) => setDepMinScore(Number(e.target.value))}
+                        className="flex-1 accent-primary"
+                      />
+                      <span className="text-xs font-mono w-10 text-right">{(depMinScore * 100).toFixed(0)}%</span>
+                    </div>
+                  </div>
+
+                  <Button
+                    onClick={runDependencies}
+                    disabled={!hasLog || depLoading}
+                    className="w-full mt-1"
+                  >
+                    {depLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    ) : (
+                      <Search className="h-4 w-4 mr-2" />
+                    )}
+                    Analyser les dependances
                   </Button>
                 </CardContent>
               </Card>
@@ -1061,6 +1174,232 @@ export default function AnalyseCANPage() {
                     )}
                   </CardContent>
                 </Card>
+              </>
+            )}
+
+            {/* Dependencies results */}
+            {tab === "dependencies" && (
+              <>
+                <Card className="border-border/60">
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-sm flex items-center gap-2">
+                        <GitBranch className="h-4 w-4 text-primary" /> Graphe de dependances
+                      </CardTitle>
+                      {depResult && (
+                        <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
+                          <span>{depResult.edges.length} aretes</span>
+                          <span>{depResult.nodes.length} noeuds</span>
+                          <span>{depResult.active_ids} IDs actifs</span>
+                          <Badge variant="outline" className="text-[10px]">{depResult.elapsed_ms} ms</Badge>
+                        </div>
+                      )}
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    {depLoading && (
+                      <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                        <Loader2 className="h-8 w-8 animate-spin mb-3 opacity-40" />
+                        <p className="text-sm">Analyse des dependances inter-ID...</p>
+                      </div>
+                    )}
+                    {depError && (
+                      <Alert variant="destructive">
+                        <AlertCircle className="h-4 w-4" />
+                        <AlertTitle>Erreur</AlertTitle>
+                        <AlertDescription>{depError}</AlertDescription>
+                      </Alert>
+                    )}
+
+                    {!depLoading && !depError && !depResult && (
+                      <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                        <GitBranch className="h-8 w-8 mb-3 opacity-40" />
+                        <p className="text-sm font-medium">Selectionnez un log et lancez l{"'"}analyse</p>
+                        <p className="text-xs mt-1">Detecte quels IDs changent juste apres un evenement sur un autre ID</p>
+                      </div>
+                    )}
+
+                    {depResult && !depLoading && depResult.edges.length > 0 && (
+                      <>
+                        {/* Mini graph - visual node layout */}
+                        <div className="mb-4 rounded-lg border border-border/40 bg-muted/20 p-4">
+                          <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-3">Vue graphe</p>
+                          <div className="flex flex-wrap gap-3 items-center justify-center">
+                            {depResult.nodes.map((node) => (
+                              <div
+                                key={node.id}
+                                className={cn(
+                                  "flex flex-col items-center gap-0.5 px-3 py-2 rounded-lg border transition-colors cursor-default",
+                                  node.role === "source"
+                                    ? "bg-primary/15 border-primary/40 text-primary"
+                                    : node.role === "target"
+                                      ? "bg-emerald-900/20 border-emerald-600/40 text-emerald-400"
+                                      : "bg-amber-900/15 border-amber-600/40 text-amber-400"
+                                )}
+                              >
+                                <span className="font-mono text-sm font-bold">{node.id}</span>
+                                <span className="text-[9px] opacity-70">
+                                  {node.event_count} evt
+                                </span>
+                                <div className="flex gap-1 text-[8px]">
+                                  {node.out_degree > 0 && (
+                                    <span className="opacity-60">{node.out_degree} out</span>
+                                  )}
+                                  {node.in_degree > 0 && (
+                                    <span className="opacity-60">{node.in_degree} in</span>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                          {/* Legend */}
+                          <div className="flex gap-4 mt-3 justify-center text-[9px] text-muted-foreground">
+                            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-primary/60" /> Source</span>
+                            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500/60" /> Cible</span>
+                            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500/60" /> Les deux</span>
+                          </div>
+                        </div>
+
+                        {/* Edges table */}
+                        <div className="max-h-[400px] overflow-y-auto overflow-x-hidden rounded-md border border-border/30">
+                          <Table>
+                            <TableHeader className="sticky top-0 z-10 bg-card">
+                              <TableRow>
+                                <TableHead className="text-[10px]">Source</TableHead>
+                                <TableHead className="text-[10px] w-8"></TableHead>
+                                <TableHead className="text-[10px]">Cible</TableHead>
+                                <TableHead className="text-[10px]">Co-occ.</TableHead>
+                                <TableHead className="text-[10px]">P(react)</TableHead>
+                                <TableHead className="text-[10px]">Lift</TableHead>
+                                <TableHead className="text-[10px]">Score</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {depResult.edges.map((edge, i) => {
+                                const scoreColor =
+                                  edge.score >= 0.7 ? "text-emerald-400 bg-emerald-900/30 border-emerald-600/40"
+                                    : edge.score >= 0.4 ? "text-amber-400 bg-amber-900/30 border-amber-600/40"
+                                      : "text-muted-foreground bg-muted/30 border-border/40"
+                                return (
+                                  <TableRow
+                                    key={`${edge.source}-${edge.target}-${i}`}
+                                    className={cn(
+                                      "cursor-pointer hover:bg-muted/30 transition-colors",
+                                      depSelectedEdge?.source === edge.source && depSelectedEdge?.target === edge.target
+                                        ? "bg-primary/10"
+                                        : ""
+                                    )}
+                                    onClick={() => setDepSelectedEdge(
+                                      depSelectedEdge?.source === edge.source && depSelectedEdge?.target === edge.target
+                                        ? null
+                                        : edge
+                                    )}
+                                  >
+                                    <TableCell className="font-mono text-xs font-semibold text-primary">
+                                      {edge.source}
+                                    </TableCell>
+                                    <TableCell>
+                                      <ArrowRight className="h-3 w-3 text-muted-foreground" />
+                                    </TableCell>
+                                    <TableCell className="font-mono text-xs font-semibold text-emerald-400">
+                                      {edge.target}
+                                    </TableCell>
+                                    <TableCell className="text-xs font-mono">
+                                      {edge.co_occurrences} / {edge.source_events}
+                                    </TableCell>
+                                    <TableCell className="text-xs font-mono">
+                                      {(edge.p_react * 100).toFixed(1)}%
+                                    </TableCell>
+                                    <TableCell className="text-xs font-mono">
+                                      {edge.lift.toFixed(1)}x
+                                    </TableCell>
+                                    <TableCell>
+                                      <Badge
+                                        variant="outline"
+                                        className={cn("text-[10px] font-mono", scoreColor)}
+                                      >
+                                        {(edge.score * 100).toFixed(0)}%
+                                      </Badge>
+                                    </TableCell>
+                                  </TableRow>
+                                )
+                              })}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </>
+                    )}
+
+                    {depResult && !depLoading && depResult.edges.length === 0 && (
+                      <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                        <Search className="h-8 w-8 mb-3 opacity-40" />
+                        <p className="text-sm font-medium">Aucune dependance detectee</p>
+                        <p className="text-xs mt-1">Essayez d{"'"}augmenter la fenetre temporelle ou de baisser le score minimum</p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Selected edge detail */}
+                {depSelectedEdge && (
+                  <Card className="border-primary/30 bg-primary/5 xl:col-span-2">
+                    <CardHeader className="pb-3">
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="text-sm flex items-center gap-2">
+                          <Zap className="h-4 w-4 text-primary" />
+                          {depSelectedEdge.source}
+                          <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
+                          {depSelectedEdge.target}
+                        </CardTitle>
+                        <button
+                          onClick={() => setDepSelectedEdge(null)}
+                          className="text-muted-foreground hover:text-foreground text-xs"
+                        >
+                          Fermer
+                        </button>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                        <div className="bg-muted/30 rounded-lg p-3 border border-border/30">
+                          <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Co-occurrences</p>
+                          <p className="font-mono text-sm font-semibold text-foreground">
+                            {depSelectedEdge.co_occurrences} / {depSelectedEdge.source_events} evt source
+                          </p>
+                        </div>
+                        <div className="bg-muted/30 rounded-lg p-3 border border-border/30">
+                          <p className="text-[10px] text-muted-foreground uppercase tracking-wide">P(reaction)</p>
+                          <p className="font-mono text-sm font-semibold text-foreground">
+                            {(depSelectedEdge.p_react * 100).toFixed(1)}%
+                          </p>
+                        </div>
+                        <div className="bg-muted/30 rounded-lg p-3 border border-border/30">
+                          <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Lift</p>
+                          <p className="font-mono text-sm font-semibold text-foreground">
+                            {depSelectedEdge.lift.toFixed(2)}x
+                            <span className="text-[10px] text-muted-foreground ml-1">
+                              vs. hasard
+                            </span>
+                          </p>
+                        </div>
+                        <div className="bg-muted/30 rounded-lg p-3 border border-border/30">
+                          <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Evt cible</p>
+                          <p className="font-mono text-sm font-semibold text-foreground">
+                            {depSelectedEdge.target_events} changements
+                          </p>
+                        </div>
+                      </div>
+                      <div className="mt-3 text-xs text-muted-foreground">
+                        <p>
+                          Quand <span className="font-mono text-primary font-semibold">{depSelectedEdge.source}</span> change de payload,
+                          {" "}<span className="font-mono text-emerald-400 font-semibold">{depSelectedEdge.target}</span> reagit dans les {depWindowMs} ms
+                          {" "}dans <span className="font-semibold text-foreground">{(depSelectedEdge.p_react * 100).toFixed(1)}%</span> des cas
+                          (vs. <span className="font-semibold text-foreground">{depSelectedEdge.lift > 0 ? ((depSelectedEdge.p_react / depSelectedEdge.lift) * 100).toFixed(1) : "0"}%</span> attendu par hasard).
+                        </p>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
               </>
             )}
 

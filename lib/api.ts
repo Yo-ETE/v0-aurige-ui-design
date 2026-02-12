@@ -1605,4 +1605,58 @@ export async function getByteHeatmap(params: {
   })
 }
 
+// =============================================================================
+// Inter-ID Dependency Detection
+// =============================================================================
+
+export interface DependencyEdge {
+  source: string
+  target: string
+  co_occurrences: number
+  source_events: number
+  target_events: number
+  p_react: number
+  lift: number
+  score: number
+}
+
+export interface DependencyNode {
+  id: string
+  event_count: number
+  out_degree: number
+  in_degree: number
+  role: "source" | "target" | "both"
+}
+
+export interface DependencyResult {
+  status: string
+  edges: DependencyEdge[]
+  nodes: DependencyNode[]
+  total_frames: number
+  active_ids: number
+  duration_s: number
+  elapsed_ms: number
+}
+
+export async function getInterIdDependencies(params: {
+  missionId?: string
+  logPath?: string
+  logId?: string
+  windowMs?: number
+  minScore?: number
+  topN?: number
+}): Promise<DependencyResult> {
+  return fetchApi("/analysis/inter-id-dependencies", {
+    method: "POST",
+    body: JSON.stringify({
+      mission_id: params.missionId || null,
+      log_path: params.logPath || null,
+      log_id: params.logId || null,
+      window_ms: params.windowMs ?? 10,
+      min_score: params.minScore ?? 0.1,
+      top_n: params.topN ?? 30,
+    }),
+  })
+}
+
 

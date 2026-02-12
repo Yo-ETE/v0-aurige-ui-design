@@ -7941,6 +7941,177 @@ async def auto_detect_signals_endpoint(request: AutoDetectRequest):
     }
 
 
+# =============================================================================
+# Inter-ID Dependency Detection
+# =============================================================================
+
+class DependencyRequest(BaseModel):
+    mission_id: Optional[str] = None
+    log_path: Optional[str] = None
+    log_id: Optional[str] = None
+    window_ms: float = 10.0
+    min_score: float = 0.1
+    top_n: int = 30
+
+
+@app.post("/api/analysis/inter-id-dependencies")
+async def inter_id_dependencies_endpoint(request: DependencyRequest):
+    """
+    Detect inter-ID dependencies: when an ID's payload changes (event),
+    which other IDs change within a short window after?
+    Returns edges sorted by score (conditional probability lift).
+    """
+    start_time = time.time()
+    log_path = _resolve_log_path(request.mission_id, request.log_path, request.log_id)
+
+    window_s = request.window_ms / 1000.0
+
+    # Parse log into ordered frames
+    all_frames = []  # [ (timestamp, can_id, payload_hex) ]
+    with open(str(log_path), "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            match = re.match(r"\((\d+\.\d+)\)\s+\w+\s+([0-9A-Fa-f]+)#([0-9A-Fa-f]*)", line)
+            if not match:
+                continue
+            ts = float(match.group(1))
+            can_id = match.group(2).upper()
+            payload = match.group(3).upper()
+            if can_id in OBD_FILTER_IDS:
+                continue
+            all_frames.append((ts, can_id, payload))
+
+    if len(all_frames) < 20:
+        raise HTTPException(status_code=400, detail="Pas assez de trames pour analyser les dependances.")
+
+    all_frames.sort(key=lambda f: f[0])
+    total_frames = len(all_frames)
+    duration = all_frames[-1][0] - all_frames[0][0] if total_frames >= 2 else 0
+
+    # Build per-ID event list (payload changes)
+    last_payload = {}  # can_id -> last payload hex
+    events = {}  # can_id -> [timestamp of payload change]
+
+    for ts, can_id, payload in all_frames:
+        prev = last_payload.get(can_id)
+        last_payload[can_id] = payload
+        if prev is not None and payload != prev:
+            if can_id not in events:
+                events[can_id] = []
+            events[can_id].append(ts)
+
+    # Filter: only IDs with enough events
+    active_ids = {cid for cid, evts in events.items() if len(evts) >= 3}
+
+    if len(active_ids) < 2:
+        return {
+            "status": "success",
+            "edges": [],
+            "nodes": [],
+            "total_frames": total_frames,
+            "duration_s": round(duration, 2),
+            "elapsed_ms": round((time.time() - start_time) * 1000, 1),
+        }
+
+    # For each pair (source, target), count how many source events
+    # have a target event within window_ms after.
+    edges = []
+
+    source_ids = sorted(active_ids, key=lambda c: len(events[c]), reverse=True)
+
+    for src in source_ids:
+        src_events = events[src]
+        src_count = len(src_events)
+
+        for tgt in active_ids:
+            if tgt == src:
+                continue
+            tgt_events = events[tgt]
+            tgt_count = len(tgt_events)
+
+            # Count co-occurrences: src event followed by tgt event within window
+            co = 0
+            ti = 0  # pointer into tgt_events
+            for se in src_events:
+                # Advance tgt pointer to first event >= se
+                while ti < len(tgt_events) and tgt_events[ti] < se:
+                    ti += 1
+                # Check if any tgt event in [se, se + window]
+                tj = ti
+                while tj < len(tgt_events) and tgt_events[tj] <= se + window_s:
+                    co += 1
+                    break  # only count once per source event
+                    tj += 1
+
+            if co < 2:
+                continue
+
+            # Conditional probability: P(tgt reacts | src event)
+            p_react = co / src_count
+            # Background rate: how often does tgt change per second?
+            bg_rate = tgt_count / duration if duration > 0 else 0
+            # Expected co-occurrences by chance
+            p_chance = min(bg_rate * window_s, 1.0)
+
+            # Score = lift (how much more likely than chance)
+            if p_chance > 0:
+                lift = p_react / p_chance
+            else:
+                lift = p_react * 100
+
+            score = round(min(p_react * min(lift, 10) / 10, 1.0), 4)
+
+            if score < request.min_score:
+                continue
+
+            edges.append({
+                "source": src,
+                "target": tgt,
+                "co_occurrences": co,
+                "source_events": src_count,
+                "target_events": tgt_count,
+                "p_react": round(p_react, 4),
+                "lift": round(lift, 2),
+                "score": score,
+            })
+
+    # Sort by score descending, limit
+    edges.sort(key=lambda e: e["score"], reverse=True)
+    edges = edges[:request.top_n]
+
+    # Build node list with metadata
+    node_ids = set()
+    for e in edges:
+        node_ids.add(e["source"])
+        node_ids.add(e["target"])
+
+    nodes = []
+    for cid in sorted(node_ids):
+        evt_count = len(events.get(cid, []))
+        out_edges = sum(1 for e in edges if e["source"] == cid)
+        in_edges = sum(1 for e in edges if e["target"] == cid)
+        nodes.append({
+            "id": cid,
+            "event_count": evt_count,
+            "out_degree": out_edges,
+            "in_degree": in_edges,
+            "role": "source" if out_edges > in_edges else ("target" if in_edges > out_edges else "both"),
+        })
+
+    elapsed = round((time.time() - start_time) * 1000, 1)
+    return {
+        "status": "success",
+        "edges": edges,
+        "nodes": nodes,
+        "total_frames": total_frames,
+        "active_ids": len(active_ids),
+        "duration_s": round(duration, 2),
+        "elapsed_ms": elapsed,
+    }
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
