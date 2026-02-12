@@ -213,11 +213,13 @@ function SignalByteMap({ signal }: { signal: DetectedSignal }) {
 
 export default function AnalyseCANPage() {
   // Mission & log selection
-  const { activeMission } = useMissionStore()
+  const { missions, currentMissionId, fetchMissions } = useMissionStore()
   const [selectedMissionId, setSelectedMissionId] = useState<string>("")
   const [missionLogs, setMissionLogs] = useState<LogEntry[]>([])
   const [selectedLogId, setSelectedLogId] = useState<string>("")
   const [loadingLogs, setLoadingLogs] = useState(false)
+
+  const activeMission = missions.find((m) => m.id === currentMissionId) ?? null
 
   // Tab state
   const [tab, setTab] = useState<"heatmap" | "autodetect">("heatmap")
@@ -243,12 +245,17 @@ export default function AnalyseCANPage() {
   const [savingDBC, setSavingDBC] = useState(false)
   const [savedSignals, setSavedSignals] = useState<Set<string>>(new Set())
 
+  // Fetch missions on mount
+  useEffect(() => {
+    fetchMissions()
+  }, [fetchMissions])
+
   // Sync with active mission
   useEffect(() => {
-    if (activeMission) {
-      setSelectedMissionId(activeMission.id)
+    if (currentMissionId && !selectedMissionId) {
+      setSelectedMissionId(currentMissionId)
     }
-  }, [activeMission])
+  }, [currentMissionId, selectedMissionId])
 
   // Load logs when mission changes
   useEffect(() => {
@@ -441,11 +448,11 @@ export default function AnalyseCANPage() {
                       <SelectValue placeholder="Selectionnez une mission" />
                     </SelectTrigger>
                     <SelectContent>
-                      {activeMission && (
-                        <SelectItem key={activeMission.id} value={activeMission.id}>
-                          {activeMission.name}
+                      {missions.map((m) => (
+                        <SelectItem key={m.id} value={m.id}>
+                          {m.name} {m.id === currentMissionId ? "(active)" : ""}
                         </SelectItem>
-                      )}
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
