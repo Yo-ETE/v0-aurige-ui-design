@@ -1646,63 +1646,495 @@ CONTACT : contact@aurige.io`}
                 {[
                   {
                     id: "dashboard", icon: Globe, title: "Dashboard",
-                    content: "Page d'accueil affichant l'etat general du systeme : statut de connexion au Raspberry Pi, missions actives, acces rapide aux modules. Permet de creer une nouvelle mission via l'assistant vehicule (marque, modele, annee, VIN, motorisation)."
+                    content: `Page d'accueil et centre de controle d'AURIGE.
+
+ELEMENTS DE L'INTERFACE :
+- Carte "Etat du systeme" : indicateur vert/rouge de connexion au Raspberry Pi avec l'adresse IP courante. Si rouge, verifiez que le Pi est allume et sur le meme reseau.
+- Bouton "Nouvelle mission" : ouvre l'assistant de creation. Remplissez : nom de la mission, marque du vehicule, modele, annee, VIN (optionnel), motorisation (essence/diesel/hybride/electrique).
+- Liste des missions recentes : cliquez sur une mission pour l'ouvrir. L'icone etoile permet de la marquer comme favorite.
+
+CONSEILS :
+- Creez une mission par vehicule ou par campagne de tests.
+- Le VIN est optionnel mais recommande pour la tracabilite.
+- Verifiez la connexion au Pi avant toute operation CAN.`
                   },
                   {
-                    id: "missions", icon: FileText, title: "Mission",
-                    content: "Vue detaillee d'une mission : informations vehicule, statistiques (nombre de logs, trames decouvertes, interface/bitrate), derniere capture. Actions disponibles : renommer, modifier le vehicule, exporter (ZIP), supprimer. Donne acces a tous les modules d'analyse depuis une grille de raccourcis."
+                    id: "missions", icon: FileText, title: "Mission (vue detaillee)",
+                    content: `Vue complete d'une mission selectionnee.
+
+INFORMATIONS AFFICHEES :
+- En-tete : nom de mission, vehicule (marque / modele / annee), VIN, motorisation.
+- Statistiques : nombre de logs captures, trames totales decouvertes, interface et bitrate configures.
+- Derniere capture : nom du fichier, date, duree, nombre de trames.
+
+BOUTONS D'ACTION :
+- Crayon (Editer) : modifier le nom de la mission et les informations vehicule.
+- Telecharger : exporter la mission complete en archive ZIP (logs + config + DBC).
+- Corbeille : supprimer definitivement la mission et tous ses logs. Action irreversible.
+
+GRILLE DE RACCOURCIS :
+- Chaque carte correspond a un module d'analyse. Cliquez pour y acceder directement dans le contexte de la mission active.
+- Les modules affichent une icone, un nom, et une description courte de leur fonction.
+
+CONSEIL : Exportez regulierement vos missions en ZIP pour sauvegarde.`
                   },
                   {
                     id: "controle-can", icon: Settings, title: "Controle CAN",
-                    content: "Configuration de l'interface CAN du Raspberry Pi. Permet de monter/demonter les interfaces (can0, can1, vcan0), definir le bitrate (125k, 250k, 500k, 1M), activer le mode listen-only. Affiche l'etat temps reel de chaque interface avec statistiques de trames TX/RX."
+                    content: `Configuration et gestion des interfaces CAN du Raspberry Pi.
+
+CARTE PAR INTERFACE (can0, can1, vcan0) :
+- Indicateur d'etat : vert = montee (UP), rouge = demontee (DOWN).
+- Bitrate : selecteur deroulant (125000, 250000, 500000, 1000000 bit/s). Choisissez le bitrate correspondant au bus CAN de votre vehicule. En cas de doute, commencez par 500000 (le plus courant).
+- Mode listen-only : cochez pour ecouter sans emettre. Recommande pour la premiere exploration d'un vehicule inconnu.
+
+BOUTONS :
+- "Monter" / "Demonter" : active ou desactive l'interface. L'interface doit etre montee avant toute capture ou injection.
+- Statistiques TX/RX : nombre de trames envoyees et recues depuis le montage.
+
+INTERFACE VCAN0 :
+- Interface CAN virtuelle pour les tests sans vehicule. Utile pour verifier le bon fonctionnement du logiciel.
+
+CONSEILS :
+- Montez toujours l'interface AVANT d'ouvrir le CAN Sniffer ou de lancer une capture.
+- Si vous ne recevez aucune trame, verifiez le bitrate (essayez 250k puis 500k).
+- Le mode listen-only est OBLIGATOIRE sur un vehicule en circulation.`
                   },
                   {
                     id: "capture-replay", icon: Video, title: "Capture & Replay",
-                    content: "Enregistrement de sessions CAN avec candump. Nommez le fichier de capture (ou laissez le nom auto-genere avec horodatage), ajoutez une description. La capture enregistre toutes les trames du bus CAN selectionne. Replay : rejouer un log enregistre sur le bus CAN pour reproduire un scenario. Gestion des logs avec parentage (log parent / enfant pour tracer les derivations)."
+                    content: `Enregistrement et rejeu de sessions CAN.
+
+ONGLET CAPTURE :
+- Selecteur d'interface : choisissez can0, can1 ou vcan0.
+- Champ "Nom du fichier" (optionnel) : nommez votre capture pour la retrouver facilement (ex: "demarrage_moteur", "ouverture_porte"). Si laisse vide, un nom avec horodatage est genere automatiquement. Seuls les caracteres alphanumeriques, tirets et underscores sont autorises.
+- Champ "Description" (optionnel) : ajoutez un contexte (ex: "Moteur froid, contact mis, porte fermee").
+- Bouton "Demarrer la capture" : lance l'enregistrement candump. Un compteur de duree et de trames s'affiche.
+- Bouton "Arreter" : stoppe la capture et sauvegarde le fichier .log.
+
+ONGLET REPLAY :
+- Selecteur de log : choisissez parmi vos captures. Les logs sont groupes par famille (parent / enfants) grace a des indentations.
+- Selecteur d'interface : interface de sortie pour le rejeu.
+- Bouton "Rejouer" : envoie les trames du log sur le bus CAN en respectant les delais originaux.
+
+PARENTAGE DES LOGS :
+- Quand un log est derive d'un autre (ex: par isolation), il apparait comme "enfant" dans le selecteur, indente sous son parent. Cela permet de tracer l'origine de chaque fichier.
+
+CONSEILS :
+- Nommez TOUJOURS vos captures pour les retrouver facilement.
+- Avant un replay, assurez-vous que le vehicule est a l'arret et en securite.
+- Utilisez vcan0 pour tester un replay sans vehicule.`
                   },
                   {
                     id: "replay-rapide", icon: Zap, title: "Replay Rapide",
-                    content: "Rejeu rapide d'un log CAN avec controle de vitesse (1x, 2x, 5x, 10x). Permet de filtrer les IDs a rejouer, de definir une plage temporelle, et d'observer les reactions du vehicule en temps reel via le CAN Sniffer."
+                    content: `Rejeu rapide d'un log CAN avec options avancees.
+
+CONTROLES :
+- Selecteur de log : avec hierarchie parent/enfant.
+- Selecteur d'interface de sortie.
+- Vitesse de replay : boutons 1x, 2x, 5x, 10x. Multiplie la vitesse d'envoi des trames. Utile pour accelerer un long log ou observer un comportement au ralenti (< 1x non supporte, utilisez Capture & Replay pour le timing original).
+- Filtre d'IDs : saisissez les IDs CAN a rejouer (ex: "0x100, 0x200"). Si vide, tous les IDs sont rejoues.
+- Plage temporelle : definissez un debut et une fin en secondes pour ne rejouer qu'un extrait du log.
+
+BOUTONS :
+- "Lancer" : demarre le replay avec les parametres configures.
+- "Arreter" : interrompt le replay en cours.
+- Barre de progression : affiche l'avancement du rejeu.
+
+CONSEILS :
+- Combinez avec le CAN Sniffer ouvert pour observer les reactions en temps reel.
+- Utilisez le filtre d'IDs pour rejouer uniquement les trames isolees d'une fonction.
+- La vitesse 10x est utile pour les logs tres longs (> 5 min).`
                   },
                   {
                     id: "isolation", icon: GitBranch, title: "Isolation",
-                    content: "Isole les trames par fonction vehicule. Methode : (1) capturer un log de reference (etat repos), (2) capturer un log pendant une action (ex: ouverture porte), (3) comparer automatiquement pour isoler les trames specifiques a l'action. Supporte le mode live (capture + comparaison en un clic) et le mode manuel (selection de 2 logs existants). Resultat : liste des IDs et bytes qui changent, avec possibilite de rejouer uniquement les trames isolees."
+                    content: `Module cle pour isoler les trames specifiques a une action vehicule.
+
+PRINCIPE :
+Comparer un etat de repos (reference) avec un etat pendant une action (ex: appui sur freins) pour identifier les trames qui changent. Seules les differences significatives sont conservees.
+
+MODE LIVE (recommande pour debuter) :
+1. Bouton "Capturer reference" : enregistre 5-10 secondes de bus CAN au repos (moteur tourne, rien ne bouge).
+2. Bouton "Capturer action" : cliquez PUIS effectuez l'action vehicule (ouvrir porte, allumer phares, tourner volant, etc.). Enregistre pendant la duree configuree.
+3. Bouton "Comparer" : lance automatiquement l'algorithme de comparaison.
+Le resultat s'affiche : liste des IDs et bytes qui different entre les deux captures.
+
+MODE MANUEL :
+- Selecteur "Log reference" : choisissez un log existant comme reference (etat repos).
+- Selecteur "Log action" : choisissez un log capture pendant l'action.
+- Bouton "Lancer l'isolation" : compare les deux logs selectionnes.
+Utile quand vous avez deja des captures et voulez les comparer a posteriori.
+
+RESULTATS :
+- Tableau des differences : chaque ligne = un ID CAN avec les bytes qui changent.
+- Colonne "Bytes modifies" : indices des bytes (0-7) qui different entre reference et action, avec la valeur de reference et la valeur pendant l'action.
+- Bouton "Rejouer les trames isolees" : genere un log contenant UNIQUEMENT les trames differentes et le rejoue sur le bus. Permet de verifier si l'action est reproduite.
+- Bouton "Exporter" : sauvegarde le resultat d'isolation comme nouveau log enfant.
+
+QUALIFIER UNE ISOLATION :
+Apres avoir isole des trames, vous pouvez les qualifier :
+1. Rejouez les trames isolees (bouton "Replay isole") et observez si l'action se reproduit sur le vehicule.
+2. Si oui : vous avez identifie les trames responsables. Sauvegardez en DBC.
+3. Si non : affinez en retirant des IDs du resultat un par un et en rejouant a chaque fois. L'ID dont le retrait empeche l'action est le signal cle.
+
+CONSEILS :
+- Pendant la capture de reference, ne touchez a RIEN sur le vehicule.
+- L'action doit etre nette et unique (un seul geste a la fois).
+- Capturez au moins 5 secondes pour chaque phase.
+- Si trop de trames changent (> 20 IDs), votre reference n'etait pas assez stable. Recommencez.
+- Pour les actions breves (appui bouton), capturez en mode action pendant 3 secondes et appuyez 2-3 fois.`
                   },
                   {
                     id: "comparaison", icon: GitCompare, title: "Comparaison",
-                    content: "Compare deux logs CAN cote a cote. Affiche les differences par ID : trames presentes/absentes, payloads differents, frequences modifiees. Vue diff coloree byte par byte. Supporte les logs parents/enfants dans les selecteurs. Utile pour verifier l'effet d'une modification ou comparer deux etats du vehicule."
+                    content: `Comparaison detaillee de deux logs CAN.
+
+SELECTION DES LOGS :
+- Selecteur "Log A" et "Log B" : choisissez deux logs a comparer. Les selecteurs affichent les logs avec hierarchie parent/enfant. Vous pouvez comparer un parent avec son enfant, deux captures a des moments differents, ou un log brut avec un log isole.
+
+TYPES DE DIFFERENCES DETECTEES :
+- IDs presents uniquement dans A ou uniquement dans B (trames apparues/disparues).
+- IDs presents dans les deux mais avec des payloads differents.
+- IDs presents dans les deux mais avec des frequences d'emission differentes.
+
+AFFICHAGE DES RESULTATS :
+- Vue par ID : cliquez sur un ID pour voir le detail byte par byte.
+- Vue diff coloree : les bytes identiques sont gris, les bytes differents sont colores (rouge = valeur A, vert = valeur B).
+- Statistiques : nombre total de differences, pourcentage d'IDs communs, frequence moyenne.
+
+BOUTONS :
+- "Lancer la comparaison" : execute l'algorithme de comparaison.
+- Filtres : afficher uniquement les IDs ajoutes, supprimes, ou modifies.
+- "Exporter le diff" : sauvegarde le resultat de comparaison.
+
+CAS D'USAGE :
+- Verifier l'effet d'un fuzzing : comparez le log pre-fuzzing avec le log post-fuzzing.
+- Analyser une panne intermittente : comparez un log "ca marche" avec un log "ca ne marche pas".
+- Valider une isolation : comparez le log complet avec le log isole pour verifier que seules les trames attendues sont presentes.
+
+CONSEILS :
+- Comparez toujours des logs captures dans des conditions similaires (meme duree, meme etat vehicule de base).
+- Si la comparaison montre trop de differences, verifiez que les deux logs ont ete captures avec le meme bitrate.
+- Utilisez les filtres pour vous concentrer sur les IDs modifies uniquement.`
                   },
                   {
                     id: "analyse-can", icon: BarChart3, title: "Analyse CAN",
-                    content: "Trois onglets d'analyse avancee :\n\n- Heatmap : visualisation byte par byte de chaque ID CAN. Couleur = entropie (bleu = statique, rouge = tres variable). Cliquez sur un ID pour voir le detail de chaque byte avec min/max/valeurs uniques.\n\n- Auto-detect : detection automatique de signaux dans les logs. Analyse entropique et correlationnelle pour identifier les bytes qui forment un signal coherent (compteur, temperature, etc.). Propositions de configuration DBC avec un clic pour sauvegarder.\n\n- Dependances : graphe des dependances inter-ID. Detecte quels IDs reagissent apres un changement de payload sur un autre ID. Affiche les aretes SOURCE -> CIBLE avec score de correlation, lift probabiliste, et co-occurrences. Bouton 'Valider causalite' pour tester experimentalement par injection CAN."
+                    content: `Trois onglets d'analyse avancee pour comprendre le trafic CAN.
+
+--- ONGLET HEATMAP ---
+
+Visualisation de l'entropie byte par byte de chaque ID CAN.
+
+LECTURE DE LA HEATMAP :
+- Chaque ligne = un ID CAN. Chaque colonne = un byte (0 a 7).
+- Couleur = entropie (variabilite) :
+  - Bleu fonce : byte statique (toujours la meme valeur). Souvent un identifiant fixe ou un byte inutilise.
+  - Bleu clair/vert : faible variation. Probablement un compteur lent ou un etat binaire.
+  - Jaune/orange : variation moyenne. Signal analogique (temperature, tension, angle).
+  - Rouge : forte variation. Compteur rapide, signal haute frequence, ou bruit.
+- Cliquez sur une ligne pour voir le detail : min, max, valeurs uniques, distribution de chaque byte.
+
+BOUTONS :
+- Selecteur de log + mission.
+- Filtre par ID : saisissez un ID pour filtrer la vue.
+- Bouton "Lancer l'analyse" : genere la heatmap.
+
+--- ONGLET AUTO-DETECT ---
+
+Detection automatique de signaux dans un log CAN.
+
+FONCTIONNEMENT :
+L'algorithme analyse l'entropie et les correlations entre bytes consecutifs pour identifier des groupes de bytes formant un signal coherent (ex: bytes 2-3 d'un ID forment un entier 16 bits representant la vitesse).
+
+RESULTATS :
+- Liste des signaux detectes : ID CAN, bytes concernes, type probable (compteur, analogique, booleen), confiance (%).
+- Bouton "Ajouter au DBC" : sauvegarde le signal detecte directement dans votre base DBC en un clic. Renseigne automatiquement l'ID, le bit de depart, la longueur et le nom suggere.
+- Bouton "Ignorer" : masque un signal non pertinent.
+
+CONSEILS :
+- Lancez l'auto-detect sur un log avec du trafic varie (moteur tourne + actions).
+- Les signaux avec > 70% de confiance sont generalement fiables.
+- Verifiez toujours en croisant avec la heatmap et le CAN Sniffer en live.
+
+--- ONGLET DEPENDANCES ---
+
+Graphe des dependances inter-ID : quel ID reagit quand un autre change.
+
+FONCTIONNEMENT :
+L'algorithme observe les changements de payload sur chaque ID. Quand l'ID A change, il verifie si l'ID B change aussi dans une fenetre temporelle configurable (defaut : 50 ms). Le "lift" mesure si cette co-occurrence est significative par rapport au hasard.
+
+PARAMETRES :
+- Fenetre temporelle (ms) : duree d'observation apres un changement. Augmentez pour capter des reactions lentes, diminuez pour des reactions rapides.
+- Seuil de score : filtre les aretes faibles.
+
+RESULTATS :
+- Tableau des aretes : Source -> Cible, score de correlation, lift, co-occurrences.
+- Cliquez sur une arete pour voir le detail : taux de reaction, payload source, distribution temporelle.
+
+BOUTON "Valider causalite" (icone fiole sur chaque arete) :
+1. Cliquez sur l'icone fiole a droite d'une arete.
+2. Un avertissement s'affiche : cette operation va INJECTER une trame sur le bus CAN.
+3. Selectionnez l'interface CAN (can0, can1, vcan0).
+4. Confirmez : le systeme injecte la trame source 5 fois et observe si la cible reagit.
+5. Resultat : taux de succes (%), lag median, classification (ELEVEE / MODEREE / FAIBLE).
+Causalite ELEVEE (>= 70%) = la dependance est confirmee experimentalement.
+
+CONSEILS :
+- La validation causale doit UNIQUEMENT etre utilisee vehicule a l'arret, en environnement de test.
+- Un lift > 2 indique une dependance probablement reelle.
+- Commencez par les aretes avec le score le plus eleve.`
                   },
                   {
                     id: "dbc", icon: FileCode, title: "DBC",
-                    content: "Gestion des signaux DBC (Database CAN). Import de fichiers .dbc standards. Edition manuelle des signaux : nom, ID CAN, bit de depart, longueur, facteur, offset, unite, endianness (little/big). Les signaux DBC sont utilises par le CAN Sniffer pour decoder les trames en temps reel et par l'auto-detect pour proposer des configurations."
+                    content: `Gestion des signaux DBC (Database CAN).
+
+QU'EST-CE QU'UN SIGNAL DBC ?
+Un signal DBC decrit comment decoder un groupe de bits dans une trame CAN : "les bits 16 a 31 de l'ID 0x200 representent la vitesse vehicule en km/h, avec un facteur 0.01".
+
+IMPORT DE FICHIER .DBC :
+- Bouton "Importer .dbc" : charge un fichier DBC standard (format Vector). Tous les signaux sont importes et associes a la mission active.
+- Les doublons sont detectes et signales.
+
+EDITION MANUELLE :
+- Bouton "Ajouter un signal" : cree un signal vide a remplir.
+- Champs : Nom du signal, ID CAN (hex), Bit de depart (0-63), Longueur (bits), Facteur (multiplicateur), Offset (decalage), Unite (texte libre, ex: "km/h"), Endianness (Little Endian = Intel, Big Endian = Motorola).
+- Bouton "Sauvegarder" : enregistre les modifications.
+- Bouton "Supprimer" : retire le signal.
+
+UTILISATION DES SIGNAUX :
+- CAN Sniffer : activez l'overlay DBC (bouton fichier vert) pour decoder les trames en temps reel. Les IDs connus affichent le nom du message et les valeurs decodees.
+- Auto-detect : les signaux proposes par l'auto-detect sont pre-remplis pour ajout rapide.
+- Export : les signaux sont inclus dans l'export ZIP de la mission.
+
+CONSEILS :
+- Si vous avez le fichier DBC du constructeur, importez-le en premier.
+- Sinon, utilisez l'auto-detect pour generer les premiers signaux puis affinez manuellement.
+- Attention a l'endianness : la plupart des vehicules europeens utilisent Big Endian (Motorola), les vehicules americains/asiatiques utilisent souvent Little Endian (Intel).`
                   },
                   {
                     id: "obd-ii", icon: Activity, title: "OBD-II",
-                    content: "Diagnostics OBD-II standard. Lecture des PIDs standards (regime moteur, vitesse, temperature, pression, etc.). Lecture/effacement des codes defaut (DTC). Monitoring temps reel avec graphiques. Compatible avec les vehicules equipes d'un port OBD-II standard (ISO 15765-4)."
+                    content: `Diagnostics OBD-II standard via le port OBD du vehicule.
+
+PRE-REQUIS :
+- Interface CAN montee et connectee au port OBD-II du vehicule.
+- Contact mis (moteur tourne ou non selon les PIDs).
+
+ONGLET PIDs :
+- Liste des PIDs standards (Service 01) : regime moteur (RPM), vitesse vehicule, temperature liquide de refroidissement, charge moteur, pression collecteur, etc.
+- Bouton "Lire" a cote de chaque PID : envoie la requete OBD et affiche la reponse decodee avec l'unite.
+- Bouton "Lire tous" : interroge tous les PIDs supportes par le vehicule en une seule fois.
+- Icone graphique : ouvre un graphique temps reel pour le PID selectionne.
+
+ONGLET DTC (Codes defaut) :
+- Bouton "Lire les codes" : recupere les codes defaut actifs (DTC) stockes dans le calculateur.
+- Affichage : code (ex: P0300), description, type (generique/constructeur).
+- Bouton "Effacer les codes" : envoie la commande de reset des DTCs. Eteint le voyant moteur.
+
+ONGLET MONITORING :
+- Selection de 1 a 4 PIDs a surveiller simultanement.
+- Graphiques temps reel avec historique glissant.
+- Frequence de rafraichissement configurable.
+
+CONSEILS :
+- Tous les vehicules ne supportent pas tous les PIDs. La fonction "Lire tous" detecte automatiquement les PIDs supportes.
+- Effacer les codes defaut ne repare pas la panne, il efface simplement l'historique. Le code reviendra si la panne persiste.
+- Pour le monitoring, limitez-vous a 2-3 PIDs simultanes pour garantir une frequence de rafraichissement correcte.`
                   },
                   {
                     id: "signal-finder", icon: Search, title: "Signal Finder",
-                    content: "Recherche de signaux par action physique. Methode : (1) selectionner un log CAN, (2) definir une hypothese (ex: 'signal de vitesse'), (3) l'algorithme analyse les correlations entre les bytes CAN et identifie les candidats les plus probables. Filtrage par plage d'ID, longueur de signal, type (compteur, analogique, booleen)."
+                    content: `Recherche de signaux CAN par correlation avec une action physique.
+
+METHODE D'UTILISATION :
+1. Selectionnez un log CAN dans le selecteur (avec hierarchie parent/enfant).
+2. Definissez votre hypothese dans le champ texte : ex: "vitesse vehicule", "angle volant", "pedale frein".
+3. Lancez la recherche : l'algorithme analyse les correlations.
+
+PARAMETRES AVANCES :
+- Plage d'IDs : restreignez la recherche a une plage (ex: 0x100-0x300) si vous avez une idee de l'ID.
+- Longueur de signal : 8 bits, 16 bits, ou auto-detect.
+- Type de signal : compteur (valeur incrementale), analogique (valeur continue), booleen (0/1).
+
+RESULTATS :
+- Liste des candidats classes par score de correlation.
+- Pour chaque candidat : ID CAN, bytes concernes, type detecte, score (%), graphique de la valeur sur le temps.
+- Bouton "Ajouter au DBC" : enregistre le signal valide.
+- Bouton "Tester en live" : ouvre le CAN Sniffer filtre sur cet ID pour verification.
+
+CONSEILS :
+- Utilisez un log capture PENDANT l'action (ex: rouler a differentes vitesses pour chercher le signal vitesse).
+- Plus le log contient de variations de l'action, meilleure sera la detection.
+- Croisez le resultat avec la heatmap pour confirmer (les bytes du signal doivent etre orange/rouge dans la heatmap).`
                   },
                   {
                     id: "fuzzing", icon: Flame, title: "Fuzzing",
-                    content: "Tests de fuzzing CAN pour decouvrir des fonctions cachees. Modes : aleatoire (payloads random sur un ID), sequentiel (incrementation systematique), cible (mutation d'un payload connu). Parametres : ID cible, plage de bytes, intervalle entre trames, nombre d'iterations. Journalisation de chaque trame envoyee avec horodatage pour analyse post-mortem."
+                    content: `Tests de fuzzing CAN pour decouvrir des fonctions et comportements caches.
+
+AVERTISSEMENT : Le fuzzing envoie des trames arbitraires sur le bus CAN. Utilisez UNIQUEMENT vehicule a l'arret, en environnement de test. Ne JAMAIS fuzzer un vehicule en circulation.
+
+MODES DE FUZZING :
+
+1. Mode ALEATOIRE :
+   - Envoie des payloads generes aleatoirement sur un ID cible.
+   - Parametres : ID cible (hex), nombre d'iterations, intervalle entre trames (ms).
+   - Usage : exploration initiale d'un ID inconnu pour observer les reactions.
+
+2. Mode SEQUENTIEL :
+   - Incremente systematiquement les valeurs d'un ou plusieurs bytes.
+   - Parametres : ID cible, byte(s) a varier (index 0-7), valeur de depart, valeur de fin, pas d'incrementation.
+   - Usage : balayage methodique pour trouver les seuils de declenchement d'une fonction.
+
+3. Mode CIBLE :
+   - Mute un payload connu en modifiant un byte a la fois.
+   - Parametres : ID cible, payload de reference (hex), byte a muter, plage de mutation.
+   - Usage : affiner un signal deja partiellement identifie.
+
+BOUTONS :
+- "Lancer le fuzzing" : demarre l'envoi des trames selon le mode selectionne.
+- "Arreter" : interrompt immediatement le fuzzing.
+- "Journal" : affiche chaque trame envoyee avec horodatage, payload, et reaction observee.
+
+JOURNALISATION :
+- Chaque session de fuzzing cree automatiquement un log avec toutes les trames envoyees et les horodatages.
+- Ce log peut etre rejoue ou compare avec d'autres captures.
+
+CONSEILS :
+- TOUJOURS capturer un log de reference AVANT le fuzzing (via Capture & Replay). Il servira pour le Crash Recovery.
+- Commencez par le mode aleatoire avec un intervalle long (200 ms) pour observer les reactions.
+- Observez le vehicule ET le CAN Sniffer simultanement pendant le fuzzing.
+- Si vous observez une reaction (clignotant, bip, mouvement), notez immediatement le numero d'iteration dans le journal.
+- Apres le fuzzing, lancez un Crash Recovery si le vehicule est dans un etat anormal.`
                   },
                   {
                     id: "crash-recovery", icon: ShieldAlert, title: "Crash Recovery",
-                    content: "Analyse forensique post-fuzzing. Permet de restaurer l'etat du vehicule apres un test de fuzzing en rejouant le log de reference (pre-fuzzing). Compare l'etat actuel avec l'etat de reference pour identifier les ecarts persistants. Selecteur de logs avec hierarchie parent/enfant."
+                    content: `Analyse forensique et restauration post-fuzzing.
+
+QUAND UTILISER :
+Apres une session de fuzzing, si le vehicule est dans un etat anormal (voyant allume, fonction bloquee, comportement inattendu), utilisez Crash Recovery pour restaurer l'etat initial.
+
+ETAPES :
+1. Selectionnez le log de reference (capture effectuee AVANT le fuzzing) dans le selecteur. Les logs sont affiches avec hierarchie parent/enfant.
+2. Bouton "Analyser l'ecart" : le systeme capture l'etat actuel du bus CAN et le compare avec la reference pour identifier les divergences.
+3. Tableau des ecarts : affiche les IDs dont le payload actuel differe de la reference, avec les valeurs attendues vs observees.
+4. Bouton "Restaurer" : rejoue le log de reference sur le bus CAN pour tenter de ramener le vehicule a son etat initial.
+5. Bouton "Verifier" : relance une comparaison pour confirmer que la restauration a fonctionne.
+
+CONSEILS :
+- La restauration n'est pas toujours possible : certains ECU ne reviennent pas a leur etat precedent par simple rejeu de trames. Un redemarrage du vehicule peut etre necessaire.
+- Gardez TOUJOURS un log de reference avant chaque session de fuzzing.
+- Si la restauration echoue, coupez le contact, attendez 30 secondes, et redemarrez le vehicule.`
                   },
                   {
-                    id: "generateur", icon: Cpu, title: "Generateur",
-                    content: "Generation de trames CAN personnalisees. Definissez l'ID, le payload (hex), l'interface, et l'intervalle d'envoi. Mode burst : envoi rapide de N trames. Mode continu : envoi periodique jusqu'a arret manuel. Utile pour simuler un ECU, tester une hypothese, ou reproduire un comportement specifique."
+                    id: "generateur", icon: Cpu, title: "Generateur de trames",
+                    content: `Generation et envoi de trames CAN personnalisees.
+
+PARAMETRES :
+- ID CAN (hex) : l'identifiant de la trame a envoyer (ex: "1A0", "7DF").
+- Payload (hex) : les donnees a envoyer, 1 a 8 bytes (ex: "00FF0102AABB0011").
+- Interface : selectionnez can0, can1 ou vcan0.
+- Intervalle (ms) : delai entre chaque envoi en mode continu.
+
+MODES D'ENVOI :
+
+1. Mode UNIQUE :
+   - Bouton "Envoyer" : envoie une seule trame avec l'ID et le payload configures.
+   - Usage : tester une hypothese precise, reproduire un comportement.
+
+2. Mode BURST :
+   - Champ "Nombre de trames" : definissez combien de trames envoyer.
+   - Bouton "Burst" : envoie N trames rapidement avec l'intervalle configure.
+   - Usage : simuler un signal repetitif, saturer un ID pour observer les reactions.
+
+3. Mode CONTINU :
+   - Bouton "Start continu" : envoie la trame en boucle a l'intervalle configure.
+   - Bouton "Stop" : arrete l'envoi.
+   - Usage : simuler un ECU, maintenir un signal actif pendant un test.
+
+CONSEILS :
+- Utilisez vcan0 pour tester vos trames sans vehicule.
+- Combinez avec le CAN Sniffer pour observer les reactions en temps reel.
+- Pour simuler un compteur qui incremente, utilisez le mode continu et modifiez manuellement le payload a chaque envoi.
+- L'intervalle typique pour un signal CAN est de 10-100 ms. En dessous de 5 ms, vous risquez de saturer le bus.`
+                  },
+                  {
+                    id: "cansniffer", icon: Terminal, title: "CAN Sniffer (fenetre flottante)",
+                    content: `Terminal CAN temps reel, accessible depuis toutes les pages via le bouton en bas a droite de l'ecran.
+
+OUVRIR / FERMER :
+- Cliquez sur l'icone Terminal en bas a droite pour ouvrir la fenetre.
+- La fenetre est deplacable (glissez la barre de titre) et redimensionnable (coin inferieur droit).
+- Bouton "Minimize" (chevron bas) : reduit en icone.
+- Bouton "Expand" (carres) : agrandit en plein ecran.
+
+BARRE DE COMMANDES (icones de gauche a droite) :
+
+- Eclair (Highlight Changes) : colore en surbrillance les bytes qui changent entre deux trames successives du meme ID. Trois modes :
+  - Payload : detecte tout changement de byte brut.
+  - Signal : detecte les changements en tenant compte des signaux DBC definis.
+  - Both : combine les deux modes.
+
+- "N" (Noisy filter) : masque les IDs "bruyants" qui changent a chaque trame (compteurs, checksums). Permet de se concentrer sur les signaux utiles.
+
+- Graphique montant (Changed Only) : n'affiche que les IDs dont le payload a change depuis la derniere mise a jour. Les IDs statiques disparaissent. Tres utile pour isoler visuellement une action.
+
+- Fichier code (DBC overlay) : active le decodage DBC en temps reel. Les IDs reconnus affichent un badge vert "DBC" avec le nom du message. Les IDs inconnus affichent "???".
+
+- Selecteur d'interface : choisissez can0, can1 ou vcan0 AVANT de lancer l'ecoute.
+
+COLONNES DU TABLEAU :
+- ID : identifiant CAN en hexadecimal.
+- Message : nom DBC si l'overlay est actif.
+- L (DLC) : longueur des donnees (1-8 bytes).
+- Data : bytes du payload, colores si le highlight est actif (orange = byte qui vient de changer).
+- Cycle : temps entre deux trames du meme ID (en ms). Utile pour connaitre la frequence d'emission.
+- Count : nombre total de trames recues pour cet ID.
+
+BARRE DE PIED :
+- Bouton vert "Start" / "Go" : demarrer l'ecoute candump.
+- Bouton jaune "Pause" / "Resume" : geler/reprendre l'affichage sans arreter la capture.
+- Bouton rouge "Stop" : arreter completement l'ecoute.
+- Bouton "Clear" : vider toutes les trames affichees.
+- Compteurs : nombre d'IDs actifs, nombre total de messages.
+
+CONSEILS :
+- Ouvrez le Sniffer AVANT de lancer une action sur le vehicule pour observer les trames en temps reel.
+- Utilisez "Changed Only" + "Noisy filter" pour isoler visuellement : activez les deux, puis effectuez une action. Seuls les IDs impactes apparaitront.
+- Le Sniffer reste ouvert quand vous changez de page. Pratique pour surveiller le bus tout en utilisant d'autres modules.
+- Si le sniffer affiche 0 IDs, verifiez que l'interface est montee (page Controle CAN).`
                   },
                   {
                     id: "configuration", icon: Settings, title: "Configuration Pi",
-                    content: "Administration du Raspberry Pi. Wi-Fi : scan, connexion, mode hotspot. Ethernet : etat et IP. Tailscale VPN : connexion, peers, exit nodes. Systeme : apt update/upgrade, redemarrage, arret. Git : branches, mise a jour Aurige. Sauvegardes : creation, restauration, suppression."
+                    content: `Administration du Raspberry Pi.
+
+SECTION WI-FI :
+- Bouton "Scanner" : detecte les reseaux Wi-Fi disponibles.
+- Liste des reseaux : SSID, signal (dBm), securite. Cliquez sur un reseau pour vous connecter (saisissez le mot de passe).
+- Bouton "Mode Hotspot" : transforme le Pi en point d'acces Wi-Fi. Utile sur le terrain sans reseau disponible. Connectez-vous au reseau "AURIGE" depuis votre telephone.
+
+SECTION ETHERNET :
+- Etat de la connexion filaire, adresse IP.
+
+SECTION TAILSCALE VPN :
+- Bouton "Connecter" : active le VPN Tailscale pour acces distant.
+- Liste des peers : machines connectees au meme reseau Tailscale.
+- Exit nodes : routage du trafic via un autre noeud.
+
+SECTION SYSTEME :
+- Bouton "Mise a jour" : execute apt update + apt upgrade.
+- Bouton "Redemarrer" : reboot du Pi (attention, deconnecte toutes les sessions).
+- Bouton "Eteindre" : arret propre du Pi.
+- Informations : version OS, uptime, temperature CPU, espace disque.
+
+SECTION GIT :
+- Branche courante d'AURIGE.
+- Bouton "Mettre a jour" : git pull pour recuperer la derniere version.
+
+SECTION SAUVEGARDES :
+- Bouton "Creer une sauvegarde" : archive toutes les missions, logs et configurations.
+- Liste des sauvegardes existantes avec date et taille.
+- Bouton "Restaurer" : ecrase la configuration actuelle par la sauvegarde selectionnee.
+- Bouton "Supprimer" : supprime une sauvegarde.
+
+CONSEILS :
+- Faites une sauvegarde avant chaque mise a jour systeme ou AURIGE.
+- Le mode Hotspot est la methode recommandee pour utiliser AURIGE sur le terrain (parking, garage).
+- Tailscale permet d'acceder au Pi a distance depuis n'importe ou dans le monde.`
                   },
                 ].map((section) => (
                   <div key={section.id} className="rounded-lg border border-border/50 overflow-hidden">
@@ -1726,42 +2158,6 @@ CONTACT : contact@aurige.io`}
               </div>
             </CardContent>
           )}
-        </Card>
-
-        {/* CAN Sniffer guide */}
-        <Card className="border-border bg-card lg:col-span-2">
-          <CardHeader>
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                <Terminal className="h-5 w-5 text-primary" />
-              </div>
-              <div>
-                <CardTitle className="text-lg">CAN Sniffer (fenetre flottante)</CardTitle>
-                <CardDescription>Disponible sur toutes les pages via le bouton en bas a droite</CardDescription>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="rounded-md bg-muted/20 p-4 border border-border/30">
-              <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-line">
-{`Terminal CAN temps reel, accessible depuis n'importe quelle page.
-
-Fonctions :
-- Start/Stop : demarrer ou arreter l'ecoute candump sur l'interface selectionnee
-- Pause/Resume : geler l'affichage sans arreter la capture
-- Highlight Changes : colorer les bytes qui changent entre deux trames (mode Payload, Signal ou Both)
-- Changed Only : n'afficher que les IDs dont le payload a change
-- Noisy filter (N) : masquer les IDs trop bruyants (changent a chaque trame)
-- DBC overlay : decoder les trames en temps reel avec les signaux DBC definis
-- Interface : selectionner can0, can1 ou vcan0
-- Expand/Minimize : agrandir en plein ecran ou minimiser en icone
-- Clear : vider l'affichage
-
-Colonnes : ID CAN | Message DBC | DLC | Data (bytes colores) | Cycle (ms) | Count
-La fenetre est deplacable (drag) et redimensionnable.`}
-              </p>
-            </div>
-          </CardContent>
         </Card>
       </div>
 
