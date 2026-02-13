@@ -97,14 +97,14 @@ function SnifferRow({
         )}
         {/* CAN ID */}
         <span className={cn(
-          "w-12 flex-shrink-0 font-bold text-right",
+          "w-10 sm:w-12 flex-shrink-0 font-bold text-right text-[10px] sm:text-xs",
           dbcEnabled && isKnown ? "text-success" : dbcEnabled ? "text-warning" : "text-cyan-400"
         )}>
           {frame.canId}
         </span>
         {/* DBC badge + message name */}
         {dbcEnabled && isKnown && (
-          <span className="flex items-center gap-1.5 w-28 flex-shrink-0 truncate">
+          <span className="hidden sm:flex items-center gap-1.5 w-28 flex-shrink-0 truncate">
             <span className="inline-flex items-center rounded bg-success/20 px-1 py-px text-[9px] font-bold text-success leading-tight">
               DBC
             </span>
@@ -114,18 +114,18 @@ function SnifferRow({
           </span>
         )}
         {dbcEnabled && !isKnown && (
-          <span className="w-28 flex-shrink-0">
+          <span className="hidden sm:block w-28 flex-shrink-0">
             <span className="inline-flex items-center rounded bg-warning/20 px-1 py-px text-[9px] font-bold text-warning leading-tight">
               ???
             </span>
           </span>
         )}
         {/* DLC */}
-        <span className="w-4 flex-shrink-0 text-muted-foreground text-center">
+        <span className="hidden sm:block w-4 flex-shrink-0 text-muted-foreground text-center">
           {frame.dlc}
         </span>
         {/* Data bytes with change coloring */}
-        <span className="flex gap-1 flex-1">
+        <span className="flex gap-0.5 sm:gap-1 flex-1 min-w-0 overflow-hidden">
           {frame.bytes.map((byte, i) => (
             <ColoredByte
               key={i}
@@ -135,11 +135,11 @@ function SnifferRow({
           ))}
         </span>
         {/* Cycle time */}
-        <span className="w-16 flex-shrink-0 text-right text-muted-foreground/70">
+        <span className="hidden sm:block w-16 flex-shrink-0 text-right text-muted-foreground/70">
           {frame.cycleMs > 0 ? `${frame.cycleMs}ms` : ""}
         </span>
         {/* Count */}
-        <span className="w-12 flex-shrink-0 text-right text-muted-foreground/50">
+        <span className="w-8 sm:w-12 flex-shrink-0 text-right text-muted-foreground/50 text-[10px] sm:text-xs">
           {frame.count}
         </span>
         {/* Delta badge for changed frames */}
@@ -231,7 +231,12 @@ export function FloatingTerminal() {
 
   // Drag state
   const [position, setPosition] = useState<{ x: number; y: number } | null>(null)
-  const [size, setSize] = useState<{ w: number; h: number }>({ w: 600, h: 384 })
+  const [size, setSize] = useState<{ w: number; h: number }>(() => {
+    if (typeof window !== "undefined" && window.innerWidth < 640) {
+      return { w: window.innerWidth - 16, h: 320 }
+    }
+    return { w: 600, h: 384 }
+  })
   const dragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null)
   const resizeRef = useRef<{ startX: number; startY: number; origW: number; origH: number } | null>(null)
 
@@ -267,8 +272,8 @@ export function FloatingTerminal() {
       const dw = ev.clientX - resizeRef.current.startX
       const dh = ev.clientY - resizeRef.current.startY
       setSize({
-        w: Math.max(400, resizeRef.current.origW + dw),
-        h: Math.max(250, resizeRef.current.origH + dh),
+        w: Math.max(280, resizeRef.current.origW + dw),
+        h: Math.max(200, resizeRef.current.origH + dh),
       })
     }
     const handleUp = () => {
@@ -346,39 +351,60 @@ export function FloatingTerminal() {
       )}
       style={
         isExpanded
-          ? { bottom: 16, right: 16, left: 288, top: 80 }
+          ? { bottom: 8, right: 8, left: typeof window !== "undefined" && window.innerWidth < 1024 ? 8 : 288, top: 60 }
           : position
-            ? { left: position.x, top: position.y, width: size.w, height: size.h }
-            : { bottom: 16, right: 16, width: size.w, height: size.h }
+            ? { left: position.x, top: position.y, width: Math.min(size.w, typeof window !== "undefined" ? window.innerWidth - 16 : size.w), height: size.h }
+            : { bottom: 8, right: 8, width: Math.min(size.w, typeof window !== "undefined" ? window.innerWidth - 16 : size.w), height: size.h }
       }
     >
       {/* Header - draggable */}
       <div
-        className="flex items-center justify-between border-b border-border bg-card/50 px-4 py-2 cursor-grab active:cursor-grabbing select-none"
+        className="flex flex-col border-b border-border bg-card/50 cursor-grab active:cursor-grabbing select-none"
         onMouseDown={handleDragStart}
       >
-        <div className="flex items-center gap-3">
-          <GripHorizontal className="h-4 w-4 text-muted-foreground/50" />
-          <Terminal className="h-4 w-4 text-terminal-foreground" />
-          <span className="text-sm font-medium text-foreground">
-            CAN Sniffer
-          </span>
-          <span className="rounded bg-primary/20 px-2 py-0.5 text-xs font-medium text-primary">
-            {selectedInterface}
-          </span>
-          {isRunning && (
-            <span className="text-xs text-success font-medium">LIVE</span>
-          )}
-          {isPaused && (
-            <span className="text-xs text-warning font-medium">PAUSE</span>
-          )}
+        {/* Top row: title + window controls */}
+        <div className="flex items-center justify-between px-3 py-1.5">
+          <div className="flex items-center gap-2 min-w-0">
+            <GripHorizontal className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />
+            <Terminal className="h-3.5 w-3.5 text-terminal-foreground shrink-0" />
+            <span className="text-xs font-medium text-foreground truncate">CAN Sniffer</span>
+            <span className="rounded bg-primary/20 px-1.5 py-0.5 text-[10px] font-medium text-primary shrink-0">
+              {selectedInterface}
+            </span>
+            {isRunning && (
+              <span className="text-[10px] text-success font-medium shrink-0">LIVE</span>
+            )}
+            {isPaused && (
+              <span className="text-[10px] text-warning font-medium shrink-0">PAUSE</span>
+            )}
+          </div>
+          <div className="flex items-center gap-0.5 shrink-0">
+            <select
+              value={selectedInterface}
+              onChange={(e) => setInterface(e.target.value as "can0" | "can1" | "vcan0")}
+              onMouseDown={(e) => e.stopPropagation()}
+              disabled={isRunning}
+              className="hidden sm:block h-6 rounded border border-border bg-secondary px-1.5 text-[10px] text-foreground disabled:opacity-50"
+            >
+              <option value="can0">can0</option>
+              <option value="can1">can1</option>
+              <option value="vcan0">vcan0</option>
+            </select>
+            <Button size="icon" variant="ghost" className="h-6 w-6 text-muted-foreground hover:text-foreground" onClick={toggleExpand} onMouseDown={(e) => e.stopPropagation()}>
+              {isExpanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+            </Button>
+            <Button size="icon" variant="ghost" className="h-6 w-6 text-muted-foreground hover:text-foreground" onClick={toggleMinimize} onMouseDown={(e) => e.stopPropagation()}>
+              <ChevronDown className="h-3.5 w-3.5" />
+            </Button>
+          </div>
         </div>
-        <div className="flex items-center gap-1">
+        {/* Bottom row: tool buttons -- scrollable on mobile */}
+        <div className="flex items-center gap-1 px-3 pb-1.5 overflow-x-auto scrollbar-none">
           <Button
             size="icon"
             variant="ghost"
             className={cn(
-              "h-7 w-7",
+              "h-6 w-6 shrink-0",
               highlightChangesEnabled 
                 ? "text-warning hover:text-warning/80" 
                 : "text-muted-foreground hover:text-foreground"
@@ -387,7 +413,7 @@ export function FloatingTerminal() {
             onMouseDown={(e) => e.stopPropagation()}
             title={highlightChangesEnabled ? "Desactiver highlight changes" : "Activer highlight changes"}
           >
-            <Zap className="h-4 w-4" />
+            <Zap className="h-3.5 w-3.5" />
           </Button>
           {highlightChangesEnabled && (
             <>
@@ -395,7 +421,7 @@ export function FloatingTerminal() {
                 value={highlightMode}
                 onChange={(e) => setHighlightMode(e.target.value as "payload" | "signal" | "both")}
                 onMouseDown={(e) => e.stopPropagation()}
-                className="h-7 rounded border border-border bg-secondary px-2 text-[10px] text-foreground"
+                className="h-6 rounded border border-border bg-secondary px-1.5 text-[10px] text-foreground shrink-0"
                 title="Mode de detection"
               >
                 <option value="payload">Payload</option>
@@ -406,7 +432,7 @@ export function FloatingTerminal() {
                 size="icon"
                 variant="ghost"
                 className={cn(
-                  "h-7 w-7",
+                  "h-6 w-6 shrink-0",
                   ignoreNoisy 
                     ? "text-muted-foreground hover:text-foreground" 
                     : "text-warning hover:text-warning/80"
@@ -415,7 +441,7 @@ export function FloatingTerminal() {
                 onMouseDown={(e) => e.stopPropagation()}
                 title={ignoreNoisy ? "Afficher les IDs bruyants" : "Masquer les IDs bruyants"}
               >
-                <span className="text-xs font-bold">N</span>
+                <span className="text-[10px] font-bold">N</span>
               </Button>
             </>
           )}
@@ -423,7 +449,7 @@ export function FloatingTerminal() {
             size="icon"
             variant="ghost"
             className={cn(
-              "h-7 w-7",
+              "h-6 w-6 shrink-0",
               changedOnlyMode 
                 ? "text-warning hover:text-warning/80" 
                 : "text-muted-foreground hover:text-foreground"
@@ -432,13 +458,13 @@ export function FloatingTerminal() {
             onMouseDown={(e) => e.stopPropagation()}
             title={changedOnlyMode ? "Montrer tous les IDs" : "Filtrer IDs changes uniquement"}
           >
-            <TrendingUp className="h-4 w-4" />
+            <TrendingUp className="h-3.5 w-3.5" />
           </Button>
           <Button
             size="icon"
             variant="ghost"
             className={cn(
-              "h-7 w-7",
+              "h-6 w-6 shrink-0",
               dbcEnabled 
                 ? "text-success hover:text-success/80" 
                 : "text-muted-foreground hover:text-foreground"
@@ -447,35 +473,20 @@ export function FloatingTerminal() {
             onMouseDown={(e) => e.stopPropagation()}
             title={dbcEnabled ? "Desactiver overlay DBC" : "Activer overlay DBC"}
           >
-            <FileCode className="h-4 w-4" />
+            <FileCode className="h-3.5 w-3.5" />
           </Button>
+          {/* Mobile: show interface selector inline */}
           <select
             value={selectedInterface}
             onChange={(e) => setInterface(e.target.value as "can0" | "can1" | "vcan0")}
             onMouseDown={(e) => e.stopPropagation()}
             disabled={isRunning}
-            className="mr-2 rounded border border-border bg-secondary px-2 py-1 text-xs text-foreground disabled:opacity-50"
+            className="sm:hidden h-6 rounded border border-border bg-secondary px-1.5 text-[10px] text-foreground disabled:opacity-50 shrink-0"
           >
             <option value="can0">can0</option>
             <option value="can1">can1</option>
-            <option value="vcan0">vcan0 (test)</option>
+            <option value="vcan0">vcan0</option>
           </select>
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-7 w-7 text-muted-foreground hover:text-foreground"
-            onClick={toggleExpand}
-          >
-            {isExpanded ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-          </Button>
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-7 w-7 text-muted-foreground hover:text-foreground"
-            onClick={toggleMinimize}
-          >
-            <ChevronDown className="h-4 w-4" />
-          </Button>
         </div>
       </div>
 
@@ -542,14 +553,14 @@ export function FloatingTerminal() {
 
       {/* Column headers */}
       {sortedIds.length > 0 && (
-        <div className="flex items-center gap-3 border-b border-border/50 bg-card/30 px-2 py-1 font-mono text-[10px] text-muted-foreground/60 uppercase">
+        <div className="flex items-center gap-2 sm:gap-3 border-b border-border/50 bg-card/30 px-2 py-1 font-mono text-[9px] sm:text-[10px] text-muted-foreground/60 uppercase">
           {dbcEnabled && <span className="w-3 flex-shrink-0" />}
-          <span className="w-12 flex-shrink-0 text-right">ID</span>
-          {dbcEnabled && <span className="w-28 flex-shrink-0">Message</span>}
-          <span className="w-4 flex-shrink-0 text-center">L</span>
+          <span className="w-10 sm:w-12 flex-shrink-0 text-right">ID</span>
+          {dbcEnabled && <span className="hidden sm:block w-28 flex-shrink-0">Message</span>}
+          <span className="hidden sm:block w-4 flex-shrink-0 text-center">L</span>
           <span className="flex-1">Data</span>
-          <span className="w-16 flex-shrink-0 text-right">Cycle</span>
-          <span className="w-12 flex-shrink-0 text-right">Count</span>
+          <span className="hidden sm:block w-16 flex-shrink-0 text-right">Cycle</span>
+          <span className="w-8 sm:w-12 flex-shrink-0 text-right">Cnt</span>
         </div>
       )}
 
@@ -586,16 +597,17 @@ export function FloatingTerminal() {
       </div>
 
       {/* Footer controls */}
-      <div className="flex items-center gap-2 border-t border-border bg-card/50 px-4 py-2">
+      <div className="flex items-center gap-1.5 sm:gap-2 border-t border-border bg-card/50 px-2 sm:px-4 py-1.5">
         {!isRunning ? (
           <Button
             size="sm"
             onClick={start}
             disabled={isConnecting}
-            className="gap-2 bg-success text-success-foreground hover:bg-success/90"
+            className="gap-1.5 bg-success text-success-foreground hover:bg-success/90 h-7 text-xs px-2 sm:px-3"
           >
             <Play className="h-3 w-3" />
-            {isConnecting ? "Connexion..." : "Start"}
+            <span className="hidden sm:inline">{isConnecting ? "Connexion..." : "Start"}</span>
+            <span className="sm:hidden">{isConnecting ? "..." : "Go"}</span>
           </Button>
         ) : (
           <>
@@ -603,22 +615,22 @@ export function FloatingTerminal() {
               size="sm"
               onClick={togglePause}
               className={cn(
-                "gap-2",
+                "gap-1.5 h-7 text-xs px-2 sm:px-3",
                 isPaused
                   ? "bg-success text-success-foreground hover:bg-success/90"
                   : "bg-warning text-warning-foreground hover:bg-warning/90"
               )}
             >
               {isPaused ? <Play className="h-3 w-3" /> : <Pause className="h-3 w-3" />}
-              {isPaused ? "Resume" : "Pause"}
+              <span className="hidden sm:inline">{isPaused ? "Resume" : "Pause"}</span>
             </Button>
             <Button
               size="sm"
               onClick={stop}
-              className="gap-2 bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              className="gap-1.5 bg-destructive text-destructive-foreground hover:bg-destructive/90 h-7 text-xs px-2 sm:px-3"
             >
               <Square className="h-3 w-3" />
-              Stop
+              <span className="hidden sm:inline">Stop</span>
             </Button>
           </>
         )}
@@ -626,27 +638,27 @@ export function FloatingTerminal() {
           size="sm"
           variant="outline"
           onClick={clearFrames}
-          className="gap-2 bg-transparent"
+          className="gap-1.5 bg-transparent h-7 text-xs px-2 sm:px-3"
         >
           <Trash2 className="h-3 w-3" />
-          Clear
+          <span className="hidden sm:inline">Clear</span>
         </Button>
-        <div className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
+        <div className="ml-auto flex items-center gap-1.5 sm:gap-3 text-[10px] sm:text-xs text-muted-foreground">
           {highlightChangesEnabled && changedOnlyMode && (
             <span className="text-warning font-medium">
-              Δ {filteredIds.length}
+              {filteredIds.length}
             </span>
           )}
           {dbcEnabled && dbcStats && (
             <span className={cn(
-              "font-medium",
+              "font-medium hidden sm:inline",
               dbcStats.percent >= 50 ? "text-success" : "text-warning"
             )}>
               {dbcStats.percent}% DBC
             </span>
           )}
           <span>{filteredIds.length !== sortedIds.length ? `${filteredIds.length}/` : ""}{sortedIds.length} IDs</span>
-          <span>{totalMessages} msg</span>
+          <span className="hidden sm:inline">{totalMessages} msg</span>
           {isRunning && !isPaused && (
             <span className="flex items-center gap-1">
               <span className="h-2 w-2 animate-pulse rounded-full bg-success" />

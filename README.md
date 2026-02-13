@@ -1,227 +1,266 @@
-# AURIGE - CAN Bus Analysis Tool
+# AURIGE - Mastery of CAN
 
-Professional CAN bus analysis tool for automotive forensics and diagnostics, designed for Raspberry Pi 5.
+**Plateforme d'analyse et de reverse-engineering CAN bus pour l'automobile**
 
-## Quick Start
+> Copyright (c) 2024-2026 Yo-ETE / AURIGE. Tous droits reserves.
+> Ce logiciel fait l'objet d'un depot de brevet. Toute reproduction, distribution,
+> modification ou utilisation non autorisee est strictement interdite sans accord
+> ecrit prealable du titulaire des droits. Voir le fichier [LICENSE](./LICENSE) pour
+> les conditions detaillees.
 
-After installation, AURIGE is immediately accessible at:
-- **http://aurige.local** (mDNS - works automatically on most networks)
+---
 
-No configuration required - just open the URL and start analyzing CAN traffic.
+## Presentation
 
-## Hardware Requirements
+AURIGE est une suite logicielle embarquee sur Raspberry Pi 5 pour l'analyse complete
+du bus CAN automobile. Elle couvre tout le cycle d'analyse : capture de trames,
+decodage DBC, reverse-engineering de signaux, test de fuzzing, diagnostic OBD-II,
+et validation de dependances inter-ECU. L'interface web est accessible depuis tout
+navigateur (desktop et mobile).
 
-- **Raspberry Pi 5** (ARM64)
-- CAN interface (MCP2515, Waveshare CAN HAT, or similar)
-- SD Card (16GB minimum, 32GB recommended)
-- Power supply (5V 5A USB-C recommended)
+---
 
-## Software Prerequisites
+## Architecture technique
 
-- Raspberry Pi OS (64-bit, Debian Bookworm based)
-- Internet connection for installation
+| Composant | Technologie |
+|-----------|-------------|
+| Frontend | Next.js 16, React 19, Tailwind CSS v4, shadcn/ui |
+| Backend | Python FastAPI, asyncio, socketCAN |
+| Communication temps reel | WebSocket (candump, cansniffer) |
+| Hardware | Raspberry Pi 5 + interface CAN (MCP2515 / Waveshare HAT) |
+| Donnees | Fichiers JSON (missions) + logs CAN candump |
 
-## Quick Installation
+---
 
-### One-Line Install
+## Pages et fonctionnalites
+
+### ACCUEIL
+
+#### Dashboard (`/`)
+Vue d'ensemble du systeme : etat du Raspberry Pi (CPU, RAM, temperature, stockage),
+statut des interfaces CAN (can0, can1), mission active, nombre de logs et de trames
+captures. Point d'entree principal de l'application.
+
+---
+
+### ANALYSE
+
+#### Clio / Mission (`/missions/[id]`)
+Page de detail d'une mission specifique. Affiche les metadonnees (vehicule, description,
+date de creation), la configuration CAN (interface, bitrate), la liste des logs captures
+avec hierarchie parent/enfant, et les statistiques associees (nombre de trames, duree,
+IDs uniques). Permet de telecharger, supprimer ou renommer les logs.
+
+---
+
+### CONFIGURATION
+
+#### Controle CAN (`/controle-can`)
+Interface de gestion bas niveau des interfaces CAN :
+- **Initialisation** : choix de l'interface (can0, can1, vcan0) et du bitrate (125k, 250k, 500k, 1M)
+- **Envoi de trames** : injection manuelle de trames CAN avec choix de l'ID, du DLC et des donnees
+- **Statut** : affichage en temps reel de l'etat de chaque interface (up/down, bitrate actif, compteurs d'erreurs)
+
+---
+
+### CAPTURE & ANALYSE
+
+#### Capture & Replay (`/capture-replay`)
+Outil de capture et de rejeu de trames CAN :
+- **Capture** : demarre un enregistrement candump sur l'interface selectionnee avec nom de fichier personnalisable et description optionnelle. Affichage en temps reel du compteur de trames et de la duree.
+- **Replay** : rejeu d'un log capture a vitesse originale ou acceleree. Utile pour reproduire un scenario sans le vehicule.
+- **Gestion** : liste des captures avec taille, nombre de trames, possibilite de telecharger ou supprimer.
+
+#### Replay Rapide (`/replay-rapide`)
+Version simplifiee du replay avec injection immediate d'un log sur le bus CAN.
+Selection rapide du log et de l'interface cible, avec suivi en temps reel
+(trames envoyees, progression, vitesse).
+
+#### Isolation (`/isolation`)
+Outil de filtrage avance pour isoler des trames specifiques :
+- **Filtrage par ID** : selection d'un ou plusieurs CAN IDs a observer
+- **Filtrage temporel** : isolation d'une fenetre de temps dans un log
+- **Comparaison avant/apres** : detection des changements entre deux etats (ex: avant et apres une action physique sur le vehicule)
+- **Export** : sauvegarde du sous-ensemble filtre comme nouveau log enfant
+
+#### Comparaison (`/comparaison`)
+Comparaison cote-a-cote de deux logs CAN :
+- **Diff par ID** : identifie les IDs presents dans un seul log, les IDs communs, et les differences de payload
+- **Diff par byte** : pour chaque ID commun, montre quels bytes different entre les deux logs
+- **Hierarchie parent/enfant** : selection facilitee des logs avec groupement par famille
+- **Export** : generation d'un rapport de comparaison
+
+#### Analyse CAN (`/analyse-can`)
+Page centrale d'analyse avancee avec trois onglets :
+
+**Onglet Heatmap** : visualisation matricielle de l'activite de chaque byte pour chaque CAN ID.
+Coloration par entropie (rouge = haute variabilite, bleu = stable). Permet d'identifier
+rapidement les bytes porteurs de signaux vs. les constantes.
+
+**Onglet Auto-detect** : detection automatique de signaux dans les trames CAN par analyse
+statistique (entropie, correlation temporelle, detection de compteurs et checksums).
+Pour chaque signal detecte : position (byte, bit), taille, ordre (big/little endian),
+plage de valeurs, confiance. Possibilite de sauvegarder les signaux detectes dans le DBC.
+
+**Onglet Dependances** : analyse des dependances inter-ID. Detecte quels IDs reagissent
+(changement de payload) dans une fenetre temporelle courte apres un evenement sur un ID
+source. Affiche un mini-graphe des noeuds (colores par role : source/cible/les deux) et
+un tableau d'aretes triees par score avec P(reaction), lift vs. hasard, et co-occurrences.
+Inclut la **validation causale par injection** : bouton "Valider causalite" qui injecte
+experimentalement la trame source sur le bus CAN et observe si la cible reagit, avec
+rapport detaille (taux de succes, lag median, classification haute/moderee/faible).
+
+---
+
+### DIAGNOSTIC
+
+#### OBD-II (`/obd-ii`)
+Interface de diagnostic OBD-II complete :
+- **Lecture VIN** : recuperation du numero d'identification vehicule
+- **Codes defaut (DTC)** : lecture et effacement des codes defaut moteur
+- **PIDs en temps reel** : lecture de parametres moteur (regime, temperature, vitesse, etc.)
+- **Reset ECU** : reinitialisation de calculateurs
+- **Scan automatique** : detection des ECU presentes sur le vehicule
+
+#### Signal Finder (`/signal-finder`)
+Outil de recherche de signaux par correlation avec une action physique :
+- L'utilisateur effectue une action sur le vehicule (tourner le volant, appuyer sur les freins, etc.)
+- L'outil analyse les variations de payload pendant et apres l'action
+- Classement des candidats par score de correlation
+- Affichage des bytes impliques avec graphe temporel
+
+---
+
+### TESTS AVANCES
+
+#### Fuzzing (`/fuzzing`)
+Outil de test par injection de trames aleatoires ou semi-aleatoires :
+- **Mode random** : injection de payloads aleatoires sur un ID cible
+- **Mode incremental** : variation systematique d'un byte a la fois
+- **Mode dictionnaire** : test de payloads connus/courants
+- **Securite** : filtrage des IDs critiques (airbag, freinage, direction)
+- **Logging** : enregistrement de toutes les trames injectees et des reactions observees
+
+#### Crash Recovery (`/crash-recovery`)
+Outil de recuperation apres un crash ou un gel du bus CAN :
+- Detection automatique des erreurs bus (error frames, bus-off)
+- Reinitialisation de l'interface CAN
+- Comparaison du log pre-crash avec l'etat post-recovery
+- Identification des ECU qui ne repondent plus
+
+#### Generateur (`/generateur`)
+Generateur de trafic CAN configurable :
+- Generation de trames periodiques avec ID, DLC et payload configurables
+- Simulation de signaux (compteur, rampe, sinus, aleatoire)
+- Multi-trames : envoi simultane de plusieurs messages a frequences differentes
+- Utile pour tester des ECU en isolation ou simuler un environnement vehicule
+
+---
+
+### DBC
+
+#### DBC (`/dbc`)
+Gestionnaire de fichiers DBC (CAN Database) :
+- **Import/Export** : chargement de fichiers .dbc standard, export des signaux detectes
+- **Edition** : ajout, modification et suppression de messages et signaux
+- **Visualisation** : tableau des messages avec leurs signaux, facteurs, offsets, unites
+- **Application** : overlay DBC en temps reel sur le CAN Sniffer pour decoder les trames live
+
+---
+
+### CAN Sniffer (fenetre flottante)
+
+Fenetre flottante accessible depuis toutes les pages :
+- **Vue cansniffer** : affichage en temps reel de toutes les trames CAN regroupees par ID, avec coloration des bytes qui changent (rouge = vient de changer, vert = stable)
+- **Overlay DBC** : superposition du decodage DBC sur les trames live (badge DBC/???, nom du message, decodage des signaux au clic)
+- **Highlight changes** : mode detection de changements avec trois modes (payload, signal, both) et filtrage des IDs bruyants
+- **Filtrage** : par ID (multi-ID separes par virgule), par statut DBC (connu/inconnu), IDs changes uniquement
+- **Interface** : selection de l'interface CAN (can0, can1, vcan0)
+- **Responsive** : adapte pour desktop (redimensionnable, deplacable) et mobile (pleine largeur)
+
+---
+
+## Installation rapide
+
+### Pre-requis materiels
+
+- Raspberry Pi 5 (ARM64)
+- Interface CAN (MCP2515, Waveshare CAN HAT, ou similaire)
+- Carte SD 16 Go minimum (32 Go recommande)
+- Alimentation 5V 5A USB-C
+
+### Installation en une commande
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/YOUR_REPO/aurige/main/scripts/install_pi.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/Yo-ETE/aurige/main/scripts/install_pi.sh | sudo bash
 ```
 
-### Manual Installation
-
-1. **Update system and install dependencies:**
+### Installation manuelle
 
 ```bash
+# 1. Dependances systeme
 sudo apt-get update
 sudo apt-get install -y curl git nginx python3 python3-venv python3-pip can-utils build-essential avahi-daemon avahi-utils
-```
 
-2. **Install Node.js LTS:**
-
-```bash
+# 2. Node.js LTS
 curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo bash -
 sudo apt-get install -y nodejs
-```
 
-3. **Clone the repository:**
-
-```bash
+# 3. Clone du depot
 sudo mkdir -p /opt/aurige
 cd /opt/aurige
-sudo git clone https://github.com/YOUR_REPO/aurige.git .
-```
+sudo git clone https://github.com/Yo-ETE/aurige.git .
 
-4. **Configure environment:**
+# 4. Configuration
+sudo cp .env.example .env.local
 
-```bash
-# Copy and edit the environment file
-sudo cp /opt/aurige/.env.example /opt/aurige/.env.local
-
-# For production with nginx (recommended):
-# Leave NEXT_PUBLIC_API_URL empty in .env.local
-```
-
-5. **Setup frontend:**
-
-```bash
-cd /opt/aurige
+# 5. Frontend
 sudo npm install --legacy-peer-deps
 sudo npm run build
-```
 
-6. **Setup backend:**
-
-```bash
-cd /opt/aurige/backend
+# 6. Backend
+cd backend
 sudo python3 -m venv venv
 sudo ./venv/bin/pip install -r requirements.txt
-```
 
-7. **Install systemd services:**
-
-```bash
-sudo cp /opt/aurige/deploy/*.service /etc/systemd/system/
+# 7. Services systemd
+sudo cp deploy/*.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable aurige-web aurige-api
 sudo systemctl start aurige-web aurige-api
-```
 
-8. **Configure nginx:**
-
-```bash
-sudo cp /opt/aurige/deploy/nginx-aurige.conf /etc/nginx/sites-available/aurige
+# 8. Nginx
+sudo cp deploy/nginx-aurige.conf /etc/nginx/sites-available/aurige
 sudo ln -sf /etc/nginx/sites-available/aurige /etc/nginx/sites-enabled/aurige
 sudo rm -f /etc/nginx/sites-enabled/default
 sudo systemctl restart nginx
 ```
 
-## Accessing AURIGE
-
-After installation, access the application at:
+### Acces
 
 | Service | URL |
 |---------|-----|
-| Web Interface | `http://<raspberry-pi-ip>/` |
-| API | `http://<raspberry-pi-ip>/api` |
-| API Docs | `http://<raspberry-pi-ip>/api/docs` |
-| Health Check | `http://<raspberry-pi-ip>/api/health` |
+| Interface web | `http://aurige.local` ou `http://<ip-du-pi>/` |
+| API | `http://<ip-du-pi>/api` |
+| Documentation API | `http://<ip-du-pi>/api/docs` |
 
-To find your Raspberry Pi's IP address:
+---
 
-```bash
-hostname -I
-```
-
-## Service Management
-
-### Start Services
+## Configuration de l'interface CAN
 
 ```bash
-sudo systemctl start aurige-web
-sudo systemctl start aurige-api
-```
+# Charger les modules
+sudo modprobe can can_raw mcp251x
 
-### Stop Services
-
-```bash
-sudo systemctl stop aurige-web
-sudo systemctl stop aurige-api
-```
-
-### Restart Services
-
-```bash
-sudo systemctl restart aurige-web
-sudo systemctl restart aurige-api
-sudo systemctl restart nginx
-```
-
-### Check Service Status
-
-```bash
-sudo systemctl status aurige-web
-sudo systemctl status aurige-api
-```
-
-## Viewing Logs
-
-### Real-time Logs
-
-```bash
-# Web frontend logs
-sudo journalctl -u aurige-web -f
-
-# API backend logs
-sudo journalctl -u aurige-api -f
-
-# Nginx logs
-sudo tail -f /var/log/nginx/access.log
-sudo tail -f /var/log/nginx/error.log
-```
-
-### Historical Logs
-
-```bash
-# Last 100 lines of web logs
-sudo journalctl -u aurige-web -n 100
-
-# Logs since boot
-sudo journalctl -u aurige-api -b
-
-# Logs from specific time
-sudo journalctl -u aurige-web --since "2025-01-27 10:00:00"
-```
-
-## Updating AURIGE
-
-### From Git Repository
-
-```bash
-cd /opt/aurige
-sudo git pull origin main
-
-# Rebuild frontend
-cd /opt/aurige/frontend
-sudo npm install --legacy-peer-deps
-sudo npm run build
-
-# Update backend dependencies
-cd /opt/aurige/backend
-sudo ./venv/bin/pip install -r requirements.txt
-
-# Restart services
-sudo systemctl restart aurige-web aurige-api
-```
-
-### Re-run Installer
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/YOUR_REPO/aurige/main/scripts/install_pi.sh | sudo bash
-```
-
-## CAN Interface Setup
-
-### Enable CAN Interface
-
-```bash
-# Load CAN kernel modules
-sudo modprobe can
-sudo modprobe can_raw
-sudo modprobe mcp251x  # For MCP2515 based interfaces
-
-# Bring up CAN0 at 500kbps
+# Activer can0 a 500 kbps
 sudo ip link set can0 type can bitrate 500000
 sudo ip link set up can0
 
-# Verify
+# Verifier
 ip link show can0
 ```
 
-### Auto-start CAN on Boot
-
-Add to `/etc/network/interfaces.d/can0`:
+Pour un demarrage automatique, ajouter dans `/etc/network/interfaces.d/can0` :
 
 ```
 auto can0
@@ -231,153 +270,126 @@ iface can0 inet manual
     down /sbin/ip link set down can0
 ```
 
-### Test CAN Interface
+---
 
-```bash
-# Send a test frame
-cansend can0 123#DEADBEEF
-
-# Monitor CAN traffic
-candump can0
-```
-
-## Data Directory Structure
+## Structure des donnees
 
 ```
-/opt/aurige/
-├── frontend/          # Next.js application
-├── backend/           # FastAPI application
-│   └── venv/          # Python virtual environment
-└── data/
-    ├── missions/      # Mission JSON files
-    └── logs/          # CAN capture logs
-        └── <mission-id>/
-            ├── capture_001.log
-            └── capture_001.meta.json
+/opt/aurige/data/
+  missions/
+    <mission-id>.json          # Metadonnees de la mission
+  logs/
+    <mission-id>/
+      capture_YYYYMMDD_HHMMSS.log        # Log candump
+      capture_YYYYMMDD_HHMMSS.meta.json  # Metadonnees du log
+      isolation_YYYYMMDD_HHMMSS.log      # Log filtre (enfant)
 ```
 
-## Environment Variables
+---
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `NEXT_PUBLIC_API_URL` | `/api` | Frontend API base URL |
-| `AURIGE_DATA_DIR` | `/opt/aurige/data` | Data storage directory |
-| `PORT` (web) | `3000` | Frontend port |
-| `PORT` (api) | `8000` | Backend port |
+## Variables d'environnement
 
-## Troubleshooting
+| Variable | Defaut | Description |
+|----------|--------|-------------|
+| `NEXT_PUBLIC_API_URL` | `/api` | URL de base de l'API (frontend) |
+| `AURIGE_DATA_DIR` | `/opt/aurige/data` | Repertoire de stockage des donnees |
+| `PORT` (web) | `3000` | Port du frontend Next.js |
+| `PORT` (api) | `8000` | Port du backend FastAPI |
 
-### Services Won't Start
-
-```bash
-# Check for errors
-sudo journalctl -u aurige-web -n 50
-sudo journalctl -u aurige-api -n 50
-
-# Verify ports aren't in use
-sudo netstat -tlnp | grep -E '3000|8000'
-```
-
-### Nginx 502 Bad Gateway
-
-```bash
-# Check if backend services are running
-sudo systemctl status aurige-web aurige-api
-
-# Restart all services
-sudo systemctl restart aurige-api aurige-web nginx
-```
-
-### CAN Interface Not Found
-
-```bash
-# Check if CAN modules are loaded
-lsmod | grep can
-
-# Load modules manually
-sudo modprobe can
-sudo modprobe can_raw
-
-# Check dmesg for hardware errors
-dmesg | grep -i can
-```
-
-### Permission Denied Errors
-
-```bash
-# Fix data directory permissions
-sudo chmod -R 777 /opt/aurige/data
-```
+---
 
 ## API Reference
 
-### System
+### Systeme
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/health` | GET | Health check |
-| `/api/status` | GET | System status (CPU, memory, CAN, network) |
+| Endpoint | Methode | Description |
+|----------|---------|-------------|
+| `/api/health` | GET | Verification de sante |
+| `/api/status` | GET | Statut systeme (CPU, RAM, CAN, reseau) |
 
-### CAN Control
+### Controle CAN
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/can/init` | POST | Initialize CAN interface with bitrate |
-| `/api/can/stop` | POST | Bring down CAN interface |
-| `/api/can/send` | POST | Send single CAN frame |
-| `/api/can/{interface}/status` | GET | Get CAN interface status |
+| Endpoint | Methode | Description |
+|----------|---------|-------------|
+| `/api/can/init` | POST | Initialiser l'interface CAN |
+| `/api/can/stop` | POST | Arreter l'interface CAN |
+| `/api/can/send` | POST | Envoyer une trame CAN |
+| `/api/can/{interface}/status` | GET | Statut d'une interface |
 
 ### Capture & Replay
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/capture/start` | POST | Start CAN capture to file |
-| `/api/capture/stop` | POST | Stop capture |
-| `/api/capture/status` | GET | Get capture status |
-| `/api/replay/start` | POST | Start log replay |
-| `/api/replay/stop` | POST | Stop replay |
-| `/api/replay/status` | GET | Get replay status |
+| Endpoint | Methode | Description |
+|----------|---------|-------------|
+| `/api/capture/start` | POST | Demarrer une capture |
+| `/api/capture/stop` | POST | Arreter la capture |
+| `/api/replay/start` | POST | Demarrer un replay |
+| `/api/replay/stop` | POST | Arreter le replay |
 
-### Generator & Fuzzing
+### Analyse
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/generator/start` | POST | Start CAN traffic generator |
-| `/api/generator/stop` | POST | Stop generator |
-| `/api/fuzzing/start` | POST | Start fuzzing sequence |
-| `/api/fuzzing/stop` | POST | Stop fuzzing |
+| Endpoint | Methode | Description |
+|----------|---------|-------------|
+| `/api/analysis/byte-heatmap` | POST | Heatmap d'entropie par byte |
+| `/api/analysis/auto-detect` | POST | Detection automatique de signaux |
+| `/api/analysis/inter-id-dependencies` | POST | Detection de dependances inter-ID |
+| `/api/analysis/validate-causality` | POST | Validation causale par injection |
 
-### OBD-II Diagnostics
+### OBD-II
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/obd/vin` | POST | Request VIN |
-| `/api/obd/dtc/read` | POST | Read DTCs |
-| `/api/obd/dtc/clear` | POST | Clear DTCs |
-| `/api/obd/reset` | POST | ECU reset |
-| `/api/obd/pid` | POST | Read specific OBD PID |
+| Endpoint | Methode | Description |
+|----------|---------|-------------|
+| `/api/obd/vin` | POST | Lecture du VIN |
+| `/api/obd/dtc/read` | POST | Lecture des codes defaut |
+| `/api/obd/dtc/clear` | POST | Effacement des codes defaut |
+| `/api/obd/pid` | POST | Lecture d'un PID OBD |
 
 ### Missions
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/missions` | GET | List all missions |
-| `/api/missions` | POST | Create mission |
-| `/api/missions/{id}` | GET | Get mission |
-| `/api/missions/{id}` | PATCH | Update mission |
-| `/api/missions/{id}` | DELETE | Delete mission |
-| `/api/missions/{id}/duplicate` | POST | Duplicate mission |
-| `/api/missions/{id}/logs` | GET | List mission logs |
-| `/api/missions/{id}/logs/{log_id}` | DELETE | Delete log |
-| `/api/missions/{id}/logs/{log_id}/download` | GET | Download log |
+| Endpoint | Methode | Description |
+|----------|---------|-------------|
+| `/api/missions` | GET | Lister les missions |
+| `/api/missions` | POST | Creer une mission |
+| `/api/missions/{id}` | GET/PATCH/DELETE | Gerer une mission |
+| `/api/missions/{id}/logs` | GET | Lister les logs |
+| `/api/missions/{id}/logs/{log_id}` | DELETE | Supprimer un log |
 
-### WebSocket Streams
+### WebSocket
 
 | Endpoint | Description |
 |----------|-------------|
-| `/ws/candump?interface=can0` | Live CAN frame stream |
-| `/ws/cansniffer?interface=can0` | Aggregated CAN view |
+| `/ws/candump?interface=can0` | Flux temps reel de trames CAN |
+| `/ws/cansniffer?interface=can0` | Vue agregee cansniffer |
 
-## License
+---
 
-MIT License - See LICENSE file for details.
+## Gestion des services
+
+```bash
+# Demarrer
+sudo systemctl start aurige-web aurige-api
+
+# Arreter
+sudo systemctl stop aurige-web aurige-api
+
+# Redemarrer
+sudo systemctl restart aurige-web aurige-api nginx
+
+# Logs en temps reel
+sudo journalctl -u aurige-api -f
+sudo journalctl -u aurige-web -f
+```
+
+---
+
+## Propriete intellectuelle
+
+Copyright (c) 2024-2026 Yo-ETE / AURIGE.
+
+Ce logiciel, son architecture, ses algorithmes de detection de signaux CAN,
+d'analyse de dependances inter-ID, et de validation causale par injection
+font l'objet d'un depot de brevet.
+
+**TOUTE REPRODUCTION, DISTRIBUTION, MODIFICATION OU UTILISATION COMMERCIALE
+EST STRICTEMENT INTERDITE** sans accord ecrit prealable du titulaire des droits.
+
+Pour toute demande de licence : contact@aurige.io

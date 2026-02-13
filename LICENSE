@@ -1,0 +1,56 @@
+AURIGE - Mastery of CAN
+Licence propriétaire - Tous droits réservés
+
+Copyright (c) 2024-2026 Yo-ETE / AURIGE.
+
+AVIS DE PROPRIETE INTELLECTUELLE
+
+Ce logiciel, incluant sans limitation son code source, son architecture,
+ses algorithmes, ses interfaces utilisateur, sa documentation et tous les
+materiaux associes (ci-apres "le Logiciel"), est la propriete exclusive
+de Yo-ETE / AURIGE.
+
+Le Logiciel fait l'objet d'un depot de brevet couvrant notamment :
+- Les algorithmes de detection automatique de signaux CAN par analyse
+  entropique et correlation temporelle
+- La methode d'analyse des dependances inter-ID par fenetre temporelle
+  glissante avec calcul de lift probabiliste
+- Le procede de validation causale par injection controlee et observation
+  de reactions sur bus CAN
+- L'architecture integree d'analyse forensique CAN embarquee
+
+RESTRICTIONS
+
+Sauf accord ecrit prealable du titulaire des droits, il est STRICTEMENT
+INTERDIT de :
+
+1. Reproduire, copier ou dupliquer tout ou partie du Logiciel
+2. Distribuer, publier ou rendre accessible le Logiciel a des tiers
+3. Modifier, adapter, traduire ou creer des oeuvres derivees du Logiciel
+4. Decompiler, desassembler ou tenter d'extraire le code source du Logiciel
+5. Utiliser le Logiciel a des fins commerciales
+6. Sous-licencier, louer ou preter le Logiciel
+7. Retirer ou modifier les mentions de propriete intellectuelle
+
+LIMITATION DE RESPONSABILITE
+
+LE LOGICIEL EST FOURNI "EN L'ETAT", SANS GARANTIE D'AUCUNE SORTE,
+EXPRESSE OU IMPLICITE. EN AUCUN CAS LES AUTEURS OU TITULAIRES DES
+DROITS NE POURRONT ETRE TENUS RESPONSABLES DE TOUT DOMMAGE DIRECT,
+INDIRECT, ACCESSOIRE, SPECIAL OU CONSECUTIF RESULTANT DE L'UTILISATION
+OU DE L'IMPOSSIBILITE D'UTILISER LE LOGICIEL.
+
+AVERTISSEMENT DE SECURITE
+
+Ce logiciel permet l'injection de trames sur un bus CAN automobile.
+L'utilisation sur un vehicule en circulation est STRICTEMENT INTERDITE
+et peut mettre en danger la securite des personnes. L'utilisateur est
+seul responsable de l'utilisation qu'il fait du Logiciel.
+
+CONTACT
+
+Pour toute demande de licence ou d'autorisation :
+contact@aurige.io
+
+Yo-ETE / AURIGE
+Tous droits reserves.
