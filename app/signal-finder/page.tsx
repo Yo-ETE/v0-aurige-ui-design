@@ -27,6 +27,7 @@ import {
   type LogEntry,
 } from "@/lib/api"
 import { useMissionStore } from "@/lib/mission-store"
+import { LogSelector } from "@/components/log-selector"
 import { cn } from "@/lib/utils"
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
@@ -843,21 +844,12 @@ export default function SignalFinderPage() {
                     {selectedMissionId && missionLogs.length > 0 && (
                       <div className="flex flex-col gap-1.5">
                         <Label className="text-xs text-muted-foreground">Log CAN de la mission</Label>
-                        <Select
-                          value={selectedLogId || ""}
-                          onValueChange={setSelectedLogId}
-                        >
-                          <SelectTrigger className="h-8 text-xs">
-                            <SelectValue placeholder="Selectionner un log" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {missionLogs.map((log) => (
-                              <SelectItem key={log.id} value={log.id}>
-                                {log.filename} ({log.framesCount} trames)
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+  <LogSelector
+  logs={missionLogs}
+  value={selectedLogId || ""}
+  onValueChange={setSelectedLogId}
+  placeholder="Selectionner un log"
+  />
                       </div>
                     )}
 

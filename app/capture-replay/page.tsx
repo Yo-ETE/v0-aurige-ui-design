@@ -53,6 +53,7 @@ export default function CaptureReplay() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [captureDescription, setCaptureDescription] = useState("")
+  const [captureFilename, setCaptureFilename] = useState("")
   const [replayingLogId, setReplayingLogId] = useState<string | null>(null)
   const [renamingLogId, setRenamingLogId] = useState<string | null>(null)
   const [newLogName, setNewLogName] = useState("")
@@ -143,10 +144,11 @@ export default function CaptureReplay() {
     
     // Actually start capture
     try {
-      const result = await startCapture(missionId, canInterface, undefined, captureDescription || undefined)
+      const result = await startCapture(missionId, canInterface, captureFilename || undefined, captureDescription || undefined)
       setSuccess(`Capture demarree: ${result.filename}`)
       setDisplayDuration(0)
       setCaptureDescription("")
+      setCaptureFilename("")
       await fetchStatuses()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur lors du démarrage de la capture")
@@ -364,6 +366,18 @@ const handleDeleteLog = async (logId: string) => {
               </div>
             ) : (
               <div className="space-y-3">
+                <div className="space-y-2">
+                  <Label htmlFor="filename">Nom du fichier (optionnel)</Label>
+                  <Input
+                    id="filename"
+                    placeholder="Ex: porte_conducteur"
+                    value={captureFilename}
+                    onChange={(e) => setCaptureFilename(e.target.value.replace(/[^a-zA-Z0-9_-]/g, "_"))}
+                  />
+                  <p className="text-[10px] text-muted-foreground">
+                    Si vide, un nom avec horodatage sera genere automatiquement
+                  </p>
+                </div>
                 <div className="space-y-2">
                   <Label htmlFor="description">Description (optionnel)</Label>
                   <Input

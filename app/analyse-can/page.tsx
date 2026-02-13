@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { LogSelector } from "@/components/log-selector"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import {
@@ -576,18 +577,12 @@ export default function AnalyseCANPage() {
                     ) : missionLogs.length === 0 ? (
                       <p className="text-xs text-muted-foreground">Aucun log disponible</p>
                     ) : (
-                      <Select value={selectedLogId} onValueChange={setSelectedLogId}>
-                        <SelectTrigger className="h-8 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {missionLogs.map((log) => (
-                            <SelectItem key={log.filename} value={log.filename}>
-                              {log.filename} ({log.framesCount?.toLocaleString() ?? "?"} trames)
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <LogSelector
+                        logs={missionLogs}
+                        value={selectedLogId}
+                        onValueChange={setSelectedLogId}
+                        placeholder="Selectionnez un log"
+                      />
                     )}
                   </div>
                 )}

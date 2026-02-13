@@ -28,6 +28,7 @@ import {
   type LogEntry,
 } from "@/lib/api"
 import { useMissionStore } from "@/lib/mission-store"
+import { LogSelector } from "@/components/log-selector"
 import { cn } from "@/lib/utils"
 
 export default function CrashRecoveryPage() {
@@ -268,19 +269,16 @@ export default function CrashRecoveryPage() {
           <div className="flex items-center gap-3">
             <label className="text-sm font-medium w-32">Log pre-fuzz:</label>
             {availableLogs.length > 0 ? (
-              <select
-                value={selectedPreFuzzLog}
-                onChange={(e) => setSelectedPreFuzzLog(e.target.value)}
-                className="flex-1 rounded border border-border bg-background px-3 py-2 text-sm"
-                disabled={isLoadingLogs}
-              >
-                <option value="">Selectionnez un log...</option>
-                {availableLogs.map((log) => (
-                  <option key={log.id} value={log.id}>
-                    {log.name || log.id}
-                  </option>
-                ))}
-              </select>
+              <div className="flex-1">
+                <LogSelector
+                  logs={availableLogs}
+                  value={selectedPreFuzzLog}
+                  onValueChange={setSelectedPreFuzzLog}
+                  placeholder="Selectionnez un log..."
+                  disabled={isLoadingLogs}
+                  triggerClassName="h-9 text-sm"
+                />
+              </div>
             ) : (
               <input
                 type="text"
