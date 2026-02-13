@@ -324,6 +324,10 @@ export function Sidebar() {
               <p className="text-[10px] text-muted-foreground truncate">{isHydrated ? getApiHost() : "..."}</p>
             </div>
           </div>
+          <p className="mt-3 text-center text-[9px] text-muted-foreground/50 leading-tight">
+            {"(c) 2026 Yoann ETE"}<br />
+            {"AURIGE\u2122 - Projet protege"}
+          </p>
 </div>
         </div>
       </aside>

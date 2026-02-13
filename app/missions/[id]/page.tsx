@@ -48,6 +48,9 @@ import {
   ArrowRight,
   Info,
   FileCode,
+  BarChart3,
+  Search,
+  ShieldAlert,
 } from "lucide-react"
 import Link from "next/link"
 
@@ -90,6 +93,12 @@ const moduleLinks: ModuleLink[] = [
     description: "Comparer deux logs",
   },
   {
+    name: "Analyse CAN",
+    href: "/analyse-can",
+    icon: BarChart3,
+    description: "Heatmap, auto-detect signaux, dependances inter-ID",
+  },
+  {
     name: "DBC",
     href: "/dbc",
     icon: FileCode,
@@ -102,10 +111,22 @@ const moduleLinks: ModuleLink[] = [
     description: "Diagnostics OBD-II standard",
   },
   {
+    name: "Signal Finder",
+    href: "/signal-finder",
+    icon: Search,
+    description: "Recherche de signaux par action physique",
+  },
+  {
     name: "Fuzzing",
     href: "/fuzzing",
     icon: Flame,
     description: "Tests de fuzzing CAN",
+  },
+  {
+    name: "Crash Recovery",
+    href: "/crash-recovery",
+    icon: ShieldAlert,
+    description: "Analyse forensique post-fuzzing",
   },
   {
     name: "Générateur",

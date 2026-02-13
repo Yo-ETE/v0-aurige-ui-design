@@ -28,6 +28,7 @@ import {
   ArrowUpCircle,
   GitBranch,
   ChevronDown,
+  ChevronRight,
   HardDrive,
   Trash2,
   Archive,
@@ -47,6 +48,20 @@ import {
   Server,
   Copy,
   LogOut,
+  FileText,
+  BookOpen,
+  Scale,
+  Video,
+  Zap,
+  Flame,
+  Cpu,
+  Settings,
+  Activity,
+  Search,
+  BarChart3,
+  FileCode,
+  GitCompare,
+  ShieldAlert,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -123,6 +138,11 @@ export default function ConfigurationPage() {
   const [needsRestart, setNeedsRestart] = useState(false)
   const [isRestarting, setIsRestarting] = useState(false)
   
+  // Licence / Guide state
+  const [showLicence, setShowLicence] = useState(false)
+  const [showGuide, setShowGuide] = useState(false)
+  const [guideSection, setGuideSection] = useState<string | null>(null)
+
   // Tailscale VPN
   const [tsStatus, setTsStatus] = useState<TailscaleStatus | null>(null)
   const [tsLoading, setTsLoading] = useState(false)
@@ -1526,6 +1546,236 @@ export default function ConfigurationPage() {
             </div>
           </CardContent>
         </Card>
+
+        {/* Licence */}
+        <Card className="border-border bg-card lg:col-span-2">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                  <Scale className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <CardTitle className="text-lg">Licence</CardTitle>
+                  <CardDescription>Propriete intellectuelle et conditions d{"'"}utilisation</CardDescription>
+                </div>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => setShowLicence(!showLicence)} className="bg-transparent gap-2">
+                <ChevronRight className={`h-4 w-4 transition-transform ${showLicence ? "rotate-90" : ""}`} />
+                {showLicence ? "Masquer" : "Voir la licence"}
+              </Button>
+            </div>
+          </CardHeader>
+          {showLicence && (
+            <CardContent>
+              <ScrollArea className="h-[400px]">
+                <pre className="whitespace-pre-wrap text-xs font-mono text-muted-foreground leading-relaxed p-4 rounded-lg bg-muted/30 border border-border/30">
+{`AURIGE - Mastery of CAN
+Licence proprietaire - Tous droits reserves
+
+Copyright (c) 2024-2026 Yoann ETE / AURIGE.
+
+AVIS DE PROPRIETE INTELLECTUELLE
+
+Ce logiciel, incluant sans limitation son code source, son architecture,
+ses algorithmes, ses interfaces utilisateur, sa documentation et tous les
+materiaux associes (ci-apres "le Logiciel"), est la propriete exclusive
+de Yoann ETE / AURIGE.
+
+Le Logiciel fait l'objet d'un depot de brevet couvrant notamment :
+- Les algorithmes de detection automatique de signaux CAN par analyse
+  entropique et correlation temporelle
+- La methode d'analyse des dependances inter-ID par fenetre temporelle
+  glissante avec calcul de lift probabiliste
+- Le procede de validation causale par injection controlee et observation
+  de reactions sur bus CAN
+- L'architecture integree d'analyse forensique CAN embarquee
+
+RESTRICTIONS
+
+Sauf accord ecrit prealable du titulaire des droits, il est STRICTEMENT
+INTERDIT de :
+
+1. Reproduire, copier ou dupliquer tout ou partie du Logiciel
+2. Distribuer, publier ou rendre accessible le Logiciel a des tiers
+3. Modifier, adapter, traduire ou creer des oeuvres derivees du Logiciel
+4. Decompiler, desassembler ou tenter d'extraire le code source
+5. Utiliser le Logiciel a des fins commerciales
+6. Sous-licencier, louer ou preter le Logiciel
+7. Retirer ou modifier les mentions de propriete intellectuelle
+
+LIMITATION DE RESPONSABILITE
+
+LE LOGICIEL EST FOURNI "EN L'ETAT", SANS GARANTIE D'AUCUNE SORTE.
+
+AVERTISSEMENT DE SECURITE
+
+Ce logiciel permet l'injection de trames sur un bus CAN automobile.
+L'utilisation sur un vehicule en circulation est STRICTEMENT INTERDITE
+et peut mettre en danger la securite des personnes.
+
+CONTACT : contact@aurige.io`}
+                </pre>
+              </ScrollArea>
+            </CardContent>
+          )}
+        </Card>
+
+        {/* Guide d'utilisation */}
+        <Card className="border-border bg-card lg:col-span-2">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                  <BookOpen className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <CardTitle className="text-lg">Guide d{"'"}utilisation</CardTitle>
+                  <CardDescription>Notice complete de chaque page et fonctionnalite</CardDescription>
+                </div>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => setShowGuide(!showGuide)} className="bg-transparent gap-2">
+                <ChevronRight className={`h-4 w-4 transition-transform ${showGuide ? "rotate-90" : ""}`} />
+                {showGuide ? "Masquer" : "Ouvrir le guide"}
+              </Button>
+            </div>
+          </CardHeader>
+          {showGuide && (
+            <CardContent>
+              <div className="space-y-2">
+                {[
+                  {
+                    id: "dashboard", icon: Globe, title: "Dashboard",
+                    content: "Page d'accueil affichant l'etat general du systeme : statut de connexion au Raspberry Pi, missions actives, acces rapide aux modules. Permet de creer une nouvelle mission via l'assistant vehicule (marque, modele, annee, VIN, motorisation)."
+                  },
+                  {
+                    id: "missions", icon: FileText, title: "Mission",
+                    content: "Vue detaillee d'une mission : informations vehicule, statistiques (nombre de logs, trames decouvertes, interface/bitrate), derniere capture. Actions disponibles : renommer, modifier le vehicule, exporter (ZIP), supprimer. Donne acces a tous les modules d'analyse depuis une grille de raccourcis."
+                  },
+                  {
+                    id: "controle-can", icon: Settings, title: "Controle CAN",
+                    content: "Configuration de l'interface CAN du Raspberry Pi. Permet de monter/demonter les interfaces (can0, can1, vcan0), definir le bitrate (125k, 250k, 500k, 1M), activer le mode listen-only. Affiche l'etat temps reel de chaque interface avec statistiques de trames TX/RX."
+                  },
+                  {
+                    id: "capture-replay", icon: Video, title: "Capture & Replay",
+                    content: "Enregistrement de sessions CAN avec candump. Nommez le fichier de capture (ou laissez le nom auto-genere avec horodatage), ajoutez une description. La capture enregistre toutes les trames du bus CAN selectionne. Replay : rejouer un log enregistre sur le bus CAN pour reproduire un scenario. Gestion des logs avec parentage (log parent / enfant pour tracer les derivations)."
+                  },
+                  {
+                    id: "replay-rapide", icon: Zap, title: "Replay Rapide",
+                    content: "Rejeu rapide d'un log CAN avec controle de vitesse (1x, 2x, 5x, 10x). Permet de filtrer les IDs a rejouer, de definir une plage temporelle, et d'observer les reactions du vehicule en temps reel via le CAN Sniffer."
+                  },
+                  {
+                    id: "isolation", icon: GitBranch, title: "Isolation",
+                    content: "Isole les trames par fonction vehicule. Methode : (1) capturer un log de reference (etat repos), (2) capturer un log pendant une action (ex: ouverture porte), (3) comparer automatiquement pour isoler les trames specifiques a l'action. Supporte le mode live (capture + comparaison en un clic) et le mode manuel (selection de 2 logs existants). Resultat : liste des IDs et bytes qui changent, avec possibilite de rejouer uniquement les trames isolees."
+                  },
+                  {
+                    id: "comparaison", icon: GitCompare, title: "Comparaison",
+                    content: "Compare deux logs CAN cote a cote. Affiche les differences par ID : trames presentes/absentes, payloads differents, frequences modifiees. Vue diff coloree byte par byte. Supporte les logs parents/enfants dans les selecteurs. Utile pour verifier l'effet d'une modification ou comparer deux etats du vehicule."
+                  },
+                  {
+                    id: "analyse-can", icon: BarChart3, title: "Analyse CAN",
+                    content: "Trois onglets d'analyse avancee :\n\n- Heatmap : visualisation byte par byte de chaque ID CAN. Couleur = entropie (bleu = statique, rouge = tres variable). Cliquez sur un ID pour voir le detail de chaque byte avec min/max/valeurs uniques.\n\n- Auto-detect : detection automatique de signaux dans les logs. Analyse entropique et correlationnelle pour identifier les bytes qui forment un signal coherent (compteur, temperature, etc.). Propositions de configuration DBC avec un clic pour sauvegarder.\n\n- Dependances : graphe des dependances inter-ID. Detecte quels IDs reagissent apres un changement de payload sur un autre ID. Affiche les aretes SOURCE -> CIBLE avec score de correlation, lift probabiliste, et co-occurrences. Bouton 'Valider causalite' pour tester experimentalement par injection CAN."
+                  },
+                  {
+                    id: "dbc", icon: FileCode, title: "DBC",
+                    content: "Gestion des signaux DBC (Database CAN). Import de fichiers .dbc standards. Edition manuelle des signaux : nom, ID CAN, bit de depart, longueur, facteur, offset, unite, endianness (little/big). Les signaux DBC sont utilises par le CAN Sniffer pour decoder les trames en temps reel et par l'auto-detect pour proposer des configurations."
+                  },
+                  {
+                    id: "obd-ii", icon: Activity, title: "OBD-II",
+                    content: "Diagnostics OBD-II standard. Lecture des PIDs standards (regime moteur, vitesse, temperature, pression, etc.). Lecture/effacement des codes defaut (DTC). Monitoring temps reel avec graphiques. Compatible avec les vehicules equipes d'un port OBD-II standard (ISO 15765-4)."
+                  },
+                  {
+                    id: "signal-finder", icon: Search, title: "Signal Finder",
+                    content: "Recherche de signaux par action physique. Methode : (1) selectionner un log CAN, (2) definir une hypothese (ex: 'signal de vitesse'), (3) l'algorithme analyse les correlations entre les bytes CAN et identifie les candidats les plus probables. Filtrage par plage d'ID, longueur de signal, type (compteur, analogique, booleen)."
+                  },
+                  {
+                    id: "fuzzing", icon: Flame, title: "Fuzzing",
+                    content: "Tests de fuzzing CAN pour decouvrir des fonctions cachees. Modes : aleatoire (payloads random sur un ID), sequentiel (incrementation systematique), cible (mutation d'un payload connu). Parametres : ID cible, plage de bytes, intervalle entre trames, nombre d'iterations. Journalisation de chaque trame envoyee avec horodatage pour analyse post-mortem."
+                  },
+                  {
+                    id: "crash-recovery", icon: ShieldAlert, title: "Crash Recovery",
+                    content: "Analyse forensique post-fuzzing. Permet de restaurer l'etat du vehicule apres un test de fuzzing en rejouant le log de reference (pre-fuzzing). Compare l'etat actuel avec l'etat de reference pour identifier les ecarts persistants. Selecteur de logs avec hierarchie parent/enfant."
+                  },
+                  {
+                    id: "generateur", icon: Cpu, title: "Generateur",
+                    content: "Generation de trames CAN personnalisees. Definissez l'ID, le payload (hex), l'interface, et l'intervalle d'envoi. Mode burst : envoi rapide de N trames. Mode continu : envoi periodique jusqu'a arret manuel. Utile pour simuler un ECU, tester une hypothese, ou reproduire un comportement specifique."
+                  },
+                  {
+                    id: "configuration", icon: Settings, title: "Configuration Pi",
+                    content: "Administration du Raspberry Pi. Wi-Fi : scan, connexion, mode hotspot. Ethernet : etat et IP. Tailscale VPN : connexion, peers, exit nodes. Systeme : apt update/upgrade, redemarrage, arret. Git : branches, mise a jour Aurige. Sauvegardes : creation, restauration, suppression."
+                  },
+                ].map((section) => (
+                  <div key={section.id} className="rounded-lg border border-border/50 overflow-hidden">
+                    <button
+                      onClick={() => setGuideSection(guideSection === section.id ? null : section.id)}
+                      className="w-full flex items-center gap-3 p-3 hover:bg-muted/30 transition-colors text-left"
+                    >
+                      <section.icon className="h-4 w-4 text-primary shrink-0" />
+                      <span className="text-sm font-medium text-foreground flex-1">{section.title}</span>
+                      <ChevronRight className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${guideSection === section.id ? "rotate-90" : ""}`} />
+                    </button>
+                    {guideSection === section.id && (
+                      <div className="px-3 pb-3 pt-0">
+                        <div className="rounded-md bg-muted/20 p-3 border border-border/30">
+                          <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-line">{section.content}</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          )}
+        </Card>
+
+        {/* CAN Sniffer guide */}
+        <Card className="border-border bg-card lg:col-span-2">
+          <CardHeader>
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                <Terminal className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <CardTitle className="text-lg">CAN Sniffer (fenetre flottante)</CardTitle>
+                <CardDescription>Disponible sur toutes les pages via le bouton en bas a droite</CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="rounded-md bg-muted/20 p-4 border border-border/30">
+              <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-line">
+{`Terminal CAN temps reel, accessible depuis n'importe quelle page.
+
+Fonctions :
+- Start/Stop : demarrer ou arreter l'ecoute candump sur l'interface selectionnee
+- Pause/Resume : geler l'affichage sans arreter la capture
+- Highlight Changes : colorer les bytes qui changent entre deux trames (mode Payload, Signal ou Both)
+- Changed Only : n'afficher que les IDs dont le payload a change
+- Noisy filter (N) : masquer les IDs trop bruyants (changent a chaque trame)
+- DBC overlay : decoder les trames en temps reel avec les signaux DBC definis
+- Interface : selectionner can0, can1 ou vcan0
+- Expand/Minimize : agrandir en plein ecran ou minimiser en icone
+- Clear : vider l'affichage
+
+Colonnes : ID CAN | Message DBC | DLC | Data (bytes colores) | Cycle (ms) | Count
+La fenetre est deplacable (drag) et redimensionnable.`}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Copyright footer */}
+      <div className="mt-8 border-t border-border/50 pt-6 pb-4 text-center">
+        <p className="text-xs text-muted-foreground">
+          {"(c) 2026 Yoann ETE. Tous droits reserves."}
+        </p>
+        <p className="text-xs text-muted-foreground mt-1">
+          {"AURIGE\u2122 est un projet protege."}
+        </p>
+        <p className="text-[10px] text-muted-foreground/60 mt-1">
+          Reproduction interdite sans autorisation.
+        </p>
       </div>
     </AppShell>
   )
