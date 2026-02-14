@@ -351,10 +351,10 @@ export function FloatingTerminal() {
       )}
       style={
         isExpanded
-          ? { bottom: 8, right: 8, left: typeof window !== "undefined" && window.innerWidth < 1024 ? 8 : 288, top: 60 }
+          ? { bottom: "8px", right: "8px", left: typeof window !== "undefined" && window.innerWidth < 1024 ? "8px" : "288px", top: "60px" }
           : position
-            ? { left: position.x, top: position.y, width: Math.min(size.w, typeof window !== "undefined" ? window.innerWidth - 16 : size.w), height: size.h }
-            : { bottom: 8, right: 8, width: Math.min(size.w, typeof window !== "undefined" ? window.innerWidth - 16 : size.w), height: size.h }
+            ? { left: `${position.x}px`, top: `${position.y}px`, width: `${Math.min(size.w, typeof window !== "undefined" ? window.innerWidth - 16 : size.w)}px`, height: `${size.h}px` }
+            : { bottom: "8px", right: "8px", width: `${Math.min(size.w, typeof window !== "undefined" ? window.innerWidth - 16 : size.w)}px`, height: `${size.h}px` }
       }
     >
       {/* Header - draggable */}

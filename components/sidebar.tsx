@@ -214,15 +214,22 @@ export function Sidebar() {
         <div className="flex h-full flex-col">
           {/* Logo */}
           <div className="flex h-14 items-center gap-3 border-b border-sidebar-border px-5">
-            <div className="relative h-8 w-8 flex-shrink-0 overflow-hidden rounded-lg bg-white/10">
-              <Image
-                src="/images/aurige.png"
-                alt="AURIGE Logo"
-                fill
-                sizes="32px"
-                className="object-contain p-0.5"
-                priority
-              />
+            <div className="relative h-8 w-8 flex-shrink-0 overflow-hidden rounded-lg bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center">
+              <svg viewBox="0 0 100 100" className="w-6 h-6" xmlns="http://www.w3.org/2000/svg">
+                {/* CAN bus circuit pattern */}
+                <g fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  {/* Top path */}
+                  <path d="M 20 30 L 40 30 L 50 50 L 40 70 L 20 70" />
+                  {/* Right path */}
+                  <path d="M 50 20 L 70 30 L 80 50 L 70 70 L 50 80" />
+                  {/* Connection nodes */}
+                  <circle cx="50" cy="50" r="3" fill="white" />
+                  <circle cx="70" cy="30" r="2" fill="white" />
+                  <circle cx="70" cy="70" r="2" fill="white" />
+                </g>
+                {/* Center indicator - CAN signal */}
+                <circle cx="50" cy="50" r="5" fill="white" opacity="0.9" />
+              </svg>
             </div>
             <div className="flex flex-col">
               <span className="text-sm font-bold tracking-wide text-sidebar-active">AURIGE</span>
