@@ -4196,8 +4196,12 @@ async def get_saved_networks():
 @app.post("/api/network/wifi/connect")
 async def connect_to_wifi(request: WifiConnectRequest):
     """Connect to a Wi-Fi network, handling hotspot->client transition safely"""
+    import time
     try:
-        # Detect if currently in hotspot mode
+        # Step 1: Pause the network watchdog to prevent it from interfering
+        run_command(["systemctl", "stop", "aurige-net-watchdog.timer"], check=False, timeout=5)
+        
+        # Step 2: Detect if currently in hotspot mode
         was_hotspot = False
         active_result = run_command(["nmcli", "-t", "-f", "NAME,TYPE,DEVICE", "connection", "show", "--active"], check=False)
         hotspot_conn_name = None
@@ -4215,17 +4219,36 @@ async def connect_to_wifi(request: WifiConnectRequest):
                         was_hotspot = True
                         hotspot_conn_name = conn_name
         
-        # If in hotspot mode, disable it first to free wlan0
+        # Step 3: If in hotspot mode, disable it first to free wlan0
         if was_hotspot and hotspot_conn_name:
             run_command(["nmcli", "connection", "down", hotspot_conn_name], check=False, timeout=10)
-            # Wait for interface to be released
-            import time
             time.sleep(2)
-            # Rescan wifi networks after disabling hotspot
             run_command(["nmcli", "device", "wifi", "rescan"], check=False, timeout=10)
-            time.sleep(2)
+            time.sleep(3)
         
-        # Check if this network is already saved
+        # Step 4: If password provided for a new network, always create/update the profile first
+        # This ensures the password is saved even if the first connect attempt times out
+        if request.password:
+            # Delete old profile if it exists (to update password)
+            run_command(["nmcli", "connection", "delete", request.ssid], check=False, timeout=5)
+            time.sleep(1)
+            
+            # Create a new saved connection profile with the password
+            add_result = run_command([
+                "nmcli", "connection", "add",
+                "type", "wifi",
+                "con-name", request.ssid,
+                "ssid", request.ssid,
+                "wifi-sec.key-mgmt", "wpa-psk",
+                "wifi-sec.psk", request.password,
+                "connection.autoconnect", "yes",
+                "connection.autoconnect-priority", "100"
+            ], check=False, timeout=15)
+            
+            if add_result.returncode != 0:
+                logger.warning(f"Failed to save WiFi profile: {add_result.stderr}")
+        
+        # Step 5: Check if this network is already saved (it should be after step 4)
         saved_result = run_command(["nmcli", "-t", "-f", "NAME,TYPE", "connection", "show"], check=False)
         is_saved = False
         if saved_result.returncode == 0:
@@ -4235,27 +4258,42 @@ async def connect_to_wifi(request: WifiConnectRequest):
                     is_saved = True
                     break
         
+        # Step 6: Connect - always use "connection up" since we saved the profile
         if is_saved:
             result = run_command([
                 "nmcli", "connection", "up", request.ssid
             ], check=False, timeout=30)
-        elif request.password:
-            result = run_command([
-                "nmcli", "device", "wifi", "connect", request.ssid,
-                "password", request.password
-            ], check=False, timeout=30)
         else:
+            # Fallback: direct connect (open networks without password)
             result = run_command([
                 "nmcli", "device", "wifi", "connect", request.ssid
             ], check=False, timeout=30)
         
         if result.returncode == 0:
-            # Enable autoconnect with high priority for this network
+            # Ensure autoconnect with high priority
             run_command([
                 "nmcli", "connection", "modify", request.ssid,
                 "connection.autoconnect", "yes",
                 "connection.autoconnect-priority", "100"
             ], check=False)
+            
+            # Lower USB modem priority so WiFi stays preferred
+            usb_conns = run_command(["nmcli", "-t", "-f", "NAME,TYPE,DEVICE", "connection", "show"], check=False)
+            if usb_conns.returncode == 0:
+                for line in usb_conns.stdout.strip().split("\n"):
+                    parts = line.split(":")
+                    if len(parts) >= 3:
+                        dev = parts[2] if len(parts) > 2 else ""
+                        # USB modem interfaces (cdc-wdm, usb0, wwan0, etc.)
+                        if any(x in dev for x in ["usb", "cdc", "wwan", "enx"]):
+                            run_command([
+                                "nmcli", "connection", "modify", parts[0],
+                                "connection.autoconnect-priority", "10"
+                            ], check=False)
+            
+            # Restart watchdog now that WiFi is connected
+            run_command(["systemctl", "start", "aurige-net-watchdog.timer"], check=False, timeout=5)
+            
             return {"status": "success", "message": f"Connecte a {request.ssid}"}
         else:
             error_msg = result.stderr.strip() if result.stderr else result.stdout.strip() if result.stdout else "Connexion echouee"
@@ -4265,6 +4303,9 @@ async def connect_to_wifi(request: WifiConnectRequest):
                 run_command(["nmcli", "connection", "up", hotspot_conn_name], check=False, timeout=15)
                 error_msg += " (Hotspot reactive)"
             
+            # Restart watchdog
+            run_command(["systemctl", "start", "aurige-net-watchdog.timer"], check=False, timeout=5)
+            
             return {"status": "error", "message": error_msg}
     except Exception as e:
         # FALLBACK: Re-enable hotspot on any exception
@@ -4273,6 +4314,8 @@ async def connect_to_wifi(request: WifiConnectRequest):
                 run_command(["nmcli", "connection", "up", hotspot_conn_name], check=False, timeout=15)
             except Exception:
                 pass
+        # Always restart watchdog
+        run_command(["systemctl", "start", "aurige-net-watchdog.timer"], check=False, timeout=5)
         return {"status": "error", "message": str(e)}
 
 

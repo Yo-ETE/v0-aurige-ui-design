@@ -163,10 +163,23 @@ EOF
     cat > /usr/local/bin/aurige-net-watchdog.sh << 'WATCHDOG_EOF'
 #!/bin/bash
 # Aurige Network Watchdog - checks real internet connectivity and forces reconnection if needed
+# IMPORTANT: Does NOT interfere with active WiFi client connections on wlan0
 
 TARGET_URL="https://clients3.google.com/generate_204"
 FAILCOUNT_FILE="/run/aurige-net.fail"
 MAX_FAILS=3
+
+# Check if wlan0 is currently connected to a WiFi client network (not hotspot)
+WLAN0_CLIENT=false
+WLAN0_CONN=$(nmcli -t -f NAME,TYPE,DEVICE connection show --active 2>/dev/null | grep "wlan0" | head -1)
+if [ -n "$WLAN0_CONN" ]; then
+    CONN_NAME=$(echo "$WLAN0_CONN" | cut -d: -f1)
+    # Check if it's NOT a hotspot (AP mode)
+    MODE=$(nmcli -t -f 802-11-wireless.mode connection show "$CONN_NAME" 2>/dev/null | cut -d: -f2)
+    if [ "$MODE" != "ap" ] && ! echo "$CONN_NAME" | grep -qi "hotspot"; then
+        WLAN0_CLIENT=true
+    fi
+fi
 
 # Read current fail count
 failcount=0
@@ -177,10 +190,14 @@ if curl -fs --max-time 5 "$TARGET_URL" >/dev/null 2>&1; then
     # Internet OK - reset counter
     echo 0 > "$FAILCOUNT_FILE"
     
-    # Also ensure hotspot is still up
-    if ! nmcli -t connection show --active | grep -q "Hotspot"; then
-        logger "[Aurige] Hotspot down, restarting..."
-        nmcli connection up Hotspot 2>/dev/null || true
+    # Only restart hotspot if wlan0 is NOT being used as a WiFi client
+    if [ "$WLAN0_CLIENT" = false ]; then
+        if ! nmcli -t connection show --active | grep -q "Hotspot"; then
+            logger "[Aurige] Hotspot down (no WiFi client active), restarting..."
+            nmcli connection up Hotspot 2>/dev/null || true
+        fi
+    else
+        logger "[Aurige] WiFi client active on wlan0 ($CONN_NAME), skipping hotspot check"
     fi
     
     # Re-disable power management (it can get re-enabled)
@@ -200,7 +217,7 @@ logger "[Aurige] Internet KO ($failcount/$MAX_FAILS)"
 if [ "$failcount" -ge "$MAX_FAILS" ]; then
     logger "[Aurige] Max failures reached, forcing uplink reconnection..."
     
-    # Find the uplink interface (wlan1 or any non-AP wifi)
+    # Find the uplink interface (wlan1 or any non-AP wifi, or USB modem)
     UPLINK_IFACE=""
     for iface in wlan1 wlan2 enx*; do
         if [ -e "/sys/class/net/$iface" ]; then
@@ -219,13 +236,19 @@ if [ "$failcount" -ge "$MAX_FAILS" ]; then
         sleep 2
     fi
     
-    # Also try to bring up any known WiFi connections with autoconnect
-    nmcli connection show | grep wifi | grep -v Hotspot | awk '{print $1}' | while read conn; do
-        nmcli connection up "$conn" 2>/dev/null || true
-    done
-    
-    # Ensure hotspot stays up (we never touch the hotspot itself)
-    nmcli connection up Hotspot 2>/dev/null || true
+    # If wlan0 is a WiFi client, try to reconnect it
+    if [ "$WLAN0_CLIENT" = true ]; then
+        logger "[Aurige] Reconnecting WiFi client: $CONN_NAME"
+        nmcli connection up "$CONN_NAME" 2>/dev/null || true
+    else
+        # No WiFi client, try to bring up saved WiFi connections
+        nmcli connection show | grep wifi | grep -v Hotspot | awk '{print $1}' | while read conn; do
+            nmcli connection up "$conn" 2>/dev/null || true
+        done
+        
+        # Ensure hotspot stays up only if no WiFi client is active
+        nmcli connection up Hotspot 2>/dev/null || true
+    fi
     
     # Disable power management again
     for iface in /sys/class/net/wlan*; do
