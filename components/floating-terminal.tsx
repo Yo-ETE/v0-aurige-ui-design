@@ -231,14 +231,20 @@ export function FloatingTerminal() {
 
   // Drag state
   const [position, setPosition] = useState<{ x: number; y: number } | null>(null)
-  const [size, setSize] = useState<{ w: number; h: number }>(() => {
-    if (typeof window !== "undefined" && window.innerWidth < 640) {
-      return { w: window.innerWidth - 16, h: 320 }
-    }
-    return { w: 600, h: 384 }
-  })
+  const [size, setSize] = useState<{ w: number; h: number }>({ w: 600, h: 384 })
+  const [isMounted, setIsMounted] = useState(false)
   const dragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null)
   const resizeRef = useRef<{ startX: number; startY: number; origW: number; origH: number } | null>(null)
+
+  // Adjust size on mount for mobile
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      if (window.innerWidth < 640) {
+        setSize({ w: Math.max(280, window.innerWidth - 16), h: 320 })
+      }
+      setIsMounted(true)
+    }
+  }, [])
 
   const handleDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -353,8 +359,8 @@ export function FloatingTerminal() {
         isExpanded
           ? { bottom: "8px", right: "8px", left: typeof window !== "undefined" && window.innerWidth < 1024 ? "8px" : "288px", top: "60px" }
           : position
-            ? { left: `${position.x}px`, top: `${position.y}px`, width: `${Math.min(size.w, typeof window !== "undefined" ? window.innerWidth - 16 : size.w)}px`, height: `${size.h}px` }
-            : { bottom: "8px", right: "8px", width: `${Math.min(size.w, typeof window !== "undefined" ? window.innerWidth - 16 : size.w)}px`, height: `${size.h}px` }
+            ? { left: `${position.x}px`, top: `${position.y}px`, width: `${size.w}px`, height: `${size.h}px` }
+            : { bottom: "8px", right: "8px", width: `${size.w}px`, height: `${size.h}px` }
       }
     >
       {/* Header - draggable */}
