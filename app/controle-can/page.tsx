@@ -32,10 +32,8 @@ export default function ControleCAN() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   
-  // Bitrate scan - track per interface
-  const [scanningInterfaces, setScanningInterfaces] = useState<Set<string>>(new Set())
-  const [scanResults, setScanResults] = useState<Map<string, BitrateScanResponse>>(new Map())
-  const [scanProgress, setScanProgress] = useState<Map<string, number>>(new Map())
+  // State pour afficher/masquer les résultats détaillés
+  const [showDetailedResults, setShowDetailedResults] = useState(false)
 
   // Fetch CAN interface status
   const fetchStatus = async () => {
@@ -286,52 +284,58 @@ export default function ControleCAN() {
         ))}
       </div>
 
-      {/* Detailed Results Section */}
+      {/* Detailed Results Section - collapsible */}
       {Array.from(scanResults.entries()).some(([_, result]) => result.best_bitrate) && (
         <Card className="border-border bg-card lg:col-span-3 mt-6">
-          <CardHeader>
+          <button
+            onClick={() => setShowDetailedResults(!showDetailedResults)}
+            className="w-full flex items-center justify-between p-4 hover:bg-secondary/30 transition-colors text-left"
+          >
             <CardTitle className="text-lg">Résultats détaillés du scan</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-6">
-              {Array.from(scanResults.entries()).map(([iface, result]) => (
-                <div key={iface}>
-                  <h3 className="font-semibold text-sm mb-3">{iface}</h3>
-                  <div className="rounded-md border border-border overflow-hidden">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="bg-secondary text-muted-foreground">
-                          <th className="p-2 text-left">Bitrate</th>
-                          <th className="p-2 text-center">Trames</th>
-                          <th className="p-2 text-center">IDs</th>
-                          <th className="p-2 text-center">Erreurs</th>
-                          <th className="p-2 text-right">Score</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {result.results.map((r) => (
-                          <tr 
-                            key={r.bitrate} 
-                            className={`border-t border-border/50 ${r.bitrate === result.best_bitrate ? "bg-success/5" : ""}`}
-                          >
-                            <td className="p-2 font-mono font-medium">{r.bitrate_label}</td>
-                            <td className="p-2 text-center">{r.frames_received}</td>
-                            <td className="p-2 text-center">{r.unique_ids}</td>
-                            <td className="p-2 text-center">{r.errors}</td>
-                            <td className="p-2 text-right">
-                              <Badge variant="outline" className={getScoreBadge(r.score)}>
-                                {r.score}%
-                              </Badge>
-                            </td>
+            <ChevronDown className={`h-4 w-4 transition-transform ${showDetailedResults ? "rotate-180" : ""}`} />
+          </button>
+          {showDetailedResults && (
+            <CardContent>
+              <div className="space-y-6">
+                {Array.from(scanResults.entries()).map(([iface, result]) => (
+                  <div key={iface}>
+                    <h3 className="font-semibold text-sm mb-3">{iface}</h3>
+                    <div className="rounded-md border border-border overflow-hidden">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="bg-secondary text-muted-foreground">
+                            <th className="p-2 text-left">Bitrate</th>
+                            <th className="p-2 text-center">Trames</th>
+                            <th className="p-2 text-center">IDs</th>
+                            <th className="p-2 text-center">Erreurs</th>
+                            <th className="p-2 text-right">Score</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          {result.results.map((r) => (
+                            <tr 
+                              key={r.bitrate} 
+                              className={`border-t border-border/50 ${r.bitrate === result.best_bitrate ? "bg-success/5" : ""}`}
+                            >
+                              <td className="p-2 font-mono font-medium">{r.bitrate_label}</td>
+                              <td className="p-2 text-center">{r.frames_received}</td>
+                              <td className="p-2 text-center">{r.unique_ids}</td>
+                              <td className="p-2 text-center">{r.errors}</td>
+                              <td className="p-2 text-right">
+                                <Badge variant="outline" className={getScoreBadge(r.score)}>
+                                  {r.score}%
+                                </Badge>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
+                ))}
+              </div>
+            </CardContent>
+          )}
         </Card>
       )}
     </AppShell>

@@ -246,6 +246,20 @@ export function FloatingTerminal() {
     }
   }, [])
 
+  // Adjust expanded left position on mobile
+  useEffect(() => {
+    if (isMounted && isExpanded && typeof window !== "undefined") {
+      const sniffer = document.querySelector('[data-sniffer-window]') as HTMLElement
+      if (sniffer) {
+        if (window.innerWidth < 1024) {
+          sniffer.style.left = "8px"
+        } else {
+          sniffer.style.left = "288px"
+        }
+      }
+    }
+  }, [isExpanded, isMounted])
+
   const handleDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
     const rect = (e.currentTarget.closest("[data-sniffer-window]") as HTMLElement)?.getBoundingClientRect()
@@ -351,13 +365,14 @@ export function FloatingTerminal() {
   return (
     <div
       data-sniffer-window
+      suppressHydrationWarning
       className={cn(
         "fixed z-50 flex flex-col rounded-lg border border-border bg-terminal shadow-2xl",
         isExpanded && "transition-all"
       )}
       style={
         isExpanded
-          ? { bottom: "8px", right: "8px", left: typeof window !== "undefined" && window.innerWidth < 1024 ? "8px" : "288px", top: "60px" }
+          ? { bottom: "8px", right: "8px", left: "288px", top: "60px" }
           : position
             ? { left: `${position.x}px`, top: `${position.y}px`, width: `${size.w}px`, height: `${size.h}px` }
             : { bottom: "8px", right: "8px", width: `${size.w}px`, height: `${size.h}px` }
