@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Settings, Power, PowerOff, CheckCircle2, AlertCircle, Loader2, Search, Zap, Signal, TriangleAlert, Radio } from "lucide-react"
+import { Settings, Power, PowerOff, CheckCircle2, AlertCircle, Loader2, Search, Zap, Signal, TriangleAlert, Radio, ChevronDown } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { initializeCAN, stopCAN, getCANStatus, scanBitrate, type CANInterfaceStatus, type BitrateScanResponse } from "@/lib/api"
@@ -32,12 +32,12 @@ export default function ControleCAN() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   
-  // Bitrate scan - track per interface (use array instead of Set for SSR safety)
+  // Bitrate scan - per interface tracking
   const [scanningInterfaces, setScanningInterfaces] = useState<string[]>([])
-  const [scanResults, setScanResults] = useState<Map<string, BitrateScanResponse>>(new Map())
-  const [scanProgress, setScanProgress] = useState<Map<string, number>>(new Map())
+  const [scanResults, setScanResults] = useState<Record<string, BitrateScanResponse>>({})
+  const [scanProgress, setScanProgress] = useState<Record<string, number>>({})
   
-  // State pour afficher/masquer les résultats détaillés
+  // Detailed results toggle
   const [showDetailedResults, setShowDetailedResults] = useState(false)
 
   // Fetch CAN interface status
@@ -48,8 +48,7 @@ export default function ControleCAN() {
       if (status.bitrate) {
         setBitrate(status.bitrate.toString())
       }
-    } catch (err) {
-      // Interface may not exist - this is OK
+    } catch {
       setCanStatus(null)
     }
   }
@@ -67,7 +66,7 @@ export default function ControleCAN() {
     
     try {
       await initializeCAN(canInterface, parseInt(bitrate))
-      setSuccess(`Interface ${canInterface} initialisée à ${bitrates.find(b => b.value === bitrate)?.label}`)
+      setSuccess(`Interface ${canInterface} initialisee a ${bitrates.find(b => b.value === bitrate)?.label}`)
       await fetchStatus()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur lors de l'initialisation")
@@ -83,53 +82,33 @@ export default function ControleCAN() {
     
     try {
       await stopCAN(canInterface)
-      setSuccess(`Interface ${canInterface} arrêtée`)
+      setSuccess(`Interface ${canInterface} arretee`)
       await fetchStatus()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erreur lors de l'arrêt")
+      setError(err instanceof Error ? err.message : "Erreur lors de l'arret")
     } finally {
       setIsStopping(false)
     }
   }
 
   const handleScanBitrate = async (iface: "can0" | "can1") => {
-    if (iface === "vcan0") {
-      setError("Auto-detection impossible sur interface virtuelle")
-      return
-    }
-    
-    // Warning if interface is initialized
-    if (isInitialized && iface === canInterface) {
-      if (!window.confirm("⚠️ Le scan bitrate va redémarrer l'interface CAN et interrompre les captures en cours. Continuer ?")) {
-        return
-      }
-    }
-    
     setError(null)
     setSuccess(null)
     
-    // Add to scanning array
     setScanningInterfaces(prev => [...prev, iface])
-    setScanProgress(prev => new Map(prev).set(iface, 0))
+    setScanProgress(prev => ({ ...prev, [iface]: 0 }))
     
-    // Simulate progress
     const progressInterval = setInterval(() => {
-      setScanProgress(prev => {
-        const updated = new Map(prev)
-        const current = updated.get(iface) || 0
-        updated.set(iface, Math.min(current + 1.5, 95))
-        return updated
-      })
+      setScanProgress(prev => ({
+        ...prev,
+        [iface]: Math.min((prev[iface] || 0) + 1.5, 95)
+      }))
     }, 200)
     
     try {
       const result = await scanBitrate(iface, 1.5)
-      setScanResults(prev => new Map(prev).set(iface, result))
-      setScanProgress(prev => {
-        const updated = new Map(prev)
-        updated.set(iface, 100)
-        return updated
-      })
+      setScanResults(prev => ({ ...prev, [iface]: result }))
+      setScanProgress(prev => ({ ...prev, [iface]: 100 }))
       
       if (result.best_bitrate) {
         if (iface === canInterface) {
@@ -138,7 +117,7 @@ export default function ControleCAN() {
         const bestLabel = result.results.find(r => r.bitrate === result.best_bitrate)?.bitrate_label
         setSuccess(`${iface}: Bitrate detecte - ${bestLabel} (${result.best_score}%)`)
       } else {
-        setError(`${iface}: Aucun bitrate detecte`)
+        setError(`${iface}: Aucun bitrate detecte. Verifiez le cablage.`)
       }
     } catch (err) {
       setError(`${iface}: ${err instanceof Error ? err.message : "Erreur lors du scan"}`)
@@ -146,13 +125,6 @@ export default function ControleCAN() {
       clearInterval(progressInterval)
       setScanningInterfaces(prev => prev.filter(i => i !== iface))
     }
-  }
-  
-  const getScoreColor = (score: number) => {
-    if (score >= 80) return "text-success"
-    if (score >= 50) return "text-amber-500"
-    if (score > 0) return "text-orange-500"
-    return "text-muted-foreground"
   }
   
   const getScoreBadge = (score: number) => {
@@ -163,150 +135,267 @@ export default function ControleCAN() {
   }
 
   const isInitialized = canStatus?.up ?? false
+  const hasAnyResults = Object.values(scanResults).some(r => r.best_bitrate)
 
   return (
     <AppShell
-      title="Contrôle CAN"
-      description="Configuration et contrôle des interfaces CAN"
+      title="Controle CAN"
+      description="Configuration et controle des interfaces CAN"
     >
-      <div className="grid gap-6 lg:grid-cols-3">
-        {/* Error/Success alerts */}
-        {(error || success) && (
-          <div className="lg:col-span-3">
-            {error && (
-              <Alert className="border-destructive/50 bg-destructive/10">
-                <AlertCircle className="h-4 w-4 text-destructive" />
-                <AlertDescription className="text-destructive">{error}</AlertDescription>
-              </Alert>
-            )}
-            {success && (
-              <Alert className="border-success/50 bg-success/10">
-                <CheckCircle2 className="h-4 w-4 text-success" />
-                <AlertDescription className="text-success">{success}</AlertDescription>
-              </Alert>
-            )}
+      {/* Error/Success alerts */}
+      {(error || success) && (
+        <div className="mb-6">
+          {error && (
+            <Alert className="border-destructive/50 bg-destructive/10">
+              <AlertCircle className="h-4 w-4 text-destructive" />
+              <AlertDescription className="text-destructive">{error}</AlertDescription>
+            </Alert>
+          )}
+          {success && (
+            <Alert className="border-success/50 bg-success/10">
+              <CheckCircle2 className="h-4 w-4 text-success" />
+              <AlertDescription className="text-success">{success}</AlertDescription>
+            </Alert>
+          )}
+        </div>
+      )}
+
+      {/* Initialisation CAN - main control */}
+      <Card className="border-border bg-card mb-6">
+        <CardHeader>
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+              <Settings className="h-5 w-5 text-primary" />
+            </div>
+            <div>
+              <CardTitle className="text-lg">Initialisation CAN</CardTitle>
+              <CardDescription>
+                {"Configurer et demarrer l'interface CAN"}
+              </CardDescription>
+            </div>
           </div>
-        )}
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="interface">Interface CAN</Label>
+              <Select
+                value={canInterface}
+                onValueChange={(v) => setCanInterface(v as "can0" | "can1" | "vcan0")}
+                disabled={isInitialized}
+              >
+                <SelectTrigger id="interface">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="can0">can0</SelectItem>
+                  <SelectItem value="can1">can1</SelectItem>
+                  <SelectItem value="vcan0">vcan0 (test)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="bitrate">Debit (Bitrate)</Label>
+              <Select
+                value={bitrate}
+                onValueChange={setBitrate}
+                disabled={isInitialized}
+              >
+                <SelectTrigger id="bitrate">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {bitrates.map((rate) => (
+                    <SelectItem key={rate.value} value={rate.value}>
+                      {rate.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
 
-        {/* CAN Interface Cards - one per interface */}
-        {(["can0", "can1", "vcan0"] as const).map((iface) => (
-          <Card key={iface} className="border-border bg-card">
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
-                  <Radio className="h-4 w-4 text-primary" />
-                </div>
-                <div>
-                  <CardTitle className="text-base">{iface}</CardTitle>
-                  <CardDescription className="text-[10px]">{iface === "vcan0" ? "Virtuelle (test)" : "Physique"}</CardDescription>
-                </div>
+          {/* Status display */}
+          {canStatus && (
+            <div className={`flex items-center gap-2 rounded-md px-4 py-3 text-sm ${
+              isInitialized 
+                ? "bg-success/10 text-success" 
+                : "bg-muted text-muted-foreground"
+            }`}>
+              {isInitialized ? (
+                <>
+                  <CheckCircle2 className="h-4 w-4" />
+                  <span>
+                    {"Interface"} {canInterface} {"active a"}{" "}
+                    {canStatus.bitrate 
+                      ? bitrates.find((b) => parseInt(b.value) === canStatus.bitrate)?.label || `${canStatus.bitrate} bit/s`
+                      : "bitrate inconnu"}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <PowerOff className="h-4 w-4" />
+                  <span>{"Interface"} {canInterface} {"inactive"}</span>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Stats if up */}
+          {isInitialized && canStatus && (
+            <div className="grid grid-cols-3 gap-4 text-center">
+              <div className="rounded-lg bg-secondary p-3">
+                <p className="text-lg font-bold text-foreground">{canStatus.txPackets}</p>
+                <p className="text-xs text-muted-foreground">TX Packets</p>
               </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Interface select - for can0/can1 allow selection */}
-              {iface !== "vcan0" && (
-                <div className="space-y-2">
-                  <Label className="text-xs">Débit (Bitrate)</Label>
-                  <div className="flex gap-2">
-                    <Select
-                      value={iface === canInterface ? bitrate : "500000"}
-                      onValueChange={(v) => {
-                        if (iface === canInterface) setBitrate(v)
-                      }}
-                      disabled={scanningInterfaces.includes(iface)}
-                    >
-                      <SelectTrigger className="h-8 text-xs flex-1">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {bitrates.map((rate) => (
-                          <SelectItem key={rate.value} value={rate.value} className="text-xs">
-                            {rate.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      onClick={() => handleScanBitrate(iface)}
-                      disabled={scanningInterfaces.includes(iface)}
-                      className="h-8 w-8 bg-transparent shrink-0"
-                      title="Auto-detect bitrate"
-                    >
-                      {scanningInterfaces.includes(iface) ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Search className="h-3.5 w-3.5" />
-                      )}
-                    </Button>
-                  </div>
-                </div>
-              )}
+              <div className="rounded-lg bg-secondary p-3">
+                <p className="text-lg font-bold text-foreground">{canStatus.rxPackets}</p>
+                <p className="text-xs text-muted-foreground">RX Packets</p>
+              </div>
+              <div className="rounded-lg bg-secondary p-3">
+                <p className="text-lg font-bold text-foreground">{canStatus.errors}</p>
+                <p className="text-xs text-muted-foreground">Errors</p>
+              </div>
+            </div>
+          )}
 
-              {/* Scan progress */}
-              {scanningInterfaces.includes(iface) && (
-                <div className="space-y-1">
-                  <Progress value={scanProgress.get(iface) || 0} className="h-1.5" />
-                  <p className="text-[10px] text-muted-foreground text-center">Scan en cours...</p>
-                </div>
+          <div className="flex gap-3">
+            <Button
+              onClick={handleInitialize}
+              disabled={isInitialized || isInitializing}
+              className="flex-1 gap-2"
+            >
+              {isInitializing ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Power className="h-4 w-4" />
               )}
+              Initialiser
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleStop}
+              disabled={!isInitialized || isStopping}
+              className="flex-1 gap-2"
+            >
+              {isStopping ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <PowerOff className="h-4 w-4" />
+              )}
+              Arreter
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
-              {/* Scan result - best */}
-              {scanResults.get(iface) && (
-                <div className="space-y-2">
-                  {scanResults.get(iface)!.best_bitrate && (
-                    <div className="flex items-center gap-2 rounded bg-success/10 border border-success/30 p-2">
-                      <Zap className="h-3.5 w-3.5 text-success shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-[10px] font-semibold text-success truncate">
-                          {scanResults.get(iface)!.results.find(r => r.bitrate === scanResults.get(iface)!.best_bitrate)?.bitrate_label}
-                        </p>
-                        <p className="text-[9px] text-success/70">
-                          Score {scanResults.get(iface)!.best_score}%
-                        </p>
-                      </div>
-                      <Button
-                        size="sm"
-                        onClick={() => {
-                          setCanInterface(iface)
-                          if (scanResults.get(iface)!.best_bitrate) {
-                            setBitrate(scanResults.get(iface)!.best_bitrate.toString())
-                          }
-                        }}
-                        className="gap-1 h-7 px-2 text-[10px]"
-                      >
-                        Appliquer
-                      </Button>
+      {/* Scan Bitrate - can0 and can1 side by side */}
+      <div className="grid gap-6 lg:grid-cols-2 mb-6">
+        {(["can0", "can1"] as const).map((iface) => {
+          const isScanning = scanningInterfaces.includes(iface)
+          const result = scanResults[iface]
+          const progress = scanProgress[iface] || 0
+          
+          return (
+            <Card key={iface} className="border-border bg-card">
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500/10">
+                      <Radio className="h-4 w-4 text-amber-500" />
                     </div>
-                  )}
-                  
-                  {!scanResults.get(iface)!.best_bitrate && (
-                    <p className="text-[10px] text-muted-foreground text-center py-2">
-                      Aucun trafic détecté
-                    </p>
-                  )}
+                    <div>
+                      <CardTitle className="text-base">Scan {iface}</CardTitle>
+                      <CardDescription className="text-[10px]">Auto-detection bitrate</CardDescription>
+                    </div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleScanBitrate(iface)}
+                    disabled={isScanning}
+                    className="gap-2 bg-transparent"
+                  >
+                    {isScanning ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Search className="h-3.5 w-3.5" />
+                    )}
+                    {isScanning ? "Scan..." : "Scanner"}
+                  </Button>
                 </div>
-              )}
-            </CardContent>
-          </Card>
-        ))}
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {/* Scan progress */}
+                {isScanning && (
+                  <div className="space-y-1">
+                    <Progress value={progress} className="h-1.5" />
+                    <p className="text-[10px] text-muted-foreground text-center">
+                      Test des 8 bitrates standards...
+                    </p>
+                  </div>
+                )}
+
+                {/* Scan result */}
+                {result && !isScanning && (
+                  <div className="space-y-2">
+                    {result.best_bitrate ? (
+                      <div className="flex items-center gap-2 rounded bg-success/10 border border-success/30 p-3">
+                        <Zap className="h-4 w-4 text-success shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-success">
+                            {result.results.find(r => r.bitrate === result.best_bitrate)?.bitrate_label}
+                          </p>
+                          <p className="text-[10px] text-success/70">
+                            Score {result.best_score}% - {(result.scan_duration_ms / 1000).toFixed(1)}s
+                          </p>
+                        </div>
+                        <Button
+                          size="sm"
+                          onClick={() => {
+                            setCanInterface(iface)
+                            setBitrate(result.best_bitrate!.toString())
+                          }}
+                          className="gap-1 h-7 px-2 text-[10px]"
+                        >
+                          Appliquer
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 text-sm text-amber-500 bg-amber-500/10 rounded-md p-3">
+                        <TriangleAlert className="h-4 w-4 shrink-0" />
+                        <span className="text-xs">Aucun trafic CAN detecte.</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* No scan yet */}
+                {!result && !isScanning && (
+                  <p className="text-xs text-muted-foreground text-center py-4">
+                    Cliquez sur Scanner pour detecter le bitrate
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          )
+        })}
       </div>
 
       {/* Detailed Results Section - collapsible */}
-      {Array.from(scanResults.entries()).some(([_, result]) => result.best_bitrate) && (
-        <Card className="border-border bg-card lg:col-span-3 mt-6">
+      {hasAnyResults && (
+        <Card className="border-border bg-card">
           <button
             onClick={() => setShowDetailedResults(!showDetailedResults)}
             className="w-full flex items-center justify-between p-4 hover:bg-secondary/30 transition-colors text-left"
           >
-            <CardTitle className="text-lg">Résultats détaillés du scan</CardTitle>
+            <span className="text-sm font-semibold">Resultats detailles du scan</span>
             <ChevronDown className={`h-4 w-4 transition-transform ${showDetailedResults ? "rotate-180" : ""}`} />
           </button>
           {showDetailedResults && (
             <CardContent>
               <div className="space-y-6">
-                {Array.from(scanResults.entries()).map(([iface, result]) => (
+                {Object.entries(scanResults).map(([iface, result]) => (
                   <div key={iface}>
                     <h3 className="font-semibold text-sm mb-3">{iface}</h3>
                     <div className="rounded-md border border-border overflow-hidden">
