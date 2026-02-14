@@ -32,6 +32,11 @@ export default function ControleCAN() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   
+  // Bitrate scan - track per interface (use array instead of Set for SSR safety)
+  const [scanningInterfaces, setScanningInterfaces] = useState<string[]>([])
+  const [scanResults, setScanResults] = useState<Map<string, BitrateScanResponse>>(new Map())
+  const [scanProgress, setScanProgress] = useState<Map<string, number>>(new Map())
+  
   // State pour afficher/masquer les résultats détaillés
   const [showDetailedResults, setShowDetailedResults] = useState(false)
 
@@ -92,11 +97,19 @@ export default function ControleCAN() {
       setError("Auto-detection impossible sur interface virtuelle")
       return
     }
+    
+    // Warning if interface is initialized
+    if (isInitialized && iface === canInterface) {
+      if (!window.confirm("⚠️ Le scan bitrate va redémarrer l'interface CAN et interrompre les captures en cours. Continuer ?")) {
+        return
+      }
+    }
+    
     setError(null)
     setSuccess(null)
     
-    // Add to scanning set
-    setScanningInterfaces(prev => new Set([...prev, iface]))
+    // Add to scanning array
+    setScanningInterfaces(prev => [...prev, iface])
     setScanProgress(prev => new Map(prev).set(iface, 0))
     
     // Simulate progress
@@ -131,11 +144,7 @@ export default function ControleCAN() {
       setError(`${iface}: ${err instanceof Error ? err.message : "Erreur lors du scan"}`)
     } finally {
       clearInterval(progressInterval)
-      setScanningInterfaces(prev => {
-        const updated = new Set(prev)
-        updated.delete(iface)
-        return updated
-      })
+      setScanningInterfaces(prev => prev.filter(i => i !== iface))
     }
   }
   
@@ -204,7 +213,7 @@ export default function ControleCAN() {
                       onValueChange={(v) => {
                         if (iface === canInterface) setBitrate(v)
                       }}
-                      disabled={scanningInterfaces.has(iface)}
+                      disabled={scanningInterfaces.includes(iface)}
                     >
                       <SelectTrigger className="h-8 text-xs flex-1">
                         <SelectValue />
@@ -221,11 +230,11 @@ export default function ControleCAN() {
                       variant="outline"
                       size="icon"
                       onClick={() => handleScanBitrate(iface)}
-                      disabled={scanningInterfaces.has(iface)}
+                      disabled={scanningInterfaces.includes(iface)}
                       className="h-8 w-8 bg-transparent shrink-0"
                       title="Auto-detect bitrate"
                     >
-                      {scanningInterfaces.has(iface) ? (
+                      {scanningInterfaces.includes(iface) ? (
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
                       ) : (
                         <Search className="h-3.5 w-3.5" />
@@ -236,7 +245,7 @@ export default function ControleCAN() {
               )}
 
               {/* Scan progress */}
-              {scanningInterfaces.has(iface) && (
+              {scanningInterfaces.includes(iface) && (
                 <div className="space-y-1">
                   <Progress value={scanProgress.get(iface) || 0} className="h-1.5" />
                   <p className="text-[10px] text-muted-foreground text-center">Scan en cours...</p>
