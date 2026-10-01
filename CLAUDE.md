@@ -109,6 +109,14 @@ ethernet) · `system/*` (apt, update, backups, reboot, restart-services) · `tai
 
 Outil offensif sur bus CAN réel. Voir `docs/AUDIT.md` pour l'état de sécurité détaillé.
 
+- **Authentification par comptes** (remplace le token partagé AUD-01) : utilisateurs, rôles et
+  permissions stockés dans SQLite `aurige.db` ; session par cookie `aurige_session`. Le backend
+  crée le compte admin au premier démarrage (mot de passe dans
+  `AURIGE_DATA_DIR/initial_admin_password.txt`, à supprimer après changement).
+  `/opt/aurige/api_token` est **obsolète**.
+- La permission `can_inject` contrôle l'injection **par utilisateur** ; elle est distincte du
+  filtre d'IDs AUD-06 (`is_id_blocked()`), qui s'applique à tous, quel que soit l'utilisateur.
+
 - ⚠️ **Le filtrage des IDs critiques (airbag, freinage, direction) n'existe pas encore dans
   le code** (AUD-06) : aucune route d'injection (`can/send`, `fuzzing`, `generator`,
   `validate-causality`, `crash-recovery`) ne bloque d'ID. À implémenter via un garde commun

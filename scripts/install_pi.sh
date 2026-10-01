@@ -590,18 +590,16 @@ print_summary() {
     echo -e "  ${BLUE}http://aurige.local/${NC}  (mDNS - recommended)"
     echo -e "  ${BLUE}http://${IP}/${NC}        (IP address)"
     echo ""
-    # Le backend crée le token au premier démarrage (AUD-01) : on l'attend un peu
-    TOKEN_FILE="$AURIGE_DIR/api_token"
-    for _ in $(seq 1 15); do
-        [ -s "$TOKEN_FILE" ] && break
-        sleep 1
-    done
-    if [ -s "$TOKEN_FILE" ]; then
-        echo -e "API token (à saisir dans l'interface au premier accès) :"
-        echo -e "  ${YELLOW}$(cat "$TOKEN_FILE")${NC}"
-        echo -e "  Le relire plus tard : ${YELLOW}sudo cat $TOKEN_FILE${NC}"
+    # Le backend crée le compte admin dans aurige.db au premier démarrage : on attend le fichier
+    ADMIN_FILE="$AURIGE_DIR/data/initial_admin_password.txt"
+    for _ in $(seq 1 15); do [ -s "$ADMIN_FILE" ] && break; sleep 1; done
+    if [ -s "$ADMIN_FILE" ]; then
+        echo -e "Compte administrateur initial :"
+        echo -e "  ${YELLOW}$(cat "$ADMIN_FILE")${NC}"
+        echo -e "  ${YELLOW}Changez ce mot de passe après la première connexion, puis supprimez ce fichier :${NC}"
+        echo -e "  ${YELLOW}sudo rm $ADMIN_FILE${NC}"
     else
-        log_warn "Token introuvable ($TOKEN_FILE). Vérifier : sudo journalctl -u aurige-api -n 50"
+        log_warn "Compte admin introuvable. Vérifier : sudo journalctl -u aurige-api -n 50"
     fi
     echo ""
     echo -e "Useful commands:"
