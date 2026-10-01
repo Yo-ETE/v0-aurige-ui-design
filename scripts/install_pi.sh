@@ -80,9 +80,19 @@ install_system_deps() {
         build-essential \
         avahi-daemon \
         avahi-utils \
-        rsync
+        rsync \
+        hostapd \
+        dnsmasq
 
     log_success "System dependencies installed"
+
+    # Stop and disable hostapd/dnsmasq (launched on-demand by backend)
+    systemctl stop hostapd 2>/dev/null || true
+    systemctl disable hostapd 2>/dev/null || true
+    systemctl unmask hostapd 2>/dev/null || true
+    systemctl stop dnsmasq 2>/dev/null || true
+    systemctl disable dnsmasq 2>/dev/null || true
+    log_info "hostapd/dnsmasq installed (launched on-demand by backend)"
 }
 
 # Setup virtual CAN interface for testing
@@ -547,6 +557,12 @@ setup_nginx() {
 }
 
 # Setup systemd services
+# Environment variables for WiFi access point (hotspot):
+# - AURIGE_AUTO_HOTSPOT=1 (default) : auto-start AP ~45s after boot if Pi has no internet
+# - AURIGE_AUTO_HOTSPOT_TIMEOUT=45 : seconds to wait before auto-starting (default 45s)
+# - AURIGE_AUTO_HOTSPOT_INTERVAL=30 : seconds between internet checks (default 30s)
+# - AURIGE_HOTSPOT_SSID=AURIGE : WiFi AP network name (default "AURIGE")
+# - AURIGE_HOTSPOT_PASSWORD_FILE=${AURIGE_DATA_DIR}/hotspot_password.txt : AP password storage
 setup_services() {
     log_info "Setting up systemd services..."
     

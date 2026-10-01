@@ -125,3 +125,6 @@ Outil offensif sur bus CAN réel. Voir `docs/AUDIT.md` pour l'état de sécurit�
   pas de l'injection.
 - **Toute modification touchant l'injection de trames doit ajouter ou préserver ces
   garde-fous, jamais les contourner.**
+- **WiFi Access Point (hotspot)** créé par `backend/hotspot.py` : nmcli (primaire), hostapd/dnsmasq
+  (fallback) ; SSID par défaut `AURIGE`, auto-démarrage ~45s après boot si pas d'internet (boot-only) ;
+  mot de passe stocké dans `${AURIGE_DATA_DIR}/hotspot_password.txt`.

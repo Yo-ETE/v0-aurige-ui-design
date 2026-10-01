@@ -2105,7 +2105,7 @@ CONSEILS :
 SECTION WI-FI :
 - Bouton "Scanner" : detecte les reseaux Wi-Fi disponibles.
 - Liste des reseaux : SSID, signal (dBm), securite. Cliquez sur un reseau pour vous connecter (saisissez le mot de passe).
-- Bouton "Mode Hotspot" : transforme le Pi en point d'acces Wi-Fi. Utile sur le terrain sans reseau disponible. Connectez-vous au reseau "AURIGE" depuis votre telephone.
+- Carte "Hotspot/Mode AP" : affiche l'etat du point d'acces Wi-Fi. Lancez-le manuellement pour connecter votre telephone au reseau "AURIGE" sur le terrain. Le point d'acces se cree automatiquement ~45s apres le demarrage si le Pi n'a pas de connexion internet.
 
 SECTION ETHERNET :
 - Etat de la connexion filaire, adresse IP.
@@ -2133,7 +2133,7 @@ SECTION SAUVEGARDES :
 
 CONSEILS :
 - Faites une sauvegarde avant chaque mise a jour systeme ou AURIGE.
-- Le mode Hotspot est la methode recommandee pour utiliser AURIGE sur le terrain (parking, garage).
+- Le point d'acces WiFi (Hotspot) se lance automatiquement au demarrage si pas de connexion internet, ou manuellement depuis la carte Hotspot si besoin sur le terrain.
 - Tailscale permet d'acceder au Pi a distance depuis n'importe ou dans le monde.`
                   },
                 ].map((section) => (
