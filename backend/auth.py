@@ -1,179 +1,175 @@
+"""AURIGE - Authentification par comptes (sessions serveur + RBAC).
+
+Remplace l'auth par token partagé (AUD-01). Session opaque stockée en DB,
+transmise par le cookie HttpOnly `aurige_session`. Le middleware ASGI couvre
+HTTP et WebSocket : il refuse l'accès sans session valide, applique
+l'autorisation grossière (permissions par route, rôle admin pour la gestion
+des comptes) et injecte l'utilisateur dans `scope["state"]["user"]`.
+
+L'objet utilisateur est partagé par référence (cache de db.py) : lecture seule.
 """
-AURIGE - Authentification par token partagé (AUD-01)
-
-Toutes les routes HTTP et WebSocket exigent le token, sauf une courte liste
-publique (santé + endpoints d'authentification). Le token est accepté via :
-- l'en-tête `Authorization: Bearer <token>` (scripts, curl) ;
-- l'en-tête `X-Aurige-Token` ;
-- le cookie HttpOnly `aurige_token`, posé par `POST /api/auth/login` (navigateur,
-  y compris pour les WebSockets et les liens de téléchargement).
-
-Le token vient de la variable `AURIGE_API_TOKEN`, sinon du fichier
-`AURIGE_TOKEN_FILE` (défaut : `/opt/aurige/api_token`), créé au premier
-démarrage avec un token aléatoire et des permissions 0600.
-"""
-
 import asyncio
-import hmac
-import os
-import secrets
+import time
 from http.cookies import SimpleCookie
-from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-TOKEN_COOKIE = "aurige_token"
-COOKIE_MAX_AGE = 30 * 24 * 3600  # 30 jours
+import db
+from permissions import allows, is_admin_route, required_permissions
 
-PUBLIC_PATHS = frozenset({
-    "/api/health",
-    "/api/auth/login",
-    "/api/auth/logout",
-    "/api/auth/status",
-})
+TOKEN_COOKIE = "aurige_session"
+COOKIE_MAX_AGE = 30 * 24 * 3600
+MIN_PASSWORD_LEN = 10
 
+PUBLIC_PATHS = frozenset({"/api/health", "/api/auth/login", "/api/auth/logout"})
 
-class AuthConfig:
-    """Token attendu, fixé au démarrage par init_auth()."""
-    token: str = ""
-
-
-def load_or_create_token(token_file: Path) -> str:
-    """Retourne le token configuré, en le générant au premier démarrage."""
-    env_token = os.getenv("AURIGE_API_TOKEN", "").strip()
-    if env_token:
-        return env_token
-
-    if token_file.exists():
-        existing = token_file.read_text(encoding="utf-8").strip()
-        if existing:
-            return existing
-
-    token_file.parent.mkdir(parents=True, exist_ok=True)
-    token = secrets.token_urlsafe(32)
-    fd = os.open(token_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(token + "\n")
-    return token
+# rate limit login : {ip: [timestamps]}
+_login_attempts: dict[str, list[float]] = {}
+_RL_MAX = 5
+_RL_WINDOW = 300.0
 
 
-def init_auth(token_file: Path) -> None:
-    AuthConfig.token = load_or_create_token(token_file)
+def _rate_limited(ip: str) -> bool:
+    now = time.time()
+    hits = [t for t in _login_attempts.get(ip, []) if now - t < _RL_WINDOW]
+    _login_attempts[ip] = hits
+    return len(hits) >= _RL_MAX
 
 
-def token_matches(candidate: Optional[str]) -> bool:
-    expected = AuthConfig.token
-    if not candidate or not expected:
-        return False
-    return hmac.compare_digest(candidate.encode("utf-8"), expected.encode("utf-8"))
+def _record_attempt(ip: str) -> None:
+    _login_attempts.setdefault(ip, []).append(time.time())
+
+
+def _scope_headers(scope) -> dict[str, str]:
+    return {k.decode("latin-1").lower(): v.decode("latin-1")
+            for k, v in scope.get("headers", [])}
 
 
 def _extract_token(headers: dict[str, str]) -> Optional[str]:
     auth = headers.get("authorization", "")
     if auth.lower().startswith("bearer "):
         return auth[7:].strip()
-
-    header_token = headers.get("x-aurige-token")
-    if header_token:
-        return header_token.strip()
-
     cookie_header = headers.get("cookie")
     if cookie_header:
-        cookie = SimpleCookie()
+        jar = SimpleCookie()
         try:
-            cookie.load(cookie_header)
+            jar.load(cookie_header)
         except Exception:
             return None
-        morsel = cookie.get(TOKEN_COOKIE)
-        if morsel:
-            return morsel.value
+        m = jar.get(TOKEN_COOKIE)
+        if m:
+            return m.value
     return None
 
 
-def _scope_headers(scope) -> dict[str, str]:
-    return {
-        k.decode("latin-1").lower(): v.decode("latin-1")
-        for k, v in scope.get("headers", [])
-    }
-
-
-class TokenAuthMiddleware:
-    """Middleware ASGI : couvre HTTP et WebSocket (BaseHTTPMiddleware ne voit pas les WS)."""
-
+class SessionAuthMiddleware:
     def __init__(self, app):
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        scope_type = scope["type"]
-        if scope_type not in ("http", "websocket"):
+        if scope["type"] not in ("http", "websocket"):
             await self.app(scope, receive, send)
             return
-
         path = scope.get("path", "")
-        if path in PUBLIC_PATHS or (scope_type == "http" and scope.get("method") == "OPTIONS"):
+        method = scope.get("method", "")
+        if path in PUBLIC_PATHS or (scope["type"] == "http" and method == "OPTIONS"):
             await self.app(scope, receive, send)
             return
 
-        if token_matches(_extract_token(_scope_headers(scope))):
-            await self.app(scope, receive, send)
+        token = _extract_token(_scope_headers(scope))
+        user = await db.get_session_user(token) if token else None
+        if not user:
+            await self._reject(scope, receive, send, 401, "Authentification requise")
             return
 
-        if scope_type == "http":
-            response = JSONResponse({"detail": "Authentification requise"}, status_code=401)
-            await response(scope, receive, send)
-            return
+        if scope["type"] == "http":
+            needed = required_permissions(method, path)
+            if needed and user["role"] != "admin" and not allows(
+                user["role"], user["permissions"], needed
+            ):
+                await self._reject(scope, receive, send, 403, "Permission refusée")
+                return
+            if is_admin_route(method, path) and user["role"] != "admin":
+                await self._reject(scope, receive, send, 403, "Réservé à l'administrateur")
+                return
 
-        # WebSocket : refuser la poignée de main (le serveur répond 403)
+        scope.setdefault("state", {})["user"] = user
+        await self.app(scope, receive, send)
+
+    async def _reject(self, scope, receive, send, status, detail):
+        if scope["type"] == "http":
+            resp = JSONResponse({"detail": detail}, status_code=status)
+            await resp(scope, receive, send)
+            return
         message = await receive()
         if message["type"] == "websocket.connect":
             await send({"type": "websocket.close", "code": 1008})
 
 
-# =============================================================================
-# Endpoints d'authentification
-# =============================================================================
-
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
 class LoginRequest(BaseModel):
-    token: str
+    username: str
+    password: str
 
 
 def _is_https(request: Request) -> bool:
-    forwarded = request.headers.get("x-forwarded-proto", "")
-    return request.url.scheme == "https" or forwarded.lower() == "https"
+    fwd = request.headers.get("x-forwarded-proto", "")
+    return request.url.scheme == "https" or fwd.lower() == "https"
+
+
+def _public_user(user: dict) -> dict:
+    return {"id": user["id"], "username": user["username"],
+            "role": user["role"], "permissions": user["permissions"]}
+
+
+def current_user(request: Request) -> dict:
+    user = getattr(request.state, "user", None)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentification requise")
+    return user
+
+
+def require_permission(request: Request, *flags: str) -> None:
+    user = current_user(request)
+    if user["role"] == "admin":
+        return
+    if not allows(user["role"], user["permissions"], list(flags)):
+        raise HTTPException(status_code=403, detail="Permission refusée")
 
 
 @router.post("/login")
 async def login(body: LoginRequest, request: Request, response: Response):
-    if not token_matches(body.token.strip()):
-        # Ralentit le bruteforce ; le token fait 256 bits de toute façon
-        await asyncio.sleep(0.5)
-        raise HTTPException(status_code=401, detail="Token invalide")
-
-    response.set_cookie(
-        TOKEN_COOKIE,
-        AuthConfig.token,
-        max_age=COOKIE_MAX_AGE,
-        httponly=True,
-        samesite="strict",
-        secure=_is_https(request),
-        path="/",
-    )
-    return {"authenticated": True}
+    ip = request.client.host if request.client else "?"
+    if _rate_limited(ip):
+        raise HTTPException(status_code=429, detail="Trop d'essais. Réessayez plus tard.")
+    user = await db.get_user_by_username(body.username.strip())
+    stored = await db._get_password_hash(body.username.strip()) if user else None
+    if not user or not user["is_active"] or not stored or not db.verify_password(body.password, stored):
+        _record_attempt(ip)
+        await asyncio.sleep(0.3)
+        raise HTTPException(status_code=401, detail="Identifiants invalides")
+    token = await db.create_session(user["id"])
+    await db.touch_last_login(user["id"])
+    response.set_cookie(TOKEN_COOKIE, token, max_age=COOKIE_MAX_AGE, httponly=True,
+                        samesite="strict", secure=_is_https(request), path="/")
+    return {"user": _public_user(user)}
 
 
 @router.post("/logout")
-async def logout(response: Response):
+async def logout(request: Request, response: Response):
+    token = _extract_token({k.lower(): v for k, v in request.headers.items()})
+    if token:
+        await db.delete_session(token)
     response.delete_cookie(TOKEN_COOKIE, path="/")
-    return {"authenticated": False}
+    return {"ok": True}
 
 
-@router.get("/status")
-async def auth_status(request: Request):
-    headers = {k.lower(): v for k, v in request.headers.items()}
-    return {"authenticated": token_matches(_extract_token(headers))}
+@router.get("/me")
+async def me(request: Request):
+    user = current_user(request)
+    return _public_user(user)
