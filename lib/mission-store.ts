@@ -11,7 +11,7 @@
 
 import { create } from "zustand"
 import { persist, createJSONStorage } from "zustand/middleware"
-import { getApiBaseUrl } from "./api-config"
+import { apiFetch, getApiBaseUrl } from "./api-config"
 
 export interface Vehicle {
   brand: string
@@ -78,7 +78,7 @@ export const useMissionStore = create<MissionStore>()(
   fetchMissions: async () => {
     set({ isLoading: true, error: null })
     try {
-      const response = await fetch(`${getApiBaseUrl()}/api/missions`, {
+      const response = await apiFetch(`${getApiBaseUrl()}/api/missions`, {
         signal: AbortSignal.timeout(5000),
       })
       
@@ -101,7 +101,7 @@ export const useMissionStore = create<MissionStore>()(
   addMission: async (missionData) => {
     set({ isLoading: true, error: null })
     try {
-      const response = await fetch(`${getApiBaseUrl()}/api/missions`, {
+      const response = await apiFetch(`${getApiBaseUrl()}/api/missions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -132,7 +132,7 @@ export const useMissionStore = create<MissionStore>()(
   updateMission: async (id, updates) => {
     set({ error: null })
     try {
-      const response = await fetch(`${getApiBaseUrl()}/api/missions/${id}`, {
+      const response = await apiFetch(`${getApiBaseUrl()}/api/missions/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updates),
@@ -159,7 +159,7 @@ export const useMissionStore = create<MissionStore>()(
   deleteMission: async (id) => {
     set({ error: null })
     try {
-      const response = await fetch(`${getApiBaseUrl()}/api/missions/${id}`, {
+      const response = await apiFetch(`${getApiBaseUrl()}/api/missions/${id}`, {
         method: "DELETE",
       })
       
@@ -180,7 +180,7 @@ export const useMissionStore = create<MissionStore>()(
   duplicateMission: async (id) => {
     set({ isLoading: true, error: null })
     try {
-      const response = await fetch(`${getApiBaseUrl()}/api/missions/${id}/duplicate`, {
+      const response = await apiFetch(`${getApiBaseUrl()}/api/missions/${id}/duplicate`, {
         method: "POST",
       })
       

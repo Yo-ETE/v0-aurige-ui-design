@@ -6,7 +6,7 @@
  * All CAN operations are delegated to the backend.
  */
 
-import { getApiBaseUrl, getWsBaseUrl } from "./api-config"
+import { AUTH_REQUIRED_EVENT, apiFetch, getApiBaseUrl, getWsBaseUrl } from "./api-config"
 
 
 // =============================================================================
@@ -139,7 +139,7 @@ export interface CANMessage {
 // API Fetch Helper
 // =============================================================================
 
-class APIError extends Error {
+export class APIError extends Error {
   constructor(public status: number, message: string) {
     super(message)
     this.name = "APIError"
@@ -152,7 +152,7 @@ async function fetchApi<T>(
 ): Promise<T> {
   const url = `${getApiBaseUrl()}/api${endpoint}`
   
-  const response = await fetch(url, {
+  const response = await apiFetch(url, {
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -182,6 +182,28 @@ export async function getSystemStatus(): Promise<SystemStatus> {
 
 export async function checkHealth(): Promise<{ status: string; timestamp: string; version: string }> {
   return fetchApi("/health")
+}
+
+// =============================================================================
+// Authentification (token partagé, cookie HttpOnly posé par le backend)
+// =============================================================================
+
+export async function getAuthStatus(): Promise<{ authenticated: boolean }> {
+  return fetchApi("/auth/status", { cache: "no-store" })
+}
+
+export async function login(token: string): Promise<{ authenticated: boolean }> {
+  return fetchApi("/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  })
+}
+
+export async function logout(): Promise<void> {
+  await fetchApi("/auth/logout", { method: "POST" })
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT))
+  }
 }
 
 // =============================================================================
@@ -1150,7 +1172,7 @@ export interface AnalyzeFamilyRequest {
 export async function analyzeFamilyDiff(request: AnalyzeFamilyRequest): Promise<FamilyAnalysisResponse> {
   const body = JSON.stringify(request)
   
-  const response = await fetch(`${getApiBaseUrl()}/api/analysis/family-diff`, {
+  const response = await apiFetch(`${getApiBaseUrl()}/api/analysis/family-diff`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body,
@@ -1379,7 +1401,7 @@ export async function importLog(
   formData.append("file", file)
   
   const url = `${getApiBaseUrl()}/api/missions/${missionId}/import-log`
-  const response = await fetch(url, {
+  const response = await apiFetch(url, {
     method: "POST",
     body: formData,
   })

@@ -7,7 +7,8 @@ Type=simple
 User=root
 WorkingDirectory=/opt/aurige/backend
 Environment=AURIGE_DATA_DIR=/opt/aurige/data
-ExecStart=/opt/aurige/backend/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
+# 127.0.0.1 : l API ne passe que par nginx (AUD-24). Token : /opt/aurige/api_token (AUD-01)
+ExecStart=/opt/aurige/backend/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
 Restart=always
 RestartSec=10
 StandardOutput=journal

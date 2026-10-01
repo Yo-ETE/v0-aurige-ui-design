@@ -17,7 +17,7 @@ import {
   type DBCMessage,
   type MissionDBC,
 } from "@/lib/api"
-import { getApiBaseUrl } from "@/lib/api-config"
+import { apiFetch, getApiBaseUrl } from "@/lib/api-config"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -142,7 +142,7 @@ export default function DBCPage() {
       const formData = new FormData()
       formData.append('file', file)
       
-      const response = await fetch(`${getApiBaseUrl()}/api/missions/${missionId}/dbc/import`, {
+      const response = await apiFetch(`${getApiBaseUrl()}/api/missions/${missionId}/dbc/import`, {
         method: 'POST',
         body: formData,
       })

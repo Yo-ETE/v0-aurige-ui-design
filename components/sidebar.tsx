@@ -7,7 +7,8 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { useMissionStore } from "@/lib/mission-store"
-import { getApiHost } from "@/lib/api-config"
+import { apiFetch, getApiBaseUrl, getApiHost } from "@/lib/api-config"
+import { logout } from "@/lib/api"
 import Image from "next/image"
 import {
   Car,
@@ -28,6 +29,7 @@ import {
   ShieldAlert,
   Search,
   BarChart3,
+  LogOut,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
@@ -38,10 +40,8 @@ type SystemStatus = {
   ethernetIp?: string
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api"
-
 async function fetchStatus(): Promise<SystemStatus> {
-  const res = await fetch(`${API_BASE}/status`, { cache: "no-store" })
+  const res = await apiFetch(`${getApiBaseUrl()}/api/status`, { cache: "no-store" })
   if (!res.ok) throw new Error("status not ok")
   return res.json()
 }
@@ -330,6 +330,15 @@ export function Sidebar() {
               <p className="text-xs font-medium text-sidebar-foreground">Raspberry Pi</p>
               <p className="text-[10px] text-muted-foreground truncate">{isHydrated ? getApiHost() : "..."}</p>
             </div>
+            <button
+              type="button"
+              onClick={() => { void logout() }}
+              title="Se déconnecter"
+              aria-label="Se déconnecter"
+              className="rounded p-1 text-muted-foreground hover:bg-sidebar-border hover:text-sidebar-foreground"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+            </button>
           </div>
           <p className="mt-3 text-center text-[9px] text-muted-foreground/50 leading-tight">
             {"(c) 2026 Yoann ETE"}<br />

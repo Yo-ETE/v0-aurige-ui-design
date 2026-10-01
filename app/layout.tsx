@@ -4,6 +4,7 @@ import { Geist, Geist_Mono } from 'next/font/google'
 import './globals.css'
 import { FloatingTerminal } from "@/components/floating-terminal"
 import { Toaster } from "@/components/ui/toaster"
+import { AuthGate } from "@/components/auth-gate"
 
 const _geist = Geist({ subsets: ["latin"] });
 const _geistMono = Geist_Mono({ subsets: ["latin"] });
@@ -30,9 +31,11 @@ export default function RootLayout({
   return (
     <html lang="fr" suppressHydrationWarning>
       <body className="font-sans antialiased bg-background text-foreground" suppressHydrationWarning>
-        {children}
+        <AuthGate>
+          {children}
+          <FloatingTerminal />
+        </AuthGate>
         <Toaster />
-        <FloatingTerminal />
       </body>
     </html>
   )

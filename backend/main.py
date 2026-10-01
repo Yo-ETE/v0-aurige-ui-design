@@ -35,6 +35,7 @@ from pydantic import BaseModel, Field
 
 from error_logger import log_error, log_info, setup_error_logging
 from dbc_parser import parse_dbc_file
+from auth import TokenAuthMiddleware, init_auth, router as auth_router
 
 # =============================================================================
 # Configuration
@@ -44,6 +45,16 @@ DATA_DIR = Path(os.getenv("AURIGE_DATA_DIR", "/opt/aurige/data"))
 MISSIONS_DIR = DATA_DIR / "missions"
 
 MISSIONS_DIR.mkdir(parents=True, exist_ok=True)
+
+# Token d'API (AUD-01) : hors de DATA_DIR pour ne pas finir dans les sauvegardes
+TOKEN_FILE = Path(os.getenv("AURIGE_TOKEN_FILE", str(DATA_DIR.parent / "api_token")))
+init_auth(TOKEN_FILE)
+
+# Origines autorisées en CORS : aucune en prod (nginx, même origine), le dev local
+# (Next sur :3000, API sur :8000) et celles listées dans AURIGE_CORS_ORIGINS.
+CORS_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000"] + [
+    o.strip() for o in os.getenv("AURIGE_CORS_ORIGINS", "").split(",") if o.strip()
+]
 
 # Global state for running processes
 class ProcessState:
@@ -85,13 +96,17 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Ordre : le dernier ajouté est le plus externe. CORS enveloppe l'auth pour que
+# les réponses 401 portent les en-têtes CORS et que les preflight passent.
+app.add_middleware(TokenAuthMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(auth_router)
 
 
 # =============================================================================

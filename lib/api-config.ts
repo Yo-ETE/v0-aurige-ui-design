@@ -27,6 +27,23 @@ export function getApiBaseUrl(): string {
 }
 
 /**
+ * Événement émis quand le backend répond 401 : l'AuthGate réaffiche l'écran de connexion.
+ */
+export const AUTH_REQUIRED_EVENT = "aurige:auth-required"
+
+/**
+ * fetch() vers le backend : envoie le cookie de session (même en dev cross-origin)
+ * et signale un 401 à l'AuthGate. Tout appel HTTP au backend doit passer par ici.
+ */
+export async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
+  const response = await fetch(input, { credentials: "include", ...init })
+  if (response.status === 401 && typeof window !== "undefined") {
+    window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT))
+  }
+  return response
+}
+
+/**
  * Get the WebSocket base URL.
  * Auto-derives from current page location if not explicitly set.
  */

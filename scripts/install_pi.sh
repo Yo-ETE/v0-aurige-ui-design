@@ -590,7 +590,19 @@ print_summary() {
     echo -e "  ${BLUE}http://aurige.local/${NC}  (mDNS - recommended)"
     echo -e "  ${BLUE}http://${IP}/${NC}        (IP address)"
     echo ""
-    echo -e "No configuration required - just open the URL above!"
+    # Le backend crée le token au premier démarrage (AUD-01) : on l'attend un peu
+    TOKEN_FILE="$AURIGE_DIR/api_token"
+    for _ in $(seq 1 15); do
+        [ -s "$TOKEN_FILE" ] && break
+        sleep 1
+    done
+    if [ -s "$TOKEN_FILE" ]; then
+        echo -e "API token (à saisir dans l'interface au premier accès) :"
+        echo -e "  ${YELLOW}$(cat "$TOKEN_FILE")${NC}"
+        echo -e "  Le relire plus tard : ${YELLOW}sudo cat $TOKEN_FILE${NC}"
+    else
+        log_warn "Token introuvable ($TOKEN_FILE). Vérifier : sudo journalctl -u aurige-api -n 50"
+    fi
     echo ""
     echo -e "Useful commands:"
     echo -e "  ${YELLOW}sudo systemctl status aurige-web${NC}   - Check web service"
