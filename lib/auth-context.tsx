@@ -1,5 +1,5 @@
 "use client"
-import React, { createContext, useCallback, useContext, useEffect, useState } from "react"
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react"
 import { AUTH_REQUIRED_EVENT } from "@/lib/api-config"
 import { APIError, getMe, login as apiLogin, logout as apiLogout,
          type AuthUser, type PermissionFlag } from "@/lib/api"
@@ -51,18 +51,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const hasPermission = useCallback((flag: PermissionFlag) => {
     if (!user) return false
     if (user.role === "admin") return true
-    if (user.permissions) return !!user.permissions[flag]
-    return !!VIEWER_DEFAULT[flag]
+    // overlay identique au backend : défauts viewer + permissions stockées
+    const eff = { ...VIEWER_DEFAULT, ...(user.permissions ?? {}) }
+    return !!eff[flag]
   }, [user])
 
-  return (
-    <Ctx.Provider value={{
-      user, isAdmin: user?.role === "admin", isLoading, hubUnreachable,
-      hasPermission, hasArea: hasPermission, login, logout, refresh,
-    }}>
-      {children}
-    </Ctx.Provider>
-  )
+  const value = useMemo<AuthCtx>(() => ({
+    user, isAdmin: user?.role === "admin", isLoading, hubUnreachable,
+    hasPermission, hasArea: hasPermission, login, logout, refresh,
+  }), [user, isLoading, hubUnreachable, hasPermission, login, logout, refresh])
+
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }
 
 export function useAuth(): AuthCtx {

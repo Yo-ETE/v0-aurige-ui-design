@@ -27,6 +27,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     } catch (err) {
       if (err instanceof APIError && err.status === 429) setError("Trop d'essais. Réessayez dans quelques minutes.")
       else if (err instanceof APIError && err.status === 401) setError("Identifiants invalides.")
+      else if (err instanceof APIError) setError(`Erreur serveur (${err.status}).`)
       else setError("Backend injoignable. Vérifiez que le service aurige-api tourne.")
     } finally { setSubmitting(false) }
   }
