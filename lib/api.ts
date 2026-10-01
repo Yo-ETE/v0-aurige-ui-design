@@ -953,7 +953,14 @@ export async function connectToWifi(ssid: string, password: string): Promise<{ s
   })
 }
 
-export async function runAptUpdate(): Promise<{ status: string; message: string }> {
+export interface HotspotStatus { active: boolean; ssid: string; interface: string; clients: number }
+export async function getHotspotStatus(): Promise<HotspotStatus> { return fetchApi("/network/hotspot/status", { cache: "no-store" }) }
+export async function getHotspotCredentials(): Promise<{ ssid: string; password: string }> { return fetchApi("/network/hotspot/credentials", { cache: "no-store" }) }
+export async function setHotspotPassword(password: string): Promise<void> { await fetchApi("/network/hotspot/credentials", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password }) }) }
+export async function startHotspot(): Promise<{ status: string; detail: string }> { return fetchApi("/network/hotspot/start", { method: "POST" }) }
+export async function stopHotspot(): Promise<{ status: string; detail: string }> { return fetchApi("/network/hotspot/stop", { method: "POST" }) }
+
+export async function runAptUpdate():Promise<{ status: string; message: string }> {
   return fetchApi("/system/apt/update", { method: "POST" })
 }
 

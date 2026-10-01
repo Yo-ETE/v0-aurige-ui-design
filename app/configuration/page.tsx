@@ -89,6 +89,12 @@ import {
   tailscaleDown,
   tailscaleLogout,
   tailscaleSetExitNode,
+  getHotspotStatus,
+  getHotspotCredentials,
+  setHotspotPassword,
+  startHotspot,
+  stopHotspot,
+  type HotspotStatus,
   type WifiNetwork,
   type WifiStatus,
   type TailscaleStatus,
@@ -148,6 +154,60 @@ export default function ConfigurationPage() {
   const [tsLoading, setTsLoading] = useState(false)
   const [tsAction, setTsAction] = useState<string | null>(null)
   const [tsMessage, setTsMessage] = useState<{ type: "success" | "error" | "auth"; text: string; url?: string } | null>(null)
+
+  // Hotspot (SSID local)
+  const [hsStatus, setHsStatus] = useState<HotspotStatus | null>(null)
+  const [hsCreds, setHsCreds] = useState<{ ssid: string; password: string } | null>(null)
+  const [hsNewPassword, setHsNewPassword] = useState("")
+  const [hsBusy, setHsBusy] = useState<string | null>(null)
+  const [hsMessage, setHsMessage] = useState<{ type: "success" | "error"; text: string } | null>(null)
+
+  const fetchHotspotStatus = useCallback(async () => {
+    try {
+      setHsStatus(await getHotspotStatus())
+    } catch {
+      setHsStatus(null)
+    }
+  }, [])
+
+  const fetchHotspotCredentials = useCallback(async () => {
+    try {
+      setHsCreds(await getHotspotCredentials())
+    } catch {
+      setHsCreds(null)
+    }
+  }, [])
+
+  const handleHotspotAction = async (action: "start" | "stop") => {
+    setHsBusy(action)
+    setHsMessage(null)
+    try {
+      const res = action === "start" ? await startHotspot() : await stopHotspot()
+      setHsMessage({ type: "success", text: res.detail || (action === "start" ? "Hotspot demarre" : "Hotspot arrete") })
+    } catch (e) {
+      setHsMessage({ type: "error", text: e instanceof Error ? e.message : "Echec de l'operation" })
+    } finally {
+      await fetchHotspotStatus()
+      setHsBusy(null)
+    }
+  }
+
+  const handleHotspotPassword = async () => {
+    setHsBusy("password")
+    setHsMessage(null)
+    try {
+      await setHotspotPassword(hsNewPassword)
+      setHsNewPassword("")
+      setHsMessage({ type: "success", text: "Mot de passe mis a jour" })
+      await fetchHotspotCredentials()
+    } catch (e) {
+      setHsMessage({ type: "error", text: e instanceof Error ? e.message : "Echec de l'operation" })
+    } finally {
+      setHsBusy(null)
+    }
+  }
+
+  const hsPasswordValid = hsNewPassword.length >= 8 && hsNewPassword.length <= 63
 
   // Fetch connection status (wifi + ethernet)
   const fetchConnectionStatus = useCallback(async () => {
@@ -587,7 +647,9 @@ export default function ConfigurationPage() {
     fetchBranches()
     fetchBackups()
     fetchTailscale()
-  }, [fetchConnectionStatus, fetchVersionInfo, fetchBranches, fetchBackups, fetchTailscale])
+    fetchHotspotStatus()
+    fetchHotspotCredentials()
+  }, [fetchConnectionStatus, fetchVersionInfo, fetchBranches, fetchBackups, fetchTailscale, fetchHotspotStatus, fetchHotspotCredentials])
 
   // Signal strength helper
   const getSignalIcon = (signal: number) => {
@@ -1189,6 +1251,138 @@ export default function ConfigurationPage() {
                 </Button>
               </div>
             )}
+          </CardContent>
+        </Card>
+
+        {/* Hotspot Card */}
+        <Card className="border-border bg-card">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${hsStatus?.active ? "bg-success/10" : "bg-primary/10"}`}>
+                  <Wifi className={`h-5 w-5 ${hsStatus?.active ? "text-success" : "text-primary"}`} />
+                </div>
+                <div>
+                  <CardTitle className="text-lg">Hotspot (SSID local)</CardTitle>
+                  <CardDescription>Point d{"'"}acces Wi-Fi du Pi</CardDescription>
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => { fetchHotspotStatus(); fetchHotspotCredentials() }}
+                className="bg-transparent"
+              >
+                <RefreshCw className="h-4 w-4" />
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-2 gap-3 text-sm" suppressHydrationWarning>
+              <div>
+                <p className="text-xs text-muted-foreground">Statut</p>
+                <p className={`text-xs font-medium ${hsStatus?.active ? "text-success" : "text-muted-foreground"}`} suppressHydrationWarning>
+                  {hsStatus ? (hsStatus.active ? "Actif" : "Inactif") : "-"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Clients</p>
+                <p className="font-mono text-xs" suppressHydrationWarning>{hsStatus ? hsStatus.clients : "-"}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">SSID</p>
+                <p className="font-mono text-xs" suppressHydrationWarning>{hsStatus?.ssid || hsCreds?.ssid || "-"}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Interface</p>
+                <p className="font-mono text-xs" suppressHydrationWarning>{hsStatus?.interface || "-"}</p>
+              </div>
+            </div>
+
+            <div className="space-y-2 rounded-lg border border-border p-3">
+              <div>
+                <p className="text-xs text-muted-foreground">SSID</p>
+                <div className="flex items-center gap-1.5">
+                  <p className="font-mono text-xs" suppressHydrationWarning>{hsCreds?.ssid ?? "-"}</p>
+                  {hsCreds?.ssid && (
+                    <button
+                      onClick={() => navigator.clipboard.writeText(hsCreds.ssid)}
+                      className="text-muted-foreground hover:text-foreground transition-colors"
+                      title="Copier"
+                    >
+                      <Copy className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Mot de passe</p>
+                <div className="flex items-center gap-1.5">
+                  <p className="font-mono text-xs" suppressHydrationWarning>{hsCreds?.password ?? "-"}</p>
+                  {hsCreds?.password && (
+                    <button
+                      onClick={() => navigator.clipboard.writeText(hsCreds.password)}
+                      className="text-muted-foreground hover:text-foreground transition-colors"
+                      title="Copier"
+                    >
+                      <Copy className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="hotspot-password" className="text-xs">Nouveau mot de passe (8 a 63 caracteres)</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="hotspot-password"
+                  type="password"
+                  value={hsNewPassword}
+                  onChange={(e) => setHsNewPassword(e.target.value)}
+                  maxLength={63}
+                  autoComplete="new-password"
+                  placeholder="Nouveau mot de passe"
+                />
+                <Button
+                  onClick={handleHotspotPassword}
+                  disabled={!hsPasswordValid || hsBusy !== null}
+                  variant="outline"
+                  className="bg-transparent"
+                >
+                  {hsBusy === "password" ? <Loader2 className="h-4 w-4 animate-spin" /> : "Appliquer"}
+                </Button>
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <Button onClick={() => handleHotspotAction("start")} disabled={hsBusy !== null} className="flex-1">
+                {hsBusy === "start" ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Power className="h-4 w-4 mr-2" />}
+                Demarrer
+              </Button>
+              <Button
+                onClick={() => handleHotspotAction("stop")}
+                disabled={hsBusy !== null}
+                variant="outline"
+                className="flex-1 bg-transparent"
+              >
+                {hsBusy === "stop" ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <PowerOff className="h-4 w-4 mr-2" />}
+                Arreter
+              </Button>
+            </div>
+
+            {hsMessage && (
+              <Alert variant={hsMessage.type === "error" ? "destructive" : "default"}>
+                <AlertDescription>{hsMessage.text}</AlertDescription>
+              </Alert>
+            )}
+
+            <Alert>
+              <AlertTriangle className="h-4 w-4" />
+              <AlertDescription>
+                Sur une seule carte WiFi, demarrer le hotspot coupe la connexion client.
+              </AlertDescription>
+            </Alert>
           </CardContent>
         </Card>
 
