@@ -1,0 +1,84 @@
+"""AURIGE - Permissions fines (RBAC). Voir la spec pour la matrice complète."""
+import re
+
+AREA_FLAGS = [
+    "area_dashboard", "area_missions", "area_control", "area_analysis",
+    "area_capture", "area_configuration", "area_administration",
+]
+ACTION_FLAGS = [
+    "can_inject", "fuzzing_run", "crash_recovery_run", "causality_validate",
+    "capture_run", "replay_run", "missions_create", "missions_edit",
+    "missions_delete", "dbc_manage", "obd_write", "system_update",
+    "system_reboot", "system_network", "system_backup",
+]
+ALL_FLAGS = AREA_FLAGS + ACTION_FLAGS
+
+VIEWER_DEFAULT = {f: False for f in ALL_FLAGS}
+VIEWER_DEFAULT.update({
+    "area_dashboard": True, "area_missions": True,
+    "area_analysis": True, "area_capture": True,
+})
+
+OPERATOR_DEFAULT = {f: True for f in ALL_FLAGS}
+OPERATOR_DEFAULT.update({
+    "area_administration": False, "system_update": False,
+    "system_reboot": False, "system_network": False, "system_backup": False,
+})
+
+PRESETS = {"admin": None, "operator": OPERATOR_DEFAULT, "viewer": VIEWER_DEFAULT}
+DEFAULT_PERMISSIONS = VIEWER_DEFAULT
+
+
+def sanitize_permissions(raw):
+    if raw is None:
+        return None
+    return {k: bool(v) for k, v in raw.items() if k in ALL_FLAGS}
+
+
+def effective_permissions(role, permissions):
+    if role == "admin":
+        return {f: True for f in ALL_FLAGS}
+    eff = dict(VIEWER_DEFAULT)
+    if permissions:
+        eff.update({k: bool(v) for k, v in permissions.items() if k in ALL_FLAGS})
+    return eff
+
+
+def allows(role, permissions, needed):
+    eff = effective_permissions(role, permissions)
+    return any(eff.get(f, False) for f in needed)
+
+
+# (method, compiled regex on path) -> required flags (any-of). Fail-closed:
+# add an entry for every injection/stateful/system route. Starter set covers
+# the dangerous routes; extend by auditing main.py (see Task 5, Step 6).
+_ROUTE_RULES = [
+    ("POST", r"^/api/can/send", ["can_inject"]),
+    ("POST", r"^/api/generator/.*send", ["can_inject"]),
+    ("POST", r"^/api/fuzzing/(start|run)", ["fuzzing_run"]),
+    ("POST", r"^/api/fuzzing/crash-recovery", ["crash_recovery_run"]),
+    ("POST", r"^/api/analysis/validate-causality", ["causality_validate"]),
+    ("POST", r"^/api/capture/", ["capture_run"]),
+    ("POST", r"^/api/replay/", ["replay_run"]),
+    ("POST", r"^/api/missions$", ["missions_create"]),
+    ("DELETE", r"^/api/missions/[^/]+$", ["missions_delete"]),
+    ("POST", r"^/api/system/(apt|update)", ["system_update"]),
+    ("POST", r"^/api/system/(reboot|restart-services)", ["system_reboot"]),
+    ("POST", r"^/api/network/", ["system_network"]),
+    ("POST", r"^/api/tailscale/", ["system_network"]),
+    ("POST", r"^/api/system/backups", ["system_backup"]),
+]
+_COMPILED = [(m, re.compile(p), flags) for m, p, flags in _ROUTE_RULES]
+
+
+def required_permissions(method, path):
+    for m, rx, flags in _COMPILED:
+        if m == method and rx.search(path):
+            return flags
+    return []
+
+
+def is_admin_route(method, path):
+    if re.match(r"^/api/auth/users(/[^/]+)?$", path) and method in ("POST", "PATCH", "DELETE"):
+        return True
+    return False
