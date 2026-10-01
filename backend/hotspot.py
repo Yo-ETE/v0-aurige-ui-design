@@ -20,26 +20,29 @@ AP_IP = "192.168.4.1"
 def _run(cmd, timeout=10):
     """Exécute cmd (liste) ; retourne (returncode, stdout+stderr)."""
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                           errors="replace")
         return p.returncode, (p.stdout or "") + (p.stderr or "")
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError, ValueError) as e:
         return 1, str(e)
 
 
 def valid_ssid(s):
     if not isinstance(s, str):
         return False
-    b = s.encode("utf-8")
-    if not (1 <= len(b) <= 32):
+    if not all(32 <= ord(c) <= 126 for c in s):
         return False
-    if s.startswith("-"):
+    # ASCII imprimable : longueur en octets == longueur en caractères
+    if not (1 <= len(s) <= 32):
         return False
-    return all(32 <= ord(c) <= 126 for c in s)
+    return not s.startswith("-")
 
 
 def valid_wpa_passphrase(p):
     if not isinstance(p, str):
         return False
+    if p != p.strip():
+        return False  # la lecture du fichier fait strip() : pas d'aller-retour sûr
     if not (8 <= len(p) <= 63):
         return False
     return all(32 <= ord(c) <= 126 for c in p)
@@ -48,9 +51,11 @@ def valid_wpa_passphrase(p):
 def get_or_create_hotspot_password():
     if PASSWORD_FILE.exists():
         existing = PASSWORD_FILE.read_text(encoding="utf-8").strip()
-        if existing:
+        if valid_wpa_passphrase(existing):
             return existing
     pw = secrets.token_urlsafe(9)
+    while pw.startswith("-"):  # évite qu'un nmcli/hostapd le lise comme une option
+        pw = secrets.token_urlsafe(9)
     _write_password(pw)
     return pw
 
@@ -69,14 +74,18 @@ def set_hotspot_password(pw):
 
 
 def _iface_has_ip(prefixes):
-    """True si une interface dont le nom commence par un des prefixes a une IPv4."""
+    """True si une interface dont le nom commence par un des prefixes a une IPv4
+    routable (les adresses link-local 169.254.0.0/16 sont ignorées)."""
     rc, out = _run(["ip", "-o", "-4", "addr", "show"], timeout=5)
     if rc != 0:
         return False
     for line in out.splitlines():
         parts = line.split()
-        if len(parts) >= 2 and any(parts[1].startswith(p) for p in prefixes):
-            return True
+        if len(parts) < 4 or not any(parts[1].startswith(p) for p in prefixes):
+            continue
+        if parts[3].startswith("169.254."):
+            continue
+        return True
     return False
 
 
