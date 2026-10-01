@@ -185,25 +185,63 @@ export async function checkHealth(): Promise<{ status: string; timestamp: string
 }
 
 // =============================================================================
-// Authentification (token partagé, cookie HttpOnly posé par le backend)
+// Authentification (comptes utilisateurs, cookie HttpOnly posé par le backend)
 // =============================================================================
 
-export async function getAuthStatus(): Promise<{ authenticated: boolean }> {
-  return fetchApi("/auth/status", { cache: "no-store" })
+export const ALL_PERMISSION_FLAGS = [
+  "area_dashboard","area_missions","area_control","area_analysis","area_capture",
+  "area_configuration","area_administration","can_inject","fuzzing_run",
+  "crash_recovery_run","causality_validate","capture_run","replay_run",
+  "missions_create","missions_edit","missions_delete","dbc_manage","obd_write",
+  "system_update","system_reboot","system_network","system_backup",
+] as const
+export type PermissionFlag = (typeof ALL_PERMISSION_FLAGS)[number]
+export type UserPermissions = Partial<Record<PermissionFlag, boolean>>
+
+export interface AuthUser {
+  id: number
+  username: string
+  role: "admin" | "viewer"
+  permissions: UserPermissions | null
+}
+export interface ManagedUser extends AuthUser {
+  is_active: boolean
+  last_login: string | null
 }
 
-export async function login(token: string): Promise<{ authenticated: boolean }> {
+export async function login(username: string, password: string): Promise<{ user: AuthUser }> {
   return fetchApi("/auth/login", {
     method: "POST",
-    body: JSON.stringify({ token }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
   })
 }
-
 export async function logout(): Promise<void> {
   await fetchApi("/auth/logout", { method: "POST" })
-  if (typeof window !== "undefined") {
-    window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT))
-  }
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT))
+}
+export async function getMe(): Promise<AuthUser> {
+  return fetchApi("/auth/me", { cache: "no-store" })
+}
+export async function listUsers(): Promise<ManagedUser[]> {
+  return fetchApi("/auth/users", { cache: "no-store" })
+}
+export async function createUser(input: {
+  username: string; password: string; role: "admin" | "viewer"; permissions: UserPermissions | null
+}): Promise<{ id: number }> {
+  return fetchApi("/auth/users", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input),
+  })
+}
+export async function updateUser(id: number, patch: {
+  password?: string; role?: "admin" | "viewer"; permissions?: UserPermissions | null; is_active?: boolean
+}): Promise<void> {
+  await fetchApi(`/auth/users/${id}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch),
+  })
+}
+export async function deleteUser(id: number): Promise<void> {
+  await fetchApi(`/auth/users/${id}`, { method: "DELETE" })
 }
 
 // =============================================================================
