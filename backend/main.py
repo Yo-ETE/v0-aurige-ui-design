@@ -36,7 +36,8 @@ from pydantic import BaseModel, Field
 from error_logger import log_error, log_info, setup_error_logging
 from dbc_parser import parse_dbc_file
 import db
-from auth import SessionAuthMiddleware, router as auth_router
+from auth import SessionAuthMiddleware, require_permission, router as auth_router
+from permissions import allows
 from routers.users import router as users_router
 
 # =============================================================================
@@ -78,8 +79,10 @@ async def lifespan(app: FastAPI):
   setup_error_logging(DATA_DIR)
   log_info("AURIGE Backend starting up")
   await db.init_db(DB_PATH)
-  yield
-  await db.close_db()
+  try:
+    yield
+  finally:
+    await db.close_db()
   
   # Stop all processes on shutdown
   for proc in [state.candump_process, state.capture_process, 
@@ -99,13 +102,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=CORS_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 app.include_router(auth_router)
 app.include_router(users_router)
 
@@ -573,6 +569,39 @@ def can_interface_down(interface: str):
     Uses: ip link set can0 down
     """
     run_command(["ip", "link", "set", interface, "down"])
+
+
+_HEX2_RE = re.compile(r"^[0-9A-Fa-f]{2}$")
+OBD_READ_ONLY_SERVICES = {"01", "09"}
+
+
+def validate_obd_params(service: str, pid: str) -> tuple[str, str]:
+    """Valide service/pid OBD (exactement 2 hex chacun). Retourne (service, pid) en majuscules."""
+    if not isinstance(service, str) or not isinstance(pid, str)             or not _HEX2_RE.match(service) or not _HEX2_RE.match(pid):
+        raise ValueError("service et pid doivent etre exactement 2 caracteres hexadecimaux")
+    return service.upper(), pid.upper()
+
+
+def obd_service_needs_write(service: str) -> bool:
+    """Tout service OBD hors 01/09 (ex. 04 effacement DTC, 11 reset ECU) exige obd_write."""
+    return service not in OBD_READ_ONLY_SERVICES
+
+
+def guard_obd_http(request: Request, service: str, pid: str) -> tuple[str, str]:
+    try:
+        service, pid = validate_obd_params(service, pid)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if obd_service_needs_write(service):
+        require_permission(request, "obd_write")
+    return service, pid
+
+
+def ws_user_may_obd_write(websocket: WebSocket) -> bool:
+    user = (websocket.scope.get("state") or {}).get("user")
+    if not user:
+        return False
+    return user["role"] == "admin" or allows(user["role"], user["permissions"], ["obd_write"])
 
 
 def can_send_frame(interface: str, can_id: str, data: str) -> tuple[bool, str]:
@@ -3718,6 +3747,7 @@ async def get_last_obd_report():
 
 @app.post("/api/obd/pid")
 async def read_obd_pid(
+    request: Request,
     interface: str = "can0",
     service: str = "01",  # Service 01 = Current Data
     pid: str = "0C",  # PID 0C = Engine RPM
@@ -3732,6 +3762,7 @@ async def read_obd_pid(
     - 01 0F: Intake Air Temp
     - 01 2F: Fuel Level
     """
+    service, pid = guard_obd_http(request, service, pid)
     # Format: Length + Service + PID + padding
     data = f"02{service}{pid}0000000000"[:16]
     _, _ = can_send_frame(interface, "7DF", data)
@@ -7234,6 +7265,7 @@ async def extract_obd_from_log(
 
 @app.post("/api/signal-finder/read-pid")
 async def signal_finder_read_pid(
+    request: Request,
     interface: str = "can0",
     pid: str = "0C",
     service: str = "01",
@@ -7242,6 +7274,7 @@ async def signal_finder_read_pid(
     Read a specific OBD-II PID and return the decoded value.
     Used by Signal Finder to collect OBD samples in live mode.
     """
+    service, pid = guard_obd_http(request, service, pid)
     ts = time.time()
     
     pid_upper = pid.upper()
@@ -7398,7 +7431,14 @@ async def websocket_signal_finder(websocket: WebSocket, interface: str = Query(d
             action = msg.get("action")
             
             if action == "start":
-                pid = msg.get("pid", "0C").upper()
+                try:
+                    ws_service, pid = validate_obd_params(str(msg.get("service", "01")), str(msg.get("pid", "0C")))
+                except ValueError as e:
+                    await websocket.send_text(json.dumps({"type": "error", "message": str(e)}))
+                    continue
+                if obd_service_needs_write(ws_service) and not ws_user_may_obd_write(websocket):
+                    await websocket.send_text(json.dumps({"type": "error", "message": "Permission refusee (obd_write requis)"}))
+                    continue
                 iface = msg.get("interface", interface)
                 interval_ms = msg.get("intervalMs", 300)
                 interval_s = max(interval_ms / 1000.0, 0.15)
@@ -7422,7 +7462,7 @@ async def websocket_signal_finder(websocket: WebSocket, interface: str = Query(d
                 while running:
                     ts = time.time()
                     decoder = OBD_PID_DECODERS.get(pid)
-                    data_str = f"02{msg.get('service', '01')}{pid}0000000000"[:16]
+                    data_str = f"02{ws_service}{pid}0000000000"[:16]
                     
                     result = await obd_send_with_flow_control(iface, "7DF", data_str, "7E8")
                     
@@ -8363,9 +8403,16 @@ async def validate_causality_endpoint(request: CausalityRequest):
     }
 
 
-# SessionAuthMiddleware est ASGI pur (couvre aussi les WebSocket) : on enveloppe
-# l'app EN DERNIER pour qu'il soit le plus externe. Ne rien declarer apres.
-app = SessionAuthMiddleware(app)
+# SessionAuthMiddleware (ASGI pur, couvre les WebSocket) enveloppe l'app, et CORS
+# enveloppe l'auth : 401/403 portent les en-tetes CORS. Ne rien declarer apres.
+fastapi_app = app
+app = CORSMiddleware(
+    SessionAuthMiddleware(fastapi_app),
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 if __name__ == "__main__":
     import uvicorn
