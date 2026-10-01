@@ -40,7 +40,7 @@ def verify_password(password: str, stored: str) -> bool:
         candidate = hashlib.pbkdf2_hmac(
             "sha256", password.encode("utf-8"), bytes.fromhex(salt), PBKDF2_ITERATIONS
         ).hex()
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, AttributeError):
         return False
     return hmac.compare_digest(candidate, digest)
 
@@ -113,12 +113,14 @@ async def _seed_admin() -> None:
     if (await cur.fetchone())["n"] != 0:
         return
     password = secrets.token_urlsafe(12)
-    await create_user("admin", password, role="admin", permissions=None)
+    # Écrire le fichier AVANT d'insérer l'admin : un échec d'écriture ne doit
+    # jamais laisser un admin au mot de passe inconnu (le seed ne rejouerait pas).
     if _db_dir is not None:
         path = _db_dir / "initial_admin_password.txt"
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(f"username: admin\npassword: {password}\n")
+    await create_user("admin", password, role="admin", permissions=None)
 
 
 async def create_user(username, password, role="viewer", permissions=None) -> int:
@@ -220,6 +222,7 @@ async def get_session_user(token) -> Optional[dict]:
         return None
     cached = _session_cache.get(token)
     if cached and (asyncio.get_event_loop().time() - cached[1]) < _CACHE_TTL:
+        # Re-check d'expiration volontairement ignoré dans la fenêtre de 20s (expiry naturelle <=20s de retard ; tout changement de droits appelle invalidate_user_cache).
         return cached[0]
     cur = await _conn.execute(
         """SELECT u.*, s.token AS session_token, s.expires_at AS expires_at
