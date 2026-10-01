@@ -32,7 +32,9 @@ DEFAULT_PERMISSIONS = VIEWER_DEFAULT
 def sanitize_permissions(raw):
     if raw is None:
         return None
-    return {k: bool(v) for k, v in raw.items() if k in ALL_FLAGS}
+    if not isinstance(raw, dict):
+        return None
+    return {k: v for k, v in raw.items() if k in ALL_FLAGS and isinstance(v, bool)}
 
 
 def effective_permissions(role, permissions):
