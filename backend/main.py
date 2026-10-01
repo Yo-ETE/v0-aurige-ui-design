@@ -35,7 +35,9 @@ from pydantic import BaseModel, Field
 
 from error_logger import log_error, log_info, setup_error_logging
 from dbc_parser import parse_dbc_file
-from auth import TokenAuthMiddleware, init_auth, router as auth_router
+import db
+from auth import SessionAuthMiddleware, router as auth_router
+from routers.users import router as users_router
 
 # =============================================================================
 # Configuration
@@ -46,9 +48,8 @@ MISSIONS_DIR = DATA_DIR / "missions"
 
 MISSIONS_DIR.mkdir(parents=True, exist_ok=True)
 
-# Token d'API (AUD-01) : hors de DATA_DIR pour ne pas finir dans les sauvegardes
-TOKEN_FILE = Path(os.getenv("AURIGE_TOKEN_FILE", str(DATA_DIR.parent / "api_token")))
-init_auth(TOKEN_FILE)
+# Base SQLite des comptes (auth + RBAC)
+DB_PATH = Path(os.getenv("AURIGE_DB_PATH", str(DATA_DIR / "aurige.db")))
 
 # Origines autorisées en CORS : aucune en prod (nginx, même origine), le dev local
 # (Next sur :3000, API sur :8000) et celles listées dans AURIGE_CORS_ORIGINS.
@@ -76,7 +77,9 @@ async def lifespan(app: FastAPI):
   """Startup and cleanup"""
   setup_error_logging(DATA_DIR)
   log_info("AURIGE Backend starting up")
+  await db.init_db(DB_PATH)
   yield
+  await db.close_db()
   
   # Stop all processes on shutdown
   for proc in [state.candump_process, state.capture_process, 
@@ -96,9 +99,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Ordre : le dernier ajouté est le plus externe. CORS enveloppe l'auth pour que
-# les réponses 401 portent les en-têtes CORS et que les preflight passent.
-app.add_middleware(TokenAuthMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
@@ -107,6 +107,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(auth_router)
+app.include_router(users_router)
 
 
 # =============================================================================
@@ -8361,6 +8362,10 @@ async def validate_causality_endpoint(request: CausalityRequest):
         "details": results,
     }
 
+
+# SessionAuthMiddleware est ASGI pur (couvre aussi les WebSocket) : on enveloppe
+# l'app EN DERNIER pour qu'il soit le plus externe. Ne rien declarer apres.
+app = SessionAuthMiddleware(app)
 
 if __name__ == "__main__":
     import uvicorn

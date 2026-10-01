@@ -55,20 +55,58 @@ def allows(role, permissions, needed):
 # add an entry for every injection/stateful/system route. Starter set covers
 # the dangerous routes; extend by auditing main.py (see Task 5, Step 6).
 _ROUTE_RULES = [
+    # --- Injection de trames / pilotage du bus ---
     ("POST", r"^/api/can/send", ["can_inject"]),
-    ("POST", r"^/api/generator/.*send", ["can_inject"]),
-    ("POST", r"^/api/fuzzing/(start|run)", ["fuzzing_run"]),
+    ("POST", r"^/api/can/(init|stop|scan-bitrate)", ["can_inject"]),
+    ("POST", r"^/api/generator/", ["can_inject"]),
+    ("POST", r"^/api/fuzzing/(start|run|stop|force-cleanup)", ["fuzzing_run"]),
     ("POST", r"^/api/fuzzing/crash-recovery", ["crash_recovery_run"]),
     ("POST", r"^/api/analysis/validate-causality", ["causality_validate"]),
     ("POST", r"^/api/capture/", ["capture_run"]),
     ("POST", r"^/api/replay/", ["replay_run"]),
+    # --- OBD (ecriture : effacement DTC, reset ECU) ---
+    ("POST", r"^/api/obd/(reset|dtc/clear)", ["obd_write"]),
+    # --- DBC (avant les regles missions : premier match gagne) ---
+    ("POST", r"^/api/missions/[^/]+/dbc", ["dbc_manage"]),
+    ("PUT", r"^/api/missions/[^/]+/dbc", ["dbc_manage"]),
+    ("PATCH", r"^/api/missions/[^/]+/dbc", ["dbc_manage"]),
+    ("DELETE", r"^/api/missions/[^/]+/dbc", ["dbc_manage"]),
+    # --- Missions ---
     ("POST", r"^/api/missions$", ["missions_create"]),
+    ("POST", r"^/api/missions/[^/]+/duplicate$", ["missions_create"]),
     ("DELETE", r"^/api/missions/[^/]+$", ["missions_delete"]),
+    ("PATCH", r"^/api/missions/[^/]+$", ["missions_edit"]),
+    ("PUT", r"^/api/missions/[^/]+$", ["missions_edit"]),
+    ("POST", r"^/api/missions/[^/]+/(logs/(create-frame|[^/]+/(rename|split))|import-log|comparisons)", ["missions_edit"]),
+    ("PUT", r"^/api/missions/[^/]+/", ["missions_edit"]),
+    ("PATCH", r"^/api/missions/[^/]+/", ["missions_edit"]),
+    ("DELETE", r"^/api/missions/[^/]+/", ["missions_edit"]),
+    # --- Systeme / reseau ---
     ("POST", r"^/api/system/(apt|update)", ["system_update"]),
-    ("POST", r"^/api/system/(reboot|restart-services)", ["system_reboot"]),
+    ("POST", r"^/api/system/(reboot|shutdown|restart-services)", ["system_reboot"]),
+    ("POST", r"^/api/system/backups?", ["system_backup"]),
     ("POST", r"^/api/network/", ["system_network"]),
     ("POST", r"^/api/tailscale/", ["system_network"]),
-    ("POST", r"^/api/system/backups", ["system_backup"]),
+    # Verbes non-POST : fail-closed sur les memes prefixes
+    ("PUT", r"^/api/system/(apt|update)", ["system_update"]),
+    ("PATCH", r"^/api/system/(apt|update)", ["system_update"]),
+    ("DELETE", r"^/api/system/(apt|update)", ["system_update"]),
+    ("PUT", r"^/api/system/(reboot|shutdown|restart-services)", ["system_reboot"]),
+    ("PATCH", r"^/api/system/(reboot|shutdown|restart-services)", ["system_reboot"]),
+    ("DELETE", r"^/api/system/(reboot|shutdown|restart-services)", ["system_reboot"]),
+    ("PUT", r"^/api/system/backups?", ["system_backup"]),
+    ("PATCH", r"^/api/system/backups?", ["system_backup"]),
+    ("DELETE", r"^/api/system/backups?", ["system_backup"]),
+    ("PUT", r"^/api/network/", ["system_network"]),
+    ("PATCH", r"^/api/network/", ["system_network"]),
+    ("DELETE", r"^/api/network/", ["system_network"]),
+    ("PUT", r"^/api/tailscale/", ["system_network"]),
+    ("PATCH", r"^/api/tailscale/", ["system_network"]),
+    ("DELETE", r"^/api/tailscale/", ["system_network"]),
+    # Fail-closed : tout autre verbe mutant sous /api/system/ exige system_update
+    ("PUT", r"^/api/system/", ["system_update"]),
+    ("PATCH", r"^/api/system/", ["system_update"]),
+    ("DELETE", r"^/api/system/", ["system_update"]),
 ]
 _COMPILED = [(m, re.compile(p), flags) for m, p, flags in _ROUTE_RULES]
 

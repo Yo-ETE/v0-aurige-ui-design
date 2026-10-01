@@ -164,3 +164,56 @@ def test_is_admin_route():
     assert not perms.is_admin_route("GET", "/api/missions")
     assert not perms.is_admin_route("GET", "/api/auth/users")  # GET not admin
     assert not perms.is_admin_route("POST", "/api/auth/sessions")  # wrong path
+
+
+def test_route_audit_new_rules():
+    """Task 5 route audit: every dangerous/stateful route has a guard."""
+    rp = perms.required_permissions
+    # OBD write
+    assert rp("POST", "/api/obd/reset") == ["obd_write"]
+    assert rp("POST", "/api/obd/dtc/clear") == ["obd_write"]
+    assert rp("POST", "/api/obd/dtc/read") == []  # lecture seule
+    # DBC
+    assert rp("POST", "/api/missions/m1/dbc/import") == ["dbc_manage"]
+    assert rp("POST", "/api/missions/m1/dbc/signal") == ["dbc_manage"]
+    assert rp("DELETE", "/api/missions/m1/dbc/signal/s1") == ["dbc_manage"]
+    assert rp("DELETE", "/api/missions/m1/dbc/message/123") == ["dbc_manage"]
+    assert rp("DELETE", "/api/missions/m1/dbc") == ["dbc_manage"]
+    # Generator start/stop (no "send" in path)
+    assert rp("POST", "/api/generator/start") == ["can_inject"]
+    assert rp("POST", "/api/generator/stop") == ["can_inject"]
+    # CAN bus control
+    for p in ("init", "stop", "scan-bitrate"):
+        assert rp("POST", f"/api/can/{p}") == ["can_inject"]
+    # Fuzzing stop/cleanup
+    assert rp("POST", "/api/fuzzing/stop") == ["fuzzing_run"]
+    assert rp("POST", "/api/fuzzing/force-cleanup") == ["fuzzing_run"]
+    # Missions edit/create
+    assert rp("PATCH", "/api/missions/m1") == ["missions_edit"]
+    assert rp("POST", "/api/missions/m1/duplicate") == ["missions_create"]
+    assert rp("DELETE", "/api/missions/m1/logs/l1") == ["missions_edit"]
+    assert rp("PUT", "/api/missions/m1/logs/l1/tags") == ["missions_edit"]
+    assert rp("POST", "/api/missions/m1/logs/l1/rename") == ["missions_edit"]
+    assert rp("POST", "/api/missions/m1/logs/l1/split") == ["missions_edit"]
+    assert rp("POST", "/api/missions/m1/logs/create-frame") == ["missions_edit"]
+    assert rp("POST", "/api/missions/m1/import-log") == ["missions_edit"]
+    assert rp("POST", "/api/missions/m1/comparisons") == ["missions_edit"]
+    assert rp("DELETE", "/api/missions/m1/comparisons/c1") == ["missions_edit"]
+    # Read-only analysis POSTs stay open
+    assert rp("POST", "/api/missions/m1/compare-logs") == []
+    assert rp("POST", "/api/missions/m1/logs/l1/co-occurrence") == []
+    # System: shutdown + singular backup were previously uncovered
+    assert rp("POST", "/api/system/shutdown") == ["system_reboot"]
+    assert rp("POST", "/api/system/backup") == ["system_backup"]
+    assert rp("POST", "/api/system/backups/f.tar/restore") == ["system_backup"]
+    assert rp("DELETE", "/api/system/backups/f.tar") == ["system_backup"]
+    # Non-POST verbs on system/network/tailscale
+    assert rp("PUT", "/api/network/wifi/connect") == ["system_network"]
+    assert rp("DELETE", "/api/network/wifi/saved") == ["system_network"]
+    assert rp("PUT", "/api/tailscale/up") == ["system_network"]
+    assert rp("DELETE", "/api/tailscale/x") == ["system_network"]
+    assert rp("PUT", "/api/system/reboot") == ["system_reboot"]
+    assert rp("PATCH", "/api/system/update") == ["system_update"]
+    assert rp("DELETE", "/api/system/anything") == ["system_update"]
+    # GETs never gated
+    assert rp("GET", "/api/system/backups") == []
