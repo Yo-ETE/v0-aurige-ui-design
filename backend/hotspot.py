@@ -3,11 +3,15 @@
 Toutes les commandes passent par _run (liste, jamais shell=True) : pas
 d'injection, et les tests peuvent le monkeypatcher.
 """
+import asyncio
 import os
 import re
 import secrets
 import subprocess
+import time
 from pathlib import Path
+
+from error_logger import log_info
 
 DATA_DIR = Path(os.getenv("AURIGE_DATA_DIR", "/opt/aurige/data"))
 PASSWORD_FILE = DATA_DIR / "hotspot_password.txt"
@@ -15,6 +19,13 @@ PASSWORD_FILE = DATA_DIR / "hotspot_password.txt"
 AP_BAND = "bg"
 AP_CHANNEL = "6"
 AP_IP = "192.168.4.1"
+
+SSID_DEFAULT = os.getenv("AURIGE_AUTO_HOTSPOT_SSID", "AURIGE")
+AUTO = os.getenv("AURIGE_AUTO_HOTSPOT", "1").strip().lower() not in ("0", "false", "no")
+AUTO_DELAY_S = float(os.getenv("AURIGE_AUTO_HOTSPOT_DELAY_S", "45"))
+AUTO_BOOT_WINDOW_S = float(os.getenv("AURIGE_AUTO_HOTSPOT_BOOT_WINDOW_S", "300"))
+
+HOSTAPD_DRIVERS = ("nl80211", "rtl871xdrv", "wext")
 
 
 def _run(cmd, timeout=10):
@@ -119,3 +130,121 @@ def get_ap_capable_interface():
                 return iface
     ifaces = _wireless_interfaces()
     return ifaces[0] if ifaces else "wlan0"
+
+
+def start_hotspot_blocking(ssid, password):
+    if not valid_ssid(ssid):
+        return {"status": "error", "detail": "SSID invalide", "interface": ""}
+    if not valid_wpa_passphrase(password):
+        return {"status": "error", "detail": "Mot de passe invalide", "interface": ""}
+    iface = get_ap_capable_interface()
+    rc, _ = _run(["which", "hostapd"], timeout=5)
+    if rc != 0:
+        return {"status": "error", "detail": "hostapd absent (apt install hostapd)", "interface": iface}
+
+    _run(["sudo", "iw", "reg", "set", "FR"], timeout=5)
+    _run(["sudo", "nmcli", "device", "disconnect", iface], timeout=10)
+    _run(["sudo", "pkill", "hostapd"], timeout=5)
+    _run(["sudo", "pkill", "dnsmasq"], timeout=5)
+
+    # Primaire : NetworkManager
+    rc, out = _run(["sudo", "nmcli", "device", "wifi", "hotspot", "ifname", iface,
+                    "ssid", ssid, "password", password, "band", AP_BAND,
+                    "channel", AP_CHANNEL], timeout=30)
+    time.sleep(3)
+    _, active = _run(["nmcli", "-t", "-f", "NAME,TYPE", "connection", "show", "--active"], timeout=10)
+    _, info = _run(["iw", "dev", iface, "info"], timeout=5)
+    if rc == 0 and "802-11-wireless" in active:
+        if "type AP" in info:
+            return {"status": "success", "detail": "Hotspot actif (NetworkManager)", "interface": iface}
+        return {"status": "warning", "detail": "Connexion active mais mode AP non confirmé", "interface": iface}
+
+    # Fallback : hostapd + dnsmasq bruts
+    return _start_hotspot_raw(iface, ssid, password)
+
+
+def _start_hotspot_raw(iface, ssid, password):
+    _run(["sudo", "ip", "link", "set", iface, "down"], timeout=5)
+    _run(["sudo", "ip", "addr", "flush", "dev", iface], timeout=5)
+    _run(["sudo", "ip", "addr", "add", f"{AP_IP}/24", "dev", iface], timeout=5)
+    _run(["sudo", "ip", "link", "set", iface, "up"], timeout=5)
+
+    dnsmasq_conf = Path("/tmp/aurige_dnsmasq.conf")
+    dnsmasq_conf.write_text(
+        f"interface={iface}\n"
+        f"dhcp-range=192.168.4.2,192.168.4.254,255.255.255.0,24h\n"
+        "no-resolv\nbind-interfaces\n", encoding="utf-8")
+    _run(["sudo", "dnsmasq", "-C", str(dnsmasq_conf)], timeout=10)
+
+    for driver in HOSTAPD_DRIVERS:
+        conf = Path(f"/tmp/aurige_hostapd_{driver}.conf")
+        fd = os.open(conf, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(
+                f"interface={iface}\ndriver={driver}\nssid={ssid}\n"
+                f"hw_mode=g\nchannel={AP_CHANNEL}\nwmm_enabled=0\nmacaddr_acl=0\n"
+                f"auth_algs=1\nignore_broadcast_ssid=0\nwpa=2\n"
+                f"wpa_passphrase={password}\nwpa_key_mgmt=WPA-PSK\nrsn_pairwise=CCMP\n")
+        _run(["sudo", "hostapd", "-B", str(conf)], timeout=10)
+        rc, _ = _run(["pgrep", "-a", "hostapd"], timeout=5)
+        if rc == 0:
+            return {"status": "success", "detail": f"Hotspot actif (hostapd/{driver})", "interface": iface}
+    rc, _ = _run(["pgrep", "dnsmasq"], timeout=5)
+    if rc == 0:
+        return {"status": "warning", "detail": "DHCP démarré mais hostapd échoue", "interface": iface}
+    return {"status": "error", "detail": "Échec hostapd et dnsmasq", "interface": iface}
+
+
+def stop_hotspot():
+    iface = get_ap_capable_interface()
+    _, active = _run(["nmcli", "-t", "-f", "NAME,TYPE", "connection", "show", "--active"], timeout=10)
+    for line in active.splitlines():
+        name = line.split(":")[0]
+        if "hotspot" in name.lower() or "aurige" in name.lower():
+            _run(["sudo", "nmcli", "connection", "down", name], timeout=10)
+    _run(["sudo", "pkill", "hostapd"], timeout=5)
+    _run(["sudo", "pkill", "dnsmasq"], timeout=5)
+    _run(["sudo", "ip", "addr", "flush", "dev", iface], timeout=5)
+    _run(["sudo", "ip", "link", "set", iface, "up"], timeout=5)
+    _run(["sudo", "wpa_cli", "-i", iface, "reconnect"], timeout=5)
+    return {"status": "success", "detail": "Hotspot arrêté", "interface": iface}
+
+
+def hotspot_status():
+    iface = get_ap_capable_interface()
+    _, active = _run(["nmcli", "-t", "-f", "NAME,TYPE", "connection", "show", "--active"], timeout=10)
+    _, info = _run(["iw", "dev", iface, "info"], timeout=5)
+    is_ap = "802-11-wireless" in active and "type AP" in info
+    if not is_ap:
+        rc, _ = _run(["systemctl", "is-active", "hostapd"], timeout=5)
+        is_ap = rc == 0
+    ssid = ""
+    m = re.search(r"ssid (.+)", info)
+    if m:
+        ssid = m.group(1).strip()
+    clients = 0
+    rc, dump = _run(["iw", "dev", iface, "station", "dump"], timeout=5)
+    if rc == 0:
+        clients = dump.count("Station ")
+    return {"active": is_ap, "ssid": ssid, "interface": iface, "clients": clients}
+
+
+def _uptime_seconds():
+    try:
+        return float(Path("/proc/uptime").read_text().split()[0])
+    except (OSError, ValueError, IndexError):
+        return 0.0
+
+
+async def auto_hotspot_once():
+    if not AUTO:
+        return
+    await asyncio.sleep(AUTO_DELAY_S)
+    if _uptime_seconds() > AUTO_BOOT_WINDOW_S:
+        return
+    loop = asyncio.get_event_loop()
+    if await loop.run_in_executor(None, has_working_network):
+        return
+    password = get_or_create_hotspot_password()
+    await loop.run_in_executor(None, start_hotspot_blocking, SSID_DEFAULT, password)
+    log_info("Hotspot de secours démarré automatiquement (aucun réseau au boot)")

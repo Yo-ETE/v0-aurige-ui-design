@@ -91,3 +91,100 @@ def test_has_working_network(monkeypatch):
 def test_get_ap_capable_interface_fallback(monkeypatch):
     monkeypatch.setattr(hotspot, "_wireless_interfaces", lambda: [])
     assert hotspot.get_ap_capable_interface() == "wlan0"
+
+
+import asyncio
+
+_REAL_SLEEP = asyncio.sleep  # capturé avant monkeypatch (évite la récursion)
+
+
+class FakeRun:
+    """Scripted _run: maps a command-prefix substring to (rc, out)."""
+    def __init__(self, rules, record):
+        self.rules, self.record = rules, record
+
+    def __call__(self, cmd, timeout=10):
+        self.record.append(cmd)
+        joined = " ".join(cmd)
+        for needle, resp in self.rules:
+            if needle in joined:
+                return resp
+        return (0, "")
+
+
+def test_start_hotspot_nmcli_primary(monkeypatch):
+    rec = []
+    monkeypatch.setattr(hotspot, "get_ap_capable_interface", lambda: "wlan0")
+    rules = [
+        ("which hostapd", (0, "/usr/sbin/hostapd")),
+        ("nmcli device wifi hotspot", (0, "")),
+        ("connection show --active", (0, "Hotspot:802-11-wireless")),
+        ("iw dev wlan0 info", (0, "type AP")),
+    ]
+    monkeypatch.setattr(hotspot, "_run", FakeRun(rules, rec))
+    monkeypatch.setattr(hotspot.time, "sleep", lambda s: None)
+    res = hotspot.start_hotspot_blocking("AURIGE", "password10")
+    assert res["status"] == "success"
+    assert any("nmcli device wifi hotspot" in " ".join(c) for c in rec)
+
+
+def test_start_hotspot_rejects_bad_ssid(monkeypatch):
+    res = hotspot.start_hotspot_blocking("-bad", "password10")
+    assert res["status"] == "error"
+
+
+def test_start_hotspot_missing_hostapd(monkeypatch):
+    monkeypatch.setattr(hotspot, "get_ap_capable_interface", lambda: "wlan0")
+    monkeypatch.setattr(hotspot, "_run", FakeRun([("which hostapd", (1, ""))], []))
+    res = hotspot.start_hotspot_blocking("AURIGE", "password10")
+    assert res["status"] == "error" and "hostapd" in res["detail"].lower()
+
+
+def test_hotspot_status_inactive(monkeypatch):
+    monkeypatch.setattr(hotspot, "get_ap_capable_interface", lambda: "wlan0")
+    monkeypatch.setattr(hotspot, "_run", FakeRun([
+        ("connection show --active", (0, "wifi-client:802-11-wireless")),
+        ("iw dev wlan0 info", (0, "type managed")),
+        ("is-active hostapd", (3, "inactive")),
+    ], []))
+    assert hotspot.hotspot_status()["active"] is False
+
+
+@pytest.mark.asyncio
+async def test_auto_hotspot_skips_when_network_ok(monkeypatch):
+    monkeypatch.setenv("AURIGE_AUTO_HOTSPOT", "1")
+    import importlib; importlib.reload(hotspot)
+    monkeypatch.setattr(hotspot.asyncio, "sleep", lambda s: _REAL_SLEEP(0))
+    monkeypatch.setattr(hotspot, "_uptime_seconds", lambda: 10.0)
+    monkeypatch.setattr(hotspot, "has_working_network", lambda: True)
+    started = []
+    monkeypatch.setattr(hotspot, "start_hotspot_blocking", lambda s, p: started.append((s, p)) or {"status": "success"})
+    await hotspot.auto_hotspot_once()
+    assert started == []           # network OK -> no AP
+
+
+@pytest.mark.asyncio
+async def test_auto_hotspot_starts_when_no_network(monkeypatch):
+    monkeypatch.setenv("AURIGE_AUTO_HOTSPOT", "1")
+    import importlib; importlib.reload(hotspot)
+    monkeypatch.setattr(hotspot.asyncio, "sleep", lambda s: _REAL_SLEEP(0))
+    monkeypatch.setattr(hotspot, "_uptime_seconds", lambda: 10.0)
+    monkeypatch.setattr(hotspot, "has_working_network", lambda: False)
+    monkeypatch.setattr(hotspot, "get_or_create_hotspot_password", lambda: "password10")
+    started = []
+    monkeypatch.setattr(hotspot, "start_hotspot_blocking", lambda s, p: started.append((s, p)) or {"status": "success"})
+    await hotspot.auto_hotspot_once()
+    assert len(started) == 1 and started[0][0] == "AURIGE"
+
+
+@pytest.mark.asyncio
+async def test_auto_hotspot_skips_after_boot_window(monkeypatch):
+    monkeypatch.setenv("AURIGE_AUTO_HOTSPOT", "1")
+    import importlib; importlib.reload(hotspot)
+    monkeypatch.setattr(hotspot.asyncio, "sleep", lambda s: _REAL_SLEEP(0))
+    monkeypatch.setattr(hotspot, "_uptime_seconds", lambda: 9999.0)
+    monkeypatch.setattr(hotspot, "has_working_network", lambda: False)
+    started = []
+    monkeypatch.setattr(hotspot, "start_hotspot_blocking", lambda s, p: started.append(1) or {"status": "success"})
+    await hotspot.auto_hotspot_once()
+    assert started == []           # uptime > window -> no AP
