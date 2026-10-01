@@ -8,7 +8,8 @@ import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { useMissionStore } from "@/lib/mission-store"
 import { apiFetch, getApiBaseUrl, getApiHost } from "@/lib/api-config"
-import { logout } from "@/lib/api"
+import type { PermissionFlag } from "@/lib/api"
+import { useAuth } from "@/lib/auth-context"
 import Image from "next/image"
 import {
   Car,
@@ -30,6 +31,7 @@ import {
   Search,
   BarChart3,
   LogOut,
+  Users,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
@@ -51,6 +53,7 @@ interface NavItem {
   href: string
   icon: React.ComponentType<{ className?: string }>
   badge?: string
+  area?: PermissionFlag
 }
 
 interface NavSection {
@@ -62,7 +65,7 @@ interface NavSection {
 const baseNavigation: NavSection[] = [
   {
     title: "Accueil",
-    items: [{ name: "Dashboard", href: "/", icon: Home }],
+    items: [{ name: "Dashboard", href: "/", icon: Home, area: "area_dashboard" }],
   },
   {
     title: "Analyse",
@@ -71,44 +74,46 @@ const baseNavigation: NavSection[] = [
   },
   {
     title: "Configuration",
-    items: [{ name: "Contrôle CAN", href: "/controle-can", icon: Settings }],
+    items: [{ name: "Contrôle CAN", href: "/controle-can", icon: Settings, area: "area_control" }],
   },
   {
     title: "Capture & Analyse",
     items: [
-      { name: "Capture & Replay", href: "/capture-replay", icon: Video },
-      { name: "Replay Rapide", href: "/replay-rapide", icon: Zap },
-{ name: "Isolation", href: "/isolation", icon: GitBranch },
-  { name: "Comparaison", href: "/comparaison", icon: GitCompare },
-  { name: "Analyse CAN", href: "/analyse-can", icon: BarChart3 },
-  { name: "DBC", href: "/dbc", icon: FileCode },
+      { name: "Capture & Replay", href: "/capture-replay", icon: Video, area: "area_capture" },
+      { name: "Replay Rapide", href: "/replay-rapide", icon: Zap, area: "area_capture" },
+      { name: "Isolation", href: "/isolation", icon: GitBranch, area: "area_analysis" },
+      { name: "Comparaison", href: "/comparaison", icon: GitCompare, area: "area_analysis" },
+      { name: "Analyse CAN", href: "/analyse-can", icon: BarChart3, area: "area_analysis" },
+      { name: "DBC", href: "/dbc", icon: FileCode, area: "area_analysis" },
     ],
   },
   {
     title: "Diagnostic",
     items: [
-      { name: "OBD-II", href: "/obd-ii", icon: Activity },
-      { name: "Signal Finder", href: "/signal-finder", icon: Search },
+      { name: "OBD-II", href: "/obd-ii", icon: Activity, area: "area_analysis" },
+      { name: "Signal Finder", href: "/signal-finder", icon: Search, area: "area_analysis" },
     ],
   },
   {
     title: "Tests Avancés",
     items: [
-      { name: "Fuzzing", href: "/fuzzing", icon: Flame },
-      { name: "Crash Recovery", href: "/crash-recovery", icon: ShieldAlert },
-      { name: "Générateur", href: "/generateur", icon: Cpu },
+      { name: "Fuzzing", href: "/fuzzing", icon: Flame, area: "area_control" },
+      { name: "Crash Recovery", href: "/crash-recovery", icon: ShieldAlert, area: "area_control" },
+      { name: "Générateur", href: "/generateur", icon: Cpu, area: "area_control" },
     ],
   },
   {
     title: "Administration",
     items: [
-      { name: "Configuration Pi", href: "/configuration", icon: Cog },
+      { name: "Comptes", href: "/administration", icon: Users, area: "area_administration" },
+      { name: "Configuration Pi", href: "/configuration", icon: Cog, area: "area_configuration" },
     ],
   },
 ]
 
 export function Sidebar() {
   const pathname = usePathname()
+  const { hasArea, logout } = useAuth()
   const currentMission = useMissionStore((state) => state.getCurrentMission())
 
   const [expandedSections, setExpandedSections] = useState<string[]>(
@@ -179,12 +184,19 @@ export function Sidebar() {
             href: `/missions/${currentMission.id}`,
             icon: Car,
             badge: "Mission",
+            area: "area_missions" as PermissionFlag,
           },
         ],
       }
     }
     return section
   })
+    // Per-area gating: keep permitted items, drop sections left empty
+    .map((section) => ({
+      ...section,
+      items: section.items.filter((item) => !item.area || hasArea(item.area)),
+    }))
+    .filter((section) => section.items.length > 0)
 
   return (
     <>
