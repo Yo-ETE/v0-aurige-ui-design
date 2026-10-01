@@ -1,15 +1,10 @@
 "use client"
-import { ALL_PERMISSION_FLAGS, type PermissionFlag, type UserPermissions } from "@/lib/api"
+import { ALL_PERMISSION_FLAGS, OPERATOR_PRESET, VIEWER_PRESET, type PermissionFlag, type UserPermissions } from "@/lib/api"
 import { Switch } from "@/components/ui/switch"
 import { Button } from "@/components/ui/button"
 
 const AREA = ALL_PERMISSION_FLAGS.filter((f) => f.startsWith("area_"))
 const ACTION = ALL_PERMISSION_FLAGS.filter((f) => !f.startsWith("area_"))
-
-const OPERATOR: UserPermissions = Object.fromEntries(
-  ALL_PERMISSION_FLAGS.map((f) => [f, !(["area_administration","system_update","system_reboot","system_network","system_backup"] as string[]).includes(f)]),
-) as UserPermissions
-const VIEWER: UserPermissions = { area_dashboard: true, area_missions: true, area_analysis: true, area_capture: true }
 
 export function PermissionEditor({ value, onChange }: {
   value: UserPermissions; onChange: (v: UserPermissions) => void
@@ -19,8 +14,8 @@ export function PermissionEditor({ value, onChange }: {
   return (
     <div className="space-y-4">
       <div className="flex gap-2">
-        <Button type="button" variant="outline" size="sm" onClick={() => applyPreset(OPERATOR)}>Preset operator</Button>
-        <Button type="button" variant="outline" size="sm" onClick={() => applyPreset(VIEWER)}>Preset viewer</Button>
+        <Button type="button" variant="outline" size="sm" onClick={() => applyPreset(OPERATOR_PRESET)}>Preset operator</Button>
+        <Button type="button" variant="outline" size="sm" onClick={() => applyPreset(VIEWER_PRESET)}>Preset viewer</Button>
       </div>
       {[{ title: "Zones", flags: AREA }, { title: "Actions", flags: ACTION }].map((grp) => (
         <div key={grp.title} className="space-y-2">

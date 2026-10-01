@@ -198,6 +198,17 @@ export const ALL_PERMISSION_FLAGS = [
 export type PermissionFlag = (typeof ALL_PERMISSION_FLAGS)[number]
 export type UserPermissions = Partial<Record<PermissionFlag, boolean>>
 
+// Presets partagés (source unique : éditeur, création de compte, contexte auth)
+export const VIEWER_PRESET: UserPermissions = {
+  area_dashboard: true, area_missions: true, area_analysis: true, area_capture: true,
+}
+const OPERATOR_DENIED: readonly PermissionFlag[] = [
+  "area_administration", "system_update", "system_reboot", "system_network", "system_backup",
+]
+export const OPERATOR_PRESET: UserPermissions = Object.fromEntries(
+  ALL_PERMISSION_FLAGS.map((f) => [f, !OPERATOR_DENIED.includes(f)]),
+) as UserPermissions
+
 export interface AuthUser {
   id: number
   username: string

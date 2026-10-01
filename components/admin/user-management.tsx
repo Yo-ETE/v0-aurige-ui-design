@@ -1,15 +1,13 @@
 "use client"
 import { useEffect, useState } from "react"
 import { Loader2, Trash2 } from "lucide-react"
-import { createUser, deleteUser, listUsers, updateUser,
+import { VIEWER_PRESET, createUser, deleteUser, listUsers, updateUser,
          type ManagedUser, type UserPermissions } from "@/lib/api"
 import { useAuth } from "@/lib/auth-context"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { PermissionEditor } from "@/components/admin/permission-editor"
-
-const VIEWER: UserPermissions = { area_dashboard: true, area_missions: true, area_analysis: true, area_capture: true }
 
 export function UserManagement() {
   const { user: me } = useAuth()
@@ -19,7 +17,8 @@ export function UserManagement() {
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
   const [role, setRole] = useState<"admin" | "viewer">("viewer")
-  const [perms, setPerms] = useState<UserPermissions>({ ...VIEWER })
+  const [busyId, setBusyId] = useState<number | null>(null)
+  const [perms, setPerms] = useState<UserPermissions>({ ...VIEWER_PRESET })
 
   async function reload() {
     setLoading(true)
@@ -34,9 +33,24 @@ export function UserManagement() {
     try {
       await createUser({ username: username.trim(), password, role,
                          permissions: role === "admin" ? null : perms })
-      setUsername(""); setPassword(""); setRole("viewer"); setPerms({ ...VIEWER })
+      setUsername(""); setPassword(""); setRole("viewer"); setPerms({ ...VIEWER_PRESET })
       await reload()
     } catch (err) { setError(err instanceof Error ? err.message : "Création impossible.") }
+  }
+
+  async function handleToggle(u: ManagedUser) {
+    setBusyId(u.id)
+    try { await updateUser(u.id, { is_active: !u.is_active }); await reload() }
+    catch { setError("Modification refusée.") }
+    finally { setBusyId(null) }
+  }
+
+  async function handleDelete(u: ManagedUser) {
+    if (!window.confirm(`Supprimer le compte « ${u.username} » ? Cette action est irréversible.`)) return
+    setBusyId(u.id)
+    try { await deleteUser(u.id); await reload() }
+    catch { setError("Suppression refusée.") }
+    finally { setBusyId(null) }
   }
 
   if (loading) return <Loader2 className="h-5 w-5 animate-spin" />
@@ -59,12 +73,12 @@ export function UserManagement() {
               </span>
               {me?.id !== u.id && (
                 <div className="flex items-center gap-2">
-                  <Button variant="outline" size="sm"
-                    onClick={() => void updateUser(u.id, { is_active: !u.is_active }).then(reload).catch(() => setError("Modification refusée."))}>
+                  <Button variant="outline" size="sm" disabled={busyId === u.id}
+                    onClick={() => void handleToggle(u)}>
                     {u.is_active ? "Désactiver" : "Activer"}
                   </Button>
-                  <Button variant="ghost" size="sm"
-                    onClick={() => void deleteUser(u.id).then(reload).catch(() => setError("Suppression refusée."))}>
+                  <Button variant="ghost" size="sm" disabled={busyId === u.id}
+                    onClick={() => void handleDelete(u)}>
                     <Trash2 className="h-4 w-4" />
                   </Button>
                 </div>
@@ -79,11 +93,11 @@ export function UserManagement() {
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1">
             <Label htmlFor="nu">Identifiant</Label>
-            <Input id="nu" value={username} onChange={(e) => setUsername(e.target.value)} />
+            <Input id="nu" autoComplete="off" value={username} onChange={(e) => setUsername(e.target.value)} />
           </div>
           <div className="space-y-1">
             <Label htmlFor="np">Mot de passe (min 10)</Label>
-            <Input id="np" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+            <Input id="np" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
           </div>
         </div>
         <div className="flex items-center gap-2 text-sm">

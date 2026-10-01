@@ -2,12 +2,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react"
 import { AUTH_REQUIRED_EVENT } from "@/lib/api-config"
 import { APIError, getMe, login as apiLogin, logout as apiLogout,
-         type AuthUser, type PermissionFlag } from "@/lib/api"
-
-// zones en lecture seule par défaut pour un viewer sans permissions explicites
-const VIEWER_DEFAULT: Partial<Record<PermissionFlag, boolean>> = {
-  area_dashboard: true, area_missions: true, area_analysis: true, area_capture: true,
-}
+         type AuthUser, type PermissionFlag, VIEWER_PRESET } from "@/lib/api"
 
 interface AuthCtx {
   user: AuthUser | null
@@ -52,7 +47,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!user) return false
     if (user.role === "admin") return true
     // overlay identique au backend : défauts viewer + permissions stockées
-    const eff = { ...VIEWER_DEFAULT, ...(user.permissions ?? {}) }
+    const eff = { ...VIEWER_PRESET, ...(user.permissions ?? {}) }
     return !!eff[flag]
   }, [user])
 
