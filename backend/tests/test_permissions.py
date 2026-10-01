@@ -217,3 +217,8 @@ def test_route_audit_new_rules():
     assert rp("DELETE", "/api/system/anything") == ["system_update"]
     # GETs never gated
     assert rp("GET", "/api/system/backups") == []
+
+
+def test_hotspot_credentials_gated():
+    assert perms.required_permissions("GET", "/api/network/hotspot/credentials") == ["system_network"]
+    assert perms.required_permissions("POST", "/api/network/hotspot/start") == ["system_network"]

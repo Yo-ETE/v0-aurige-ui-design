@@ -36,6 +36,7 @@ from pydantic import BaseModel, Field
 from error_logger import log_error, log_info, setup_error_logging
 from dbc_parser import parse_dbc_file
 import db
+import hotspot
 from auth import SessionAuthMiddleware, require_permission, router as auth_router
 from permissions import allows
 from routers.users import router as users_router
@@ -79,9 +80,11 @@ async def lifespan(app: FastAPI):
   setup_error_logging(DATA_DIR)
   log_info("AURIGE Backend starting up")
   await db.init_db(DB_PATH)
+  hotspot_task = asyncio.create_task(hotspot.auto_hotspot_once())
   try:
     yield
   finally:
+    hotspot_task.cancel()
     await db.close_db()
   
   # Stop all processes on shutdown
@@ -4222,6 +4225,50 @@ async def get_ethernet_status():
 class WifiConnectRequest(BaseModel):
     ssid: str
     password: str
+
+
+class HotspotPassword(BaseModel):
+    password: str
+
+
+@app.get("/api/network/hotspot/status")
+async def hotspot_status_ep():
+    """Etat du hotspot Wi-Fi (AP)"""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, hotspot.hotspot_status)
+
+
+@app.get("/api/network/hotspot/credentials")
+async def hotspot_credentials_ep():
+    """SSID + mot de passe du hotspot (admin / system_network)"""
+    loop = asyncio.get_event_loop()
+    pw = await loop.run_in_executor(None, hotspot.get_or_create_hotspot_password)
+    return {"ssid": hotspot.SSID_DEFAULT, "password": pw}
+
+
+@app.post("/api/network/hotspot/credentials")
+async def hotspot_set_credentials_ep(body: HotspotPassword):
+    """Change le mot de passe du hotspot"""
+    try:
+        hotspot.set_hotspot_password(body.password)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
+
+
+@app.post("/api/network/hotspot/start")
+async def hotspot_start_ep():
+    """Demarre le hotspot"""
+    loop = asyncio.get_event_loop()
+    pw = await loop.run_in_executor(None, hotspot.get_or_create_hotspot_password)
+    return await loop.run_in_executor(None, hotspot.start_hotspot_blocking, hotspot.SSID_DEFAULT, pw)
+
+
+@app.post("/api/network/hotspot/stop")
+async def hotspot_stop_ep():
+    """Arrete le hotspot"""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, hotspot.stop_hotspot)
 
 
 @app.get("/api/network/wifi/saved")

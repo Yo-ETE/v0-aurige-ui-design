@@ -85,6 +85,7 @@ _ROUTE_RULES = [
     ("POST", r"^/api/system/(apt|update)", ["system_update"]),
     ("POST", r"^/api/system/(reboot|shutdown|restart-services)", ["system_reboot"]),
     ("POST", r"^/api/system/backups?", ["system_backup"]),
+    ("GET", r"^/api/network/hotspot/credentials", ["system_network"]),
     ("POST", r"^/api/network/", ["system_network"]),
     ("POST", r"^/api/tailscale/", ["system_network"]),
     # Verbes non-POST : fail-closed sur les memes prefixes
