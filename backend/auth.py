@@ -26,21 +26,23 @@ MIN_PASSWORD_LEN = 10
 
 PUBLIC_PATHS = frozenset({"/api/health", "/api/auth/login", "/api/auth/logout"})
 
-# rate limit login : {ip: [timestamps]}
+DUMMY_HASH = db.hash_password("x")
+
+# rate limit login : {username: [timestamps]}
 _login_attempts: dict[str, list[float]] = {}
 _RL_MAX = 5
 _RL_WINDOW = 300.0
 
 
-def _rate_limited(ip: str) -> bool:
+def _rate_limited(key: str) -> bool:
     now = time.time()
-    hits = [t for t in _login_attempts.get(ip, []) if now - t < _RL_WINDOW]
-    _login_attempts[ip] = hits
+    hits = [t for t in _login_attempts.get(key, []) if now - t < _RL_WINDOW]
+    _login_attempts[key] = hits
     return len(hits) >= _RL_MAX
 
 
-def _record_attempt(ip: str) -> None:
-    _login_attempts.setdefault(ip, []).append(time.time())
+def _record_attempt(key: str) -> None:
+    _login_attempts.setdefault(key, []).append(time.time())
 
 
 def _scope_headers(scope) -> dict[str, str]:
@@ -144,15 +146,22 @@ def require_permission(request: Request, *flags: str) -> None:
 
 @router.post("/login")
 async def login(body: LoginRequest, request: Request, response: Response):
-    ip = request.client.host if request.client else "?"
-    if _rate_limited(ip):
+    # Clé = nom d'utilisateur (nginx same-origin : l'IP client est toujours locale).
+    username = body.username.strip()
+    key = username.lower()
+    if _rate_limited(key):
         raise HTTPException(status_code=429, detail="Trop d'essais. Réessayez plus tard.")
-    user = await db.get_user_by_username(body.username.strip())
-    stored = await db._get_password_hash(body.username.strip()) if user else None
-    if not user or not user["is_active"] or not stored or not db.verify_password(body.password, stored):
-        _record_attempt(ip)
+    # Enregistré de façon synchrone AVANT tout await (anti-TOCTOU sur rafale).
+    _record_attempt(key)
+    user = await db.get_user_by_username(username)
+    stored = await db._get_password_hash(username) if user else None
+    # PBKDF2 hors boucle d'événements ; hash factice si compte absent/inactif
+    # pour que le temps de réponse ne révèle pas l'existence du compte.
+    ok = await asyncio.to_thread(db.verify_password, body.password, stored or DUMMY_HASH)
+    if not user or not user["is_active"] or not stored or not ok:
         await asyncio.sleep(0.3)
         raise HTTPException(status_code=401, detail="Identifiants invalides")
+    _login_attempts.pop(key, None)
     token = await db.create_session(user["id"])
     await db.touch_last_login(user["id"])
     response.set_cookie(TOKEN_COOKIE, token, max_age=COOKIE_MAX_AGE, httponly=True,
