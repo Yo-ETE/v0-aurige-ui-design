@@ -15,7 +15,7 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 import db
 from permissions import allows, is_admin_route, required_permissions
@@ -32,6 +32,16 @@ DUMMY_HASH = db.hash_password("x")
 _login_attempts: dict[str, list[float]] = {}
 _RL_MAX = 5
 _RL_WINDOW = 300.0
+
+
+def _prune_attempts() -> None:
+    now = time.time()
+    for k in list(_login_attempts):
+        hits = [t for t in _login_attempts[k] if now - t < _RL_WINDOW]
+        if hits:
+            _login_attempts[k] = hits
+        else:
+            del _login_attempts[k]
 
 
 def _rate_limited(key: str) -> bool:
@@ -115,7 +125,7 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
 class LoginRequest(BaseModel):
-    username: str
+    username: str = Field(max_length=64)
     password: str
 
 
@@ -149,6 +159,7 @@ async def login(body: LoginRequest, request: Request, response: Response):
     # Clé = nom d'utilisateur (nginx same-origin : l'IP client est toujours locale).
     username = body.username.strip()
     key = username.lower()
+    _prune_attempts()
     if _rate_limited(key):
         raise HTTPException(status_code=429, detail="Trop d'essais. Réessayez plus tard.")
     # Enregistré de façon synchrone AVANT tout await (anti-TOCTOU sur rafale).

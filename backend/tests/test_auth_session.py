@@ -136,3 +136,18 @@ def test_success_resets_counter(client):
     for _ in range(4):
         _login(client, "op", "x")
     assert _login(client, "op", "x").status_code == 401
+
+
+def test_overlong_username_422(client):
+    r = client.post("/api/auth/login", json={"username": "a" * 65, "password": "x"})
+    assert r.status_code == 422
+    assert not auth._login_attempts
+
+
+def test_expired_attempt_keys_pruned(client):
+    import time
+    auth._login_attempts["stale"] = [time.time() - auth._RL_WINDOW - 10]
+    auth._login_attempts["fresh"] = [time.time()]
+    _login(client, "op", "x")
+    assert "stale" not in auth._login_attempts
+    assert "fresh" in auth._login_attempts and "op" in auth._login_attempts
