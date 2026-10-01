@@ -557,12 +557,12 @@ setup_nginx() {
 }
 
 # Setup systemd services
-# Environment variables for WiFi access point (hotspot):
-# - AURIGE_AUTO_HOTSPOT=1 (default) : auto-start AP ~45s after boot if Pi has no internet
-# - AURIGE_AUTO_HOTSPOT_TIMEOUT=45 : seconds to wait before auto-starting (default 45s)
-# - AURIGE_AUTO_HOTSPOT_INTERVAL=30 : seconds between internet checks (default 30s)
-# - AURIGE_HOTSPOT_SSID=AURIGE : WiFi AP network name (default "AURIGE")
-# - AURIGE_HOTSPOT_PASSWORD_FILE=${AURIGE_DATA_DIR}/hotspot_password.txt : AP password storage
+# Environment variables for WiFi access point (hotspot) — one-shot auto-start at boot:
+# - AURIGE_AUTO_HOTSPOT (default "1") — enable/disable boot-time auto-hotspot
+# - AURIGE_AUTO_HOTSPOT_DELAY_S (default "45") — seconds after API start before one-shot check
+# - AURIGE_AUTO_HOTSPOT_BOOT_WINDOW_S (default "300") — only auto-start if uptime below this (boot-only)
+# - AURIGE_AUTO_HOTSPOT_SSID (default "AURIGE") — WiFi AP network name
+# Password stored at ${AURIGE_DATA_DIR}/hotspot_password.txt (hardcoded, no env override)
 setup_services() {
     log_info "Setting up systemd services..."
     
