@@ -17,6 +17,8 @@ DATA_DIR = Path(os.getenv("AURIGE_DATA_DIR", "/opt/aurige/data"))
 PASSWORD_FILE = DATA_DIR / "hotspot_password.txt"
 RUN_DIR = DATA_DIR / "hotspot"  # confs contenant la passphrase : dossier root-only
 DNSMASQ_CONF_NAME = "aurige_dnsmasq.conf"
+# motif pkill -f auto-exclu (le [a] empêche pkill de se matcher lui-même)
+DNSMASQ_PKILL_PATTERN = "[a]urige_dnsmasq.conf"
 
 AP_BAND = "bg"
 AP_CHANNEL = "6"
@@ -147,7 +149,7 @@ def start_hotspot_blocking(ssid, password):
     _run(["sudo", "iw", "reg", "set", "FR"], timeout=5)
     _run(["sudo", "nmcli", "device", "disconnect", iface], timeout=10)
     _run(["sudo", "pkill", "hostapd"], timeout=5)
-    _run(["sudo", "pkill", "-f", DNSMASQ_CONF_NAME], timeout=5)
+    _run(["sudo", "pkill", "-f", DNSMASQ_PKILL_PATTERN], timeout=5)
 
     # Primaire : NetworkManager
     rc, out = _run(["sudo", "nmcli", "device", "wifi", "hotspot", "ifname", iface,
@@ -229,7 +231,7 @@ def stop_hotspot():
         if mode.strip() == "ap":
             _run(["sudo", "nmcli", "connection", "down", name], timeout=10)
     _run(["sudo", "pkill", "hostapd"], timeout=5)
-    _run(["sudo", "pkill", "-f", DNSMASQ_CONF_NAME], timeout=5)
+    _run(["sudo", "pkill", "-f", DNSMASQ_PKILL_PATTERN], timeout=5)
     _run(["sudo", "ip", "addr", "flush", "dev", iface], timeout=5)
     _run(["sudo", "ip", "link", "set", iface, "up"], timeout=5)
     if RUN_DIR.is_dir():

@@ -190,7 +190,7 @@ def test_stop_hotspot_targets_only_ap_and_our_dnsmasq(monkeypatch, tmp_path):
     assert hotspot.stop_hotspot()["status"] == "success"
     downs = [c for c in rec if c[:4] == ["sudo", "nmcli", "connection", "down"]]
     assert downs == [["sudo", "nmcli", "connection", "down", "Hotspot"]]
-    assert ["sudo", "pkill", "-f", "aurige_dnsmasq.conf"] in rec
+    assert ["sudo", "pkill", "-f", "[a]urige_dnsmasq.conf"] in rec
     assert ["sudo", "pkill", "dnsmasq"] not in rec
     assert not leftover.exists()
 
