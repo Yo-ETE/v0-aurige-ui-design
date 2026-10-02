@@ -17,9 +17,13 @@ import { Library, Plus, Pencil, Trash2, Download, FolderOpen, Check, X, Loader2 
 export function LibraryPanel({
   onOpen,
   activeId,
+  onDeleted,
+  onRenamed,
 }: {
   onOpen: (id: string, name: string) => void
   activeId?: string
+  onDeleted?: (id: string) => void
+  onRenamed?: (id: string, name: string) => void
 }) {
   const [libs, setLibs] = useState<DBCLibrarySummary[]>([])
   const [loading, setLoading] = useState(true)
@@ -67,6 +71,7 @@ export function LibraryPanel({
     try {
       await renameDBCLibrary(id, name)
       setRenamingId(null)
+      onRenamed?.(id, name)
       await refresh()
     } catch (e) {
       setError(e instanceof Error ? e.message : "Renommage impossible")
@@ -77,6 +82,7 @@ export function LibraryPanel({
     if (!confirm(`Supprimer la bibliothèque "${lib.name}" ? Cette action est irréversible.`)) return
     try {
       await deleteDBCLibrary(lib.id)
+      onDeleted?.(lib.id)
       await refresh()
     } catch (e) {
       setError(e instanceof Error ? e.message : "Suppression impossible")

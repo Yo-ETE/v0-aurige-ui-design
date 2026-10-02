@@ -242,6 +242,7 @@ export default function DBCPage() {
       setExpandedMessages(new Set(data.messages.map(m => m.can_id)))
     } catch (error) {
       console.error("Failed to load DBC:", error)
+      setDbcData({ messages: [] })
     } finally {
       setIsLoading(false)
     }
@@ -333,6 +334,8 @@ export default function DBCPage() {
       await loadDBC()
     } catch (error) {
       console.error("Failed to save message:", error)
+      setShowMessageDialog(false)
+      setEditingMessage(null)
       setImportResult({ success: false, message: error instanceof Error ? error.message : "Enregistrement du message impossible" })
     }
   }
@@ -538,6 +541,16 @@ export default function DBCPage() {
       {view === "library" && (
         <LibraryPanel
           activeId={libraryId ?? undefined}
+          onDeleted={(id) => {
+            if (id === libraryId) {
+              setLibraryId(null)
+              setLibraryName("")
+              setDbcData(null)
+            }
+          }}
+          onRenamed={(id, name) => {
+            if (id === libraryId) setLibraryName(name)
+          }}
           onOpen={(id, name) => {
             setLibraryId(id)
             setLibraryName(name)

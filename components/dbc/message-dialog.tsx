@@ -24,7 +24,7 @@ export function MessageDialog({
   const editMode = !!initial
   const submit = () => {
     if (!/^[0-9A-Fa-f]{1,8}$/.test(m.can_id.trim())) { setErr("CAN ID invalide (hex, 1-8 caracteres)"); return }
-    if (m.dlc < 0 || m.dlc > 64) { setErr("DLC invalide (0-64)"); return }
+    if (!Number.isInteger(m.dlc) || m.dlc < 0 || m.dlc > 64) { setErr("DLC invalide (entier 0-64)"); return }
     onSubmit({ ...m, can_id: m.can_id.trim() })
   }
   return (
