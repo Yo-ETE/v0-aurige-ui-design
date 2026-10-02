@@ -103,6 +103,10 @@
   * {
     @apply border-border outline-ring/50;
   }
+  html,
+  body {
+    overflow-x: clip;
+  }
   body {
     @apply bg-background text-foreground;
   }
@@ -145,7 +149,7 @@
 @layer utilities {
   /* Improve touch targets on mobile */
   @media (max-width: 640px) {
-    .btn, button {
+    .touch-44 {
       min-height: 44px;
     }
     
