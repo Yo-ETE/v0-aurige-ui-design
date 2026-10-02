@@ -365,11 +365,11 @@ export function SystemPanel() {
         <Card className="border-border bg-card lg:col-span-2">
           <CardHeader>
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
                 <Terminal className="h-5 w-5 text-primary" />
               </div>
-              <div>
-                <CardTitle className="text-lg">Mises a jour systeme</CardTitle>
+              <div className="min-w-0">
+                <CardTitle className="text-lg truncate">Mises a jour systeme</CardTitle>
                 <CardDescription>apt update & upgrade</CardDescription>
               </div>
             </div>
@@ -415,17 +415,17 @@ export function SystemPanel() {
         {/* Aurige Update Card */}
         <Card className="border-border bg-card">
           <CardHeader>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-success/10">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-success/10">
                   <GitBranch className="h-5 w-5 text-success" />
                 </div>
-                <div>
-                  <CardTitle className="text-lg">Mise a jour Aurige</CardTitle>
+                <div className="min-w-0">
+                  <CardTitle className="text-lg truncate">Mise a jour Aurige</CardTitle>
                   <CardDescription>Version et mise a jour depuis Git</CardDescription>
                 </div>
               </div>
-              <Button variant="outline" size="sm" onClick={fetchVersionInfo} disabled={isCheckingVersion} className="bg-transparent">
+              <Button variant="outline" size="sm" onClick={fetchVersionInfo} disabled={isCheckingVersion} className="shrink-0 bg-transparent">
                 <RefreshCw className={`h-4 w-4 ${isCheckingVersion ? "animate-spin" : ""}`} />
               </Button>
             </div>
@@ -434,13 +434,13 @@ export function SystemPanel() {
             {versionInfo ? (
               <div className="space-y-3">
                 <div className="grid grid-cols-2 gap-3 text-sm">
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-xs text-muted-foreground">Branche actuelle</p>
-                    <p className="font-mono">{versionInfo.branch}</p>
+                    <p className="font-mono break-all">{versionInfo.branch}</p>
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-xs text-muted-foreground">Commit</p>
-                    <p className="font-mono">{versionInfo.commit}</p>
+                    <p className="font-mono break-all">{versionInfo.commit}</p>
                   </div>
                   {versionInfo.commitDate && (
                     <div className="col-span-2">
@@ -452,9 +452,9 @@ export function SystemPanel() {
                 
                 {/* Branch selector */}
                 <div className="space-y-2 rounded-lg border border-border/50 bg-secondary/20 p-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <GitBranch className="h-3.5 w-3.5 text-primary" />
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <GitBranch className="h-3.5 w-3.5 shrink-0 text-primary" />
                       <p className="text-xs font-medium">Branche cible</p>
                     </div>
                     <Button
@@ -462,7 +462,7 @@ export function SystemPanel() {
                       size="sm"
                       onClick={fetchBranches}
                       disabled={isFetchingBranches}
-                      className="h-6 px-2 text-xs"
+                      className="h-6 shrink-0 px-2 text-xs"
                     >
                       <RefreshCw className={`h-3 w-3 mr-1 ${isFetchingBranches ? "animate-spin" : ""}`} />
                       Actualiser
@@ -574,11 +574,11 @@ export function SystemPanel() {
         <Card className="border-border bg-card">
           <CardHeader>
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
                 <Archive className="h-5 w-5 text-primary" />
               </div>
-              <div>
-                <CardTitle className="text-lg">Sauvegardes</CardTitle>
+              <div className="min-w-0">
+                <CardTitle className="text-lg truncate">Sauvegardes</CardTitle>
                 <CardDescription>Sauvegarde des donnees missions</CardDescription>
               </div>
             </div>
@@ -629,14 +629,14 @@ export function SystemPanel() {
                 <ScrollArea className="h-40">
                   <div className="space-y-2">
                     {backups.map((backup) => (
-                      <div key={backup.filename} className="flex items-center justify-between p-2 rounded bg-secondary/50">
+                      <div key={backup.filename} className="flex items-center justify-between gap-2 p-2 rounded bg-secondary/50">
                         <div className="flex-1 min-w-0">
-                          <p className="text-xs font-mono truncate">{backup.filename}</p>
+                          <p className="text-xs font-mono truncate" title={backup.filename}>{backup.filename}</p>
                           <p className="text-xs text-muted-foreground">
                             {backup.size > 0 ? `${(backup.size / 1024 / 1024).toFixed(2)} Mo` : "Vide"}
                           </p>
                         </div>
-                        <div className="flex gap-1">
+                        <div className="flex shrink-0 gap-1">
                           <Button
                             size="icon"
                             variant="ghost"
@@ -669,11 +669,11 @@ export function SystemPanel() {
         <Card className="border-border bg-card lg:col-span-2">
           <CardHeader>
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-destructive/10">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-destructive/10">
                 <Power className="h-5 w-5 text-destructive" />
               </div>
-              <div>
-                <CardTitle className="text-lg">Alimentation</CardTitle>
+              <div className="min-w-0">
+                <CardTitle className="text-lg truncate">Alimentation</CardTitle>
                 <CardDescription>Redemarrage et arret du systeme</CardDescription>
               </div>
             </div>
@@ -719,17 +719,17 @@ export function SystemPanel() {
         {/* Licence */}
         <Card className="border-border bg-card lg:col-span-2">
           <CardHeader>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
                   <Scale className="h-5 w-5 text-primary" />
                 </div>
-                <div>
-                  <CardTitle className="text-lg">Licence</CardTitle>
+                <div className="min-w-0">
+                  <CardTitle className="text-lg truncate">Licence</CardTitle>
                   <CardDescription>Propriete intellectuelle et conditions d{"'"}utilisation</CardDescription>
                 </div>
               </div>
-              <Button variant="outline" size="sm" onClick={() => setShowLicence(!showLicence)} className="bg-transparent gap-2">
+              <Button variant="outline" size="sm" onClick={() => setShowLicence(!showLicence)} className="shrink-0 bg-transparent gap-2">
                 <ChevronRight className={`h-4 w-4 transition-transform ${showLicence ? "rotate-90" : ""}`} />
                 {showLicence ? "Masquer" : "Voir la licence"}
               </Button>
@@ -793,17 +793,17 @@ CONTACT : contact@aurige.io`}
         {/* Guide d'utilisation */}
         <Card className="border-border bg-card lg:col-span-2">
           <CardHeader>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
                   <BookOpen className="h-5 w-5 text-primary" />
                 </div>
-                <div>
-                  <CardTitle className="text-lg">Guide d{"'"}utilisation</CardTitle>
+                <div className="min-w-0">
+                  <CardTitle className="text-lg truncate">Guide d{"'"}utilisation</CardTitle>
                   <CardDescription>Notice complete de chaque page et fonctionnalite</CardDescription>
                 </div>
               </div>
-              <Button variant="outline" size="sm" onClick={() => setShowGuide(!showGuide)} className="bg-transparent gap-2">
+              <Button variant="outline" size="sm" onClick={() => setShowGuide(!showGuide)} className="shrink-0 bg-transparent gap-2">
                 <ChevronRight className={`h-4 w-4 transition-transform ${showGuide ? "rotate-90" : ""}`} />
                 {showGuide ? "Masquer" : "Ouvrir le guide"}
               </Button>

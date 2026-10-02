@@ -324,17 +324,17 @@ export function NetworkPanel() {
         {/* Connection Status Card */}
         <Card className="border-border bg-card">
           <CardHeader>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
                   <Globe className="h-5 w-5 text-primary" />
                 </div>
-                <div>
-                  <CardTitle className="text-lg">Etat connexion</CardTitle>
+                <div className="min-w-0">
+                  <CardTitle className="text-lg truncate">Etat connexion</CardTitle>
                   <CardDescription>Wi-Fi et Ethernet</CardDescription>
                 </div>
               </div>
-              <Button variant="outline" size="sm" onClick={fetchConnectionStatus} className="bg-transparent">
+              <Button variant="outline" size="sm" onClick={fetchConnectionStatus} className="shrink-0 bg-transparent">
                 <RefreshCw className="h-4 w-4" />
               </Button>
             </div>
@@ -365,13 +365,13 @@ export function NetworkPanel() {
                       </AlertDescription>
                     </Alert>
                     <div className="grid grid-cols-2 gap-3">
-                      <div>
+                      <div className="min-w-0">
                         <p className="text-xs text-muted-foreground">IP Hotspot</p>
-                        <p className="font-mono text-xs">{wifiStatus.ipLocal}</p>
+                        <p className="font-mono text-xs break-all">{wifiStatus.ipLocal}</p>
                       </div>
-                      <div>
+                      <div className="min-w-0">
                         <p className="text-xs text-muted-foreground">IP Publique</p>
-                        <p className="font-mono text-xs">{wifiStatus.ipPublic || "-"}</p>
+                        <p className="font-mono text-xs break-all">{wifiStatus.ipPublic || "-"}</p>
                       </div>
                     </div>
                     
@@ -390,15 +390,15 @@ export function NetworkPanel() {
                                   : "border-border/50 bg-muted/20 opacity-60"
                             }`}
                           >
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex min-w-0 items-center gap-2">
                                 {iface.type === "wifi" && <Wifi className={`h-3.5 w-3.5 ${iface.connected ? "text-primary" : "text-muted-foreground"}`} />}
                                 {iface.type === "usb" && <Usb className={`h-3.5 w-3.5 ${iface.connected ? "text-primary" : "text-muted-foreground"}`} />}
                                 {iface.type === "ethernet" && <Cable className={`h-3.5 w-3.5 ${iface.connected ? "text-primary" : "text-muted-foreground"}`} />}
-                                <span className="text-xs font-medium">{iface.label}</span>
-                                <span className="text-xs text-muted-foreground font-mono">({iface.name})</span>
+                                <span className="shrink-0 text-xs font-medium">{iface.label}</span>
+                                <span className="min-w-0 truncate text-xs text-muted-foreground font-mono" title={iface.name}>({iface.name})</span>
                               </div>
-                              <div className="flex items-center gap-1.5">
+                              <div className="flex shrink-0 items-center gap-1.5">
                                 {iface.isDefaultRoute && (
                                   <span className="text-[10px] font-medium text-success bg-success/15 px-1.5 py-0.5 rounded">INTERNET</span>
                                 )}
@@ -410,12 +410,12 @@ export function NetworkPanel() {
                               </div>
                             </div>
                             {iface.connected && (
-                              <div className="flex items-center gap-3 mt-1.5 pl-5.5 text-xs text-muted-foreground">
+                              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 pl-5.5 text-xs text-muted-foreground">
                                 {iface.ssid && (
-                                  <span>SSID: <span className="text-foreground font-medium">{iface.ssid}</span></span>
+                                  <span className="min-w-0 break-all">SSID: <span className="text-foreground font-medium">{iface.ssid}</span></span>
                                 )}
                                 {iface.ip && (
-                                  <span className="font-mono">{iface.ip}</span>
+                                  <span className="min-w-0 break-all font-mono">{iface.ip}</span>
                                 )}
                                 {iface.signal !== 0 && (
                                   <span>{iface.signal} dBm</span>
@@ -468,13 +468,13 @@ export function NetworkPanel() {
                         {getSignalIcon(wifiStatus.signal + 100)}
                       </p>
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <p className="text-xs text-muted-foreground">IP Locale</p>
-                      <p className="font-mono text-xs">{wifiStatus.ipLocal}</p>
+                      <p className="font-mono text-xs break-all">{wifiStatus.ipLocal}</p>
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <p className="text-xs text-muted-foreground">IP Publique</p>
-                      <p className="font-mono text-xs">{wifiStatus.ipPublic || "-"}</p>
+                      <p className="font-mono text-xs break-all">{wifiStatus.ipPublic || "-"}</p>
                     </div>
                     <div>
                       <p className="text-xs text-muted-foreground">Debit TX</p>
@@ -533,9 +533,9 @@ export function NetworkPanel() {
                 )}
               </div>
               {ethernetStatus?.connected ? (
-                <div className="pl-6 text-sm">
+                <div className="pl-6 text-sm min-w-0">
                   <p className="text-xs text-muted-foreground">IP Locale</p>
-                  <p className="font-mono text-xs">{ethernetStatus.ipLocal}</p>
+                  <p className="font-mono text-xs break-all">{ethernetStatus.ipLocal}</p>
                 </div>
               ) : (
                 <p className="text-xs text-muted-foreground pl-6">Non connecte</p>
@@ -547,9 +547,9 @@ export function NetworkPanel() {
         {/* Tailscale VPN Card */}
         <Card className="border-border bg-card">
           <CardHeader>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${
                   tsStatus?.running && tsStatus.online ? "bg-success/10" : "bg-muted"
                 }`}>
                   {tsStatus?.running && tsStatus.online ? (
@@ -560,8 +560,8 @@ export function NetworkPanel() {
                     <Shield className="h-5 w-5 text-muted-foreground" />
                   )}
                 </div>
-                <div>
-                  <CardTitle className="text-lg">Tailscale VPN</CardTitle>
+                <div className="min-w-0">
+                  <CardTitle className="text-lg truncate">Tailscale VPN</CardTitle>
                   <CardDescription>
                     {!tsStatus?.installed 
                       ? "Non installe" 
@@ -573,7 +573,7 @@ export function NetworkPanel() {
                   </CardDescription>
                 </div>
               </div>
-              <Button variant="outline" size="sm" onClick={fetchTailscale} disabled={tsLoading} className="bg-transparent">
+              <Button variant="outline" size="sm" onClick={fetchTailscale} disabled={tsLoading} className="shrink-0 bg-transparent">
                 <RefreshCw className={`h-4 w-4 ${tsLoading ? "animate-spin" : ""}`} />
               </Button>
             </div>
@@ -592,28 +592,28 @@ export function NetworkPanel() {
                 {tsStatus.running && tsStatus.online && (
                   <div className="space-y-2">
                     <div className="grid grid-cols-2 gap-3 text-sm">
-                      <div>
+                      <div className="min-w-0">
                         <p className="text-xs text-muted-foreground">IP Tailscale</p>
                         <div className="flex items-center gap-1.5">
-                          <p className="font-mono text-xs">{tsStatus.tailscaleIp}</p>
+                          <p className="min-w-0 font-mono text-xs break-all">{tsStatus.tailscaleIp}</p>
                           <button
                             onClick={() => navigator.clipboard.writeText(tsStatus.tailscaleIp)}
-                            className="text-muted-foreground hover:text-foreground transition-colors"
+                            className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
                             title="Copier"
                           >
                             <Copy className="h-3 w-3" />
                           </button>
                         </div>
                       </div>
-                      <div>
+                      <div className="min-w-0">
                         <p className="text-xs text-muted-foreground">Hostname</p>
-                        <p className="font-mono text-xs">{tsStatus.hostname}</p>
+                        <p className="font-mono text-xs break-all">{tsStatus.hostname}</p>
                       </div>
                       {tsStatus.magicDns && (
-                        <div className="col-span-2">
+                        <div className="col-span-2 min-w-0">
                           <p className="text-xs text-muted-foreground">Magic DNS</p>
                           <div className="flex items-center gap-1.5">
-                            <p className="font-mono text-xs truncate">{tsStatus.magicDns}</p>
+                            <p className="min-w-0 font-mono text-xs truncate" title={tsStatus.magicDns}>{tsStatus.magicDns}</p>
                             <button
                               onClick={() => navigator.clipboard.writeText(tsStatus.magicDns)}
                               className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
@@ -701,7 +701,7 @@ export function NetworkPanel() {
                                   )}
                                 </div>
                                 <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                                  <span className="font-mono">{peer.ip}</span>
+                                  <span className="font-mono break-all">{peer.ip}</span>
                                   <span>{peer.os}</span>
                                   {peer.online && (peer.rxBytes > 0 || peer.txBytes > 0) && (
                                     <span>rx:{formatBytes(peer.rxBytes)} tx:{formatBytes(peer.txBytes)}</span>
@@ -785,17 +785,17 @@ export function NetworkPanel() {
         {/* Wi-Fi Networks Card */}
         <Card className="border-border bg-card">
           <CardHeader>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
                   <Network className="h-5 w-5 text-primary" />
                 </div>
-                <div>
-                  <CardTitle className="text-lg">Reseaux disponibles</CardTitle>
+                <div className="min-w-0">
+                  <CardTitle className="text-lg truncate">Reseaux disponibles</CardTitle>
                   <CardDescription>Selectionnez un reseau Wi-Fi</CardDescription>
                 </div>
               </div>
-              <Button variant="outline" size="sm" onClick={handleScan} disabled={isScanning}>
+              <Button variant="outline" size="sm" onClick={handleScan} disabled={isScanning} className="shrink-0">
                 <RefreshCw className={`h-4 w-4 mr-2 ${isScanning ? "animate-spin" : ""}`} />
                 Scanner
               </Button>
@@ -827,13 +827,13 @@ export function NetworkPanel() {
                         : "hover:bg-secondary"
                     }`}
                   >
-                    <div className="flex items-center gap-2">
+                    <div className="flex min-w-0 items-center gap-2">
                       {network.security !== "Open" && network.security !== "" ? (
                         <Lock className="h-4 w-4 text-muted-foreground" />
                       ) : (
                         <Unlock className="h-4 w-4 text-muted-foreground" />
                       )}
-                      <span className="font-medium">{network.ssid}</span>
+                      <span className="min-w-0 truncate font-medium" title={network.ssid}>{network.ssid}</span>
                       {savedNetworks.includes(network.ssid) && (
                         <Star className="h-3 w-3 text-warning fill-warning" title="Reseau enregistre" />
                       )}
@@ -914,13 +914,13 @@ export function NetworkPanel() {
         {/* Hotspot Card */}
         <Card className="border-border bg-card">
           <CardHeader>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${hsStatus?.active ? "bg-success/10" : "bg-primary/10"}`}>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${hsStatus?.active ? "bg-success/10" : "bg-primary/10"}`}>
                   <Wifi className={`h-5 w-5 ${hsStatus?.active ? "text-success" : "text-primary"}`} />
                 </div>
-                <div>
-                  <CardTitle className="text-lg">Hotspot (SSID local)</CardTitle>
+                <div className="min-w-0">
+                  <CardTitle className="text-lg truncate">Hotspot (SSID local)</CardTitle>
                   <CardDescription>Point d{"'"}acces Wi-Fi du Pi</CardDescription>
                 </div>
               </div>
@@ -928,7 +928,7 @@ export function NetworkPanel() {
                 variant="outline"
                 size="sm"
                 onClick={() => { fetchHotspotStatus(); fetchHotspotCredentials() }}
-                className="bg-transparent"
+                className="shrink-0 bg-transparent"
               >
                 <RefreshCw className="h-4 w-4" />
               </Button>
@@ -936,35 +936,35 @@ export function NetworkPanel() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-3 text-sm" suppressHydrationWarning>
-              <div>
+              <div className="min-w-0">
                 <p className="text-xs text-muted-foreground">Statut</p>
                 <p className={`text-xs font-medium ${hsStatus?.active ? "text-success" : "text-muted-foreground"}`} suppressHydrationWarning>
                   {hsStatus ? (hsStatus.active ? "Actif" : "Inactif") : "-"}
                 </p>
               </div>
-              <div>
+              <div className="min-w-0">
                 <p className="text-xs text-muted-foreground">Clients</p>
-                <p className="font-mono text-xs" suppressHydrationWarning>{hsStatus ? hsStatus.clients : "-"}</p>
+                <p className="min-w-0 font-mono text-xs break-all" suppressHydrationWarning>{hsStatus ? hsStatus.clients : "-"}</p>
               </div>
-              <div>
+              <div className="min-w-0">
                 <p className="text-xs text-muted-foreground">SSID</p>
-                <p className="font-mono text-xs" suppressHydrationWarning>{hsStatus?.ssid || hsCreds?.ssid || "-"}</p>
+                <p className="min-w-0 font-mono text-xs break-all" suppressHydrationWarning>{hsStatus?.ssid || hsCreds?.ssid || "-"}</p>
               </div>
-              <div>
+              <div className="min-w-0">
                 <p className="text-xs text-muted-foreground">Interface</p>
-                <p className="font-mono text-xs" suppressHydrationWarning>{hsStatus?.interface || "-"}</p>
+                <p className="min-w-0 font-mono text-xs break-all" suppressHydrationWarning>{hsStatus?.interface || "-"}</p>
               </div>
             </div>
 
             <div className="space-y-2 rounded-lg border border-border p-3">
-              <div>
+              <div className="min-w-0">
                 <p className="text-xs text-muted-foreground">SSID</p>
                 <div className="flex items-center gap-1.5">
-                  <p className="font-mono text-xs" suppressHydrationWarning>{hsCreds?.ssid ?? "-"}</p>
+                  <p className="min-w-0 font-mono text-xs break-all" suppressHydrationWarning>{hsCreds?.ssid ?? "-"}</p>
                   {hsCreds?.ssid && (
                     <button
                       onClick={() => navigator.clipboard.writeText(hsCreds.ssid)}
-                      className="text-muted-foreground hover:text-foreground transition-colors"
+                      className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
                       title="Copier"
                     >
                       <Copy className="h-3 w-3" />
@@ -972,14 +972,14 @@ export function NetworkPanel() {
                   )}
                 </div>
               </div>
-              <div>
+              <div className="min-w-0">
                 <p className="text-xs text-muted-foreground">Mot de passe</p>
                 <div className="flex items-center gap-1.5">
-                  <p className="font-mono text-xs" suppressHydrationWarning>{hsCreds?.password ?? "-"}</p>
+                  <p className="min-w-0 font-mono text-xs break-all" suppressHydrationWarning>{hsCreds?.password ?? "-"}</p>
                   {hsCreds?.password && (
                     <button
                       onClick={() => navigator.clipboard.writeText(hsCreds.password)}
-                      className="text-muted-foreground hover:text-foreground transition-colors"
+                      className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
                       title="Copier"
                     >
                       <Copy className="h-3 w-3" />

@@ -23,8 +23,8 @@ export function PermissionEditor({ value, onChange }: {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {grp.flags.map((f) => (
               <label key={f} className="flex items-center justify-between gap-2 rounded border border-border px-2 py-1 text-xs">
-                <span className="font-mono">{f}</span>
-                <Switch checked={!!value[f]} onCheckedChange={(on) => set(f, on)} />
+                <span className="min-w-0 break-all font-mono">{f}</span>
+                <Switch className="shrink-0" checked={!!value[f]} onCheckedChange={(on) => set(f, on)} />
               </label>
             ))}
           </div>
