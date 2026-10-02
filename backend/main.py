@@ -3427,73 +3427,81 @@ def decode_vin_from_frames(responses: list) -> str:
     return vin[:17] if len(vin) >= 17 else vin
 
 
-def decode_dtcs_from_frames(responses: list) -> list:
-    """
-    Decode DTCs from OBD-II Service 03 response.
-    
-    DTC encoding: 2 bytes per DTC
-    First byte upper nibble:
-      00 = P0xxx, 01 = P1xxx, 10 = P2xxx, 11 = P3xxx
-      C, B, U prefixes for other modules.
-    
-    Example: 7E8#0443010301030000
-    04 = 4 bytes follow, 43 = response to service 03, 0103 = P0103, 0103 = P0103
-    """
+DTC_DESCRIPTIONS = {
+    # Sélection de codes génériques OBD-II (FR). Fallback générique sinon.
+    "P0100": "Débit/volume d'air (MAF) — circuit",
+    "P0101": "Débit/volume d'air (MAF) — plage/performance",
+    "P0105": "Pression collecteur (MAP) — circuit",
+    "P0110": "Température air admission — circuit",
+    "P0115": "Température liquide refroidissement — circuit",
+    "P0120": "Position papillon/pédale — circuit",
+    "P0130": "Sonde O2 (banc1 capteur1) — circuit",
+    "P0171": "Système trop pauvre (banc 1)",
+    "P0172": "Système trop riche (banc 1)",
+    "P0300": "Ratés d'allumage aléatoires/multiples",
+    "P0301": "Raté d'allumage cylindre 1",
+    "P0302": "Raté d'allumage cylindre 2",
+    "P0303": "Raté d'allumage cylindre 3",
+    "P0304": "Raté d'allumage cylindre 4",
+    "P0335": "Capteur position vilebrequin — circuit",
+    "P0340": "Capteur position arbre à cames — circuit",
+    "P0420": "Rendement catalyseur sous seuil (banc 1)",
+    "P0442": "Fuite EVAP (petite)",
+    "P0500": "Capteur vitesse véhicule",
+    "P0505": "Régulation ralenti",
+    "U0100": "Perte de communication avec l'ECM/PCM",
+    "U0121": "Perte de communication avec l'ABS",
+    "C0035": "Capteur vitesse roue avant gauche",
+    "B0001": "Déploiement airbag conducteur",
+}
+
+
+def dtc_description(code: str) -> str:
+    """Description FR d'un code DTC, avec fallback générique par catégorie."""
+    if code in DTC_DESCRIPTIONS:
+        return DTC_DESCRIPTIONS[code]
+    cat = code[:1]
+    famille = {"P": "Groupe motopropulseur", "C": "Châssis", "B": "Carrosserie", "U": "Réseau/communication"}.get(cat, "")
+    generique = " (code générique)" if len(code) > 1 and code[1] == "0" else " (code constructeur)"
+    return f"{famille}{generique} — voir documentation" if famille else "Code inconnu"
+
+
+def _dtc_from_bytes(b1: int, b2: int):
+    if b1 == 0 and b2 == 0:
+        return None
+    letter = "PCBU"[(b1 >> 6) & 0x3]
+    first_digit = (b1 >> 4) & 0x3
+    code = f"{letter}{first_digit}{(b1 & 0x0F):X}{b2:02X}"
+    return {"code": code, "description": dtc_description(code), "category": letter}
+
+
+def decode_dtcs_from_frames(responses: list, response_service: int = 0x43) -> list:
+    """Décode les DTC d'une réponse OBD (Mode 03/07/0A selon response_service)."""
+    svc = f"{response_service:02X}"
     frames = []
     for line in responses:
         parsed = parse_candump_line(line) if isinstance(line, str) else line
         if parsed and parsed["id"] in ("7E8", "7E9", "7EA", "7EB"):
             frames.append(parsed["data"])
-    
     if not frames:
         return []
-    
-    dtc_codes = []
-    dtc_type_map = {0: "P0", 1: "P1", 2: "P2", 3: "P3",
-                    4: "C0", 5: "C1", 6: "C2", 7: "C3",
-                    8: "B0", 9: "B1", 10: "B2", 11: "B3",
-                    12: "U0", 13: "U1", 14: "U2", 15: "U3"}
-    
+    out = []
     for data in frames:
-        byte_list = [data[i:i+2] for i in range(0, len(data), 2)]
-        if len(byte_list) < 2:
+        bl = [data[i:i+2] for i in range(0, len(data), 2)]
+        if len(bl) < 2:
             continue
-        
-        first_byte = int(byte_list[0], 16)
-        
-        # Single frame: first byte is length, second should be 0x43 (response to service 03)
-        if first_byte <= 7 and len(byte_list) > 1 and byte_list[1].upper() == "43":
-            num_bytes = first_byte - 1  # Subtract 1 for the service byte
-            dtc_data = byte_list[2:]
-            # Each DTC is 2 bytes
-            for i in range(0, min(num_bytes, len(dtc_data)), 2):
-                if i + 1 < len(dtc_data):
-                    b1 = int(dtc_data[i], 16)
-                    b2 = int(dtc_data[i + 1], 16)
-                    if b1 == 0 and b2 == 0:
-                        continue  # No DTC
-                    upper_nibble = (b1 >> 4) & 0x0F
-                    prefix = dtc_type_map.get(upper_nibble >> 2, "P0")
-                    # The rest: lower 2 bits of upper nibble + lower nibble + second byte
-                    code_num = ((b1 & 0x3F) << 8) | b2
-                    dtc_codes.append(f"{prefix}{code_num:03X}")
-        
-        # Multi-frame first frame
-        elif first_byte == 0x10:
-            if len(byte_list) > 2 and byte_list[2].upper() == "43":
-                dtc_data = byte_list[3:]
-                for i in range(0, len(dtc_data), 2):
-                    if i + 1 < len(dtc_data):
-                        b1 = int(dtc_data[i], 16)
-                        b2 = int(dtc_data[i + 1], 16)
-                        if b1 == 0 and b2 == 0:
-                            continue
-                        upper_nibble = (b1 >> 4) & 0x0F
-                        prefix = dtc_type_map.get(upper_nibble >> 2, "P0")
-                        code_num = ((b1 & 0x3F) << 8) | b2
-                        dtc_codes.append(f"{prefix}{code_num:03X}")
-    
-    return dtc_codes
+        first = int(bl[0], 16)
+        if first <= 7 and bl[1].upper() == svc:
+            dtc_data = bl[2:]
+        elif first == 0x10 and len(bl) > 2 and bl[2].upper() == svc:
+            dtc_data = bl[3:]
+        else:
+            continue
+        for i in range(0, len(dtc_data) - 1, 2):
+            d = _dtc_from_bytes(int(dtc_data[i], 16), int(dtc_data[i+1], 16))
+            if d:
+                out.append(d)
+    return out
 
 
 @app.post("/api/obd/vin")
@@ -3558,14 +3566,16 @@ async def read_dtc(request: OBDRequest):
         }
     
     responses = result["responses"]
-    decoded_dtcs = decode_dtcs_from_frames(responses) if responses else []
+    decoded = decode_dtcs_from_frames(responses) if responses else []
+    codes = [d["code"] for d in decoded]
     
     return {
         "status": "success" if responses else "sent",
-        "message": f"DTC read completed: {len(decoded_dtcs)} code(s) detecte(s)" if decoded_dtcs else ("No DTC found" if responses else "DTC request sent"),
-        "data": ",".join(decoded_dtcs) if decoded_dtcs else None,
+        "message": f"DTC read completed: {len(codes)} code(s) detecte(s)" if codes else ("No DTC found" if responses else "DTC request sent"),
+        "data": ",".join(codes) or None,
         "frames": responses,
-        "dtcs": decoded_dtcs,
+        "dtcs": codes,
+        "dtc_details": decoded,
     }
 
 
@@ -3742,7 +3752,7 @@ async def full_obd_scan(request: OBDRequest):
         if dtc_result["success"]:
             for line in dtc_result["responses"]:
                 f.write(line + "\n")
-            decoded_dtcs = decode_dtcs_from_frames(dtc_result["responses"])
+            decoded_dtcs = [d["code"] for d in decode_dtcs_from_frames(dtc_result["responses"])]
             results["dtcs"] = decoded_dtcs if decoded_dtcs else dtc_result["responses"]
             results["dtcs_raw"] = dtc_result["responses"]
         else:
