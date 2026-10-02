@@ -2020,7 +2020,7 @@ finally:
         text=True
     )
     
-    return {{"status": "started", "iterations": request.iterations}}
+    return {"status": "started", "iterations": request.iterations}
 
 
 @app.post("/api/fuzzing/stop")
@@ -2175,14 +2175,14 @@ async def analyze_crash(mission_id: str, pre_fuzz_log_id: str, during_fuzz_log_i
     - Timing anomalies
     """
     logs_dir = get_mission_logs_dir(mission_id)
-    pre_log = logs_dir / f"{{pre_fuzz_log_id}}.log"
-    during_log = logs_dir / f"{{during_fuzz_log_id}}.log"
+    pre_log = logs_dir / f"{pre_fuzz_log_id}.log"
+    during_log = logs_dir / f"{during_fuzz_log_id}.log"
     
     if not pre_log.exists() or not during_log.exists():
         raise HTTPException(status_code=404, detail="Log files not found")
     
     # Parse pre-fuzz baseline
-    pre_data = {{}}  # {{id: [payloads...]}}
+    pre_data = {}  # {id: [payloads...]}
     try:
         with open(pre_log, "r") as f:
             for line in f:
@@ -2199,7 +2199,7 @@ async def analyze_crash(mission_id: str, pre_fuzz_log_id: str, during_fuzz_log_i
         pass
     
     # Parse during-fuzz traffic
-    during_data = {{}}
+    during_data = {}
     during_timeline = []  # [(timestamp, id, payload)]
     try:
         with open(during_log, "r") as f:
@@ -2224,12 +2224,12 @@ async def analyze_crash(mission_id: str, pre_fuzz_log_id: str, during_fuzz_log_i
     # 1. IDs that disappeared
     disappeared_ids = set(pre_data.keys()) - set(during_data.keys())
     for cid in disappeared_ids:
-        anomalies.append({{
+        anomalies.append({
             "type": "disappeared",
             "id": cid,
             "severity": "critical",
-            "description": f"ID {{cid}} stopped responding during fuzzing"
-        }})
+            "description": f"ID {cid} stopped responding during fuzzing"
+        })
     
     # 2. IDs with all-zero payloads (likely crash)
     for cid, payloads in during_data.items():
@@ -2237,12 +2237,12 @@ async def analyze_crash(mission_id: str, pre_fuzz_log_id: str, during_fuzz_log_i
             pre_non_zero = any(p != "0" * len(p) for p in pre_data[cid][:50])
             during_all_zero = all(p == "0" * len(p) for p in payloads[-20:])
             if pre_non_zero and during_all_zero:
-                anomalies.append({{
+                anomalies.append({
                     "type": "zeroed",
                     "id": cid,
                     "severity": "critical",
-                    "description": f"ID {{cid}} data went to all zeros"
-                }})
+                    "description": f"ID {cid} data went to all zeros"
+                })
     
     # 3. New error IDs (5xx, 7xx ranges)
     new_error_ids = []
@@ -2251,12 +2251,12 @@ async def analyze_crash(mission_id: str, pre_fuzz_log_id: str, during_fuzz_log_i
             cid_int = int(cid, 16)
             if (0x500 <= cid_int <= 0x5FF) or (0x700 <= cid_int <= 0x7FF):
                 new_error_ids.append(cid)
-                anomalies.append({{
+                anomalies.append({
                     "type": "new_error",
                     "id": cid,
                     "severity": "high",
-                    "description": f"New error ID {{cid}} appeared during fuzzing"
-                }})
+                    "description": f"New error ID {cid} appeared during fuzzing"
+                })
     
     # Load fuzzing history to correlate
     history_file = Path("/tmp/aurige_fuzz_history.json")
@@ -2287,13 +2287,13 @@ async def analyze_crash(mission_id: str, pre_fuzz_log_id: str, during_fuzz_log_i
                         suspects.append(frame)
                 
                 if suspects:
-                    culprits.append({{
+                    culprits.append({
                         "anomaly": anomaly,
                         "suspect_frames": suspects[:10],
                         "timing_delta": bad_timestamp - suspects[0]["timestamp"] if suspects else 0
-                    }})
+                    })
     
-    return {{
+    return {
         "mission_id": mission_id,
         "anomalies": anomalies,
         "disappeared_ids": list(disappeared_ids),
@@ -2301,8 +2301,8 @@ async def analyze_crash(mission_id: str, pre_fuzz_log_id: str, during_fuzz_log_i
         "culprits": culprits,
         "pre_fuzz_ids": sorted(list(pre_data.keys())),
         "during_fuzz_ids": sorted(list(during_data.keys())),
-        "message": f"Found {{len(anomalies)}} anomalies, {{len(culprits)}} culprits identified"
-    }}
+        "message": f"Found {len(anomalies)} anomalies, {len(culprits)} culprits identified"
+    }
 
 
 @app.post("/api/fuzzing/compare-logs")
