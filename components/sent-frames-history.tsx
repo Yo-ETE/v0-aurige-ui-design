@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Send, Trash2, CheckCircle2, XCircle, Clock } from "lucide-react"
+import { Send, Trash2, CheckCircle2, XCircle, Clock, Download, Play, Skull } from "lucide-react"
 
 // Generate unique ID without crypto.randomUUID (not available in HTTP context)
 function generateId(): string {
@@ -83,14 +83,67 @@ export function useSentFramesHistory(maxItems = 50) {
   return { frames, addFrame, updateStatus, toggleSuccess, clearHistory, trackFrame }
 }
 
+// Une ligne est une trame unique rejouable si son canId est un seul ID hex (1-8 chiffres)
+// et ses donnees une chaine hex de longueur paire. Les resumes de run ("000-7FF", "id1,id2",
+// "Mode: ...") ne passent pas ce test.
+const SINGLE_ID_RE = /^[0-9A-Fa-f]{1,8}$/
+const HEX_DATA_RE = /^(?:[0-9A-Fa-f]{2})+$/
+export function isSingleFrame(f: SentFrame): boolean {
+  return SINGLE_ID_RE.test(f.canId.trim()) && HEX_DATA_RE.test(f.data.trim())
+}
+
+const csvCell = (v: unknown) => {
+  const s = String(v ?? "")
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+}
+
+function downloadBlob(filename: string, content: string, mime: string) {
+  const blob = new Blob([content], { type: `${mime};charset=utf-8` })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
+function historyRows(frames: SentFrame[]) {
+  return frames.map((f) => ({
+    id: f.id,
+    canId: f.canId,
+    data: f.data,
+    interface: f.interface,
+    status: f.status,
+    timestamp: f.timestamp.toISOString(),
+  }))
+}
+
+function exportHistoryCsv(frames: SentFrame[]) {
+  const header = ["id", "canId", "data", "interface", "status", "timestamp"]
+  const lines = historyRows(frames).map((r) =>
+    [r.id, r.canId, r.data, r.interface, r.status, r.timestamp].map(csvCell).join(",")
+  )
+  downloadBlob("historique_fuzz.csv", [header.join(","), ...lines].join("\n"), "text/csv")
+}
+
+function exportHistoryJson(frames: SentFrame[]) {
+  downloadBlob("historique_fuzz.json", JSON.stringify(historyRows(frames), null, 2), "application/json")
+}
+
 export function SentFramesHistory({
   frames,
   onClear,
   onToggleSuccess,
+  onReplayFrame,
+  onMarkCrash,
 }: {
   frames: SentFrame[]
   onClear: () => void
   onToggleSuccess?: (id: string) => void
+  onReplayFrame?: (f: SentFrame) => void
+  onMarkCrash?: (f: SentFrame) => void
 }) {
   if (frames.length === 0) {
     return (
@@ -121,8 +174,8 @@ export function SentFramesHistory({
   return (
     <Card className="border-border bg-card">
       <CardHeader className="pb-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Send className="h-4 w-4 text-muted-foreground" />
             <CardTitle className="text-sm font-medium">Historique des envois</CardTitle>
             <Badge variant="secondary" className="text-xs">
@@ -139,10 +192,20 @@ export function SentFramesHistory({
               </Badge>
             )}
           </div>
-          <Button variant="ghost" size="sm" onClick={onClear} className="h-7 text-xs">
-            <Trash2 className="h-3 w-3 mr-1" />
-            Vider
-          </Button>
+          <div className="flex flex-wrap items-center gap-1">
+            <Button variant="ghost" size="sm" onClick={() => exportHistoryCsv(frames)} className="h-7 text-xs">
+              <Download className="h-3 w-3 mr-1" />
+              CSV
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => exportHistoryJson(frames)} className="h-7 text-xs">
+              <Download className="h-3 w-3 mr-1" />
+              JSON
+            </Button>
+            <Button variant="ghost" size="sm" onClick={onClear} className="h-7 text-xs">
+              <Trash2 className="h-3 w-3 mr-1" />
+              Vider
+            </Button>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="pt-0">
@@ -151,7 +214,7 @@ export function SentFramesHistory({
             {frames.map((frame) => (
               <div
                 key={frame.id}
-                className="flex items-center gap-2 rounded border border-border bg-secondary/30 px-2 py-1.5 font-mono text-xs"
+                className="flex flex-wrap items-center gap-2 rounded border border-border bg-secondary/30 px-2 py-1.5 font-mono text-xs"
               >
                 {frame.status === "pending" && (
                   <button
@@ -192,6 +255,34 @@ export function SentFramesHistory({
                   <span className="text-muted-foreground truncate max-w-24">
                     {frame.description}
                   </span>
+                )}
+                {(onReplayFrame || onMarkCrash) && isSingleFrame(frame) && (
+                  <div className="flex flex-wrap items-center gap-1">
+                    {onReplayFrame && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-6 px-2 text-[10px]"
+                        onClick={() => onReplayFrame(frame)}
+                      >
+                        <Play className="h-3 w-3 mr-1" />
+                        Rejouer
+                      </Button>
+                    )}
+                    {onMarkCrash && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-6 px-2 text-[10px] text-destructive"
+                        onClick={() => onMarkCrash(frame)}
+                      >
+                        <Skull className="h-3 w-3 mr-1" />
+                        Marquer comme crash
+                      </Button>
+                    )}
+                  </div>
                 )}
               </div>
             ))}

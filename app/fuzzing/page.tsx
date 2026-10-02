@@ -41,6 +41,8 @@ import {
 } from "@/lib/api"
 import { useMissionStore } from "@/lib/mission-store"
 import { SentFramesHistory, useSentFramesHistory } from "@/components/sent-frames-history"
+import { useExportStore } from "@/lib/export-store"
+import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
 
 // ---- Data Mode Card ----
@@ -166,6 +168,8 @@ function LogIdRow({
 // ==============================
 export default function Fuzzing() {
   const currentMission = useMissionStore((s) => s.getCurrentMission())
+  const router = useRouter()
+  const addFrames = useExportStore((s) => s.addFrames)
 
   // Basic params
   const [canInterface, setCanInterface] = useState<CANInterface>("can0")
@@ -298,7 +302,8 @@ export default function Fuzzing() {
     setIsStarting(true)
     setProgress(0)
 
-    const targetIds = selectedLogIds.size > 0 && (dataMode === "logs" || dataMode === "range")
+    // Ciblage : tous les modes envoient les IDs selectionnes s'il y en a
+    const targetIds = selectedLogIds.size > 0
       ? Array.from(selectedLogIds)
       : undefined
 
@@ -310,7 +315,7 @@ export default function Fuzzing() {
     }
 
     const frameId = addFrame({
-      canId: targetIds ? targetIds.join(",") : `${idStart}-${idEnd}`,
+      canId: targetIds ? `cibles : ${targetIds.length} IDs` : `${idStart}-${idEnd}`,
       data: `Mode: ${modeLabels[dataMode]}`,
       interface: canInterface,
       description: `${iterations} iterations`,
@@ -774,7 +779,19 @@ export default function Fuzzing() {
         </div>
 
         {/* Sent Frames History */}
-        <SentFramesHistory frames={frames} onClear={clearHistory} />
+        <SentFramesHistory
+          frames={frames}
+          onClear={clearHistory}
+          onReplayFrame={(f) => {
+            addFrames([{ canId: f.canId, data: f.data, timestamp: "0", source: "fuzz" }])
+            router.push("/replay-rapide")
+          }}
+          onMarkCrash={(f) =>
+            router.push(
+              `/crash-recovery?crashFrame=${encodeURIComponent(f.canId)}&crashData=${encodeURIComponent(f.data)}`
+            )
+          }
+        />
       </div>
     </AppShell>
   )
