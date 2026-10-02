@@ -1914,3 +1914,46 @@ export async function getInterIdDependencies(params: {
 }
 
 
+
+// =============================================================================
+// Injection de fond (frame loop / rejeu de log en boucle)
+// =============================================================================
+
+export interface InjectStatus {
+  running: boolean
+  description: string
+}
+
+export async function startInjectFrame(
+  iface: CANInterface,
+  canId: string,
+  data: string,
+  intervalMs = 100
+): Promise<{ status: string }> {
+  return fetchApi("/inject/start", {
+    method: "POST",
+    body: JSON.stringify({ interface: iface, mode: "frame", canId, data, intervalMs }),
+  })
+}
+
+export async function startInjectLog(
+  iface: CANInterface,
+  missionId: string,
+  logId: string,
+  intervalMs = 100
+): Promise<{ status: string }> {
+  return fetchApi("/inject/start", {
+    method: "POST",
+    body: JSON.stringify({ interface: iface, mode: "log", missionId, logId, intervalMs }),
+  })
+}
+
+export async function stopInject(): Promise<{ status: string }> {
+  return fetchApi("/inject/stop", {
+    method: "POST",
+  })
+}
+
+export async function getInjectStatus(): Promise<InjectStatus> {
+  return fetchApi("/inject/status")
+}
