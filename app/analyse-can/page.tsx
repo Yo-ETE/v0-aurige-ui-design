@@ -18,8 +18,10 @@ import {
   BarChart3, Loader2, AlertCircle, Database, Cpu, Search,
   Download, Save, Eye, EyeOff, Filter, ArrowUpDown, CheckCircle2,
   Zap, ChevronDown, ChevronRight, Info, GitBranch, ArrowRight,
-  FlaskConical, AlertTriangle, Check, X,
+  FlaskConical, AlertTriangle, Check, X, Send, ArrowUp, ArrowDown,
 } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { useExportStore } from "@/lib/export-store"
 import {
   getByteHeatmap,
   autoDetectSignals,
@@ -70,6 +72,19 @@ function confidenceBadge(confidence: number) {
   return <Badge className="bg-red-600/20 text-red-400 border-red-600/30">{(confidence * 100).toFixed(0)}%</Badge>
 }
 
+// Heuristique frontend du type de signal
+function signalTypeBadge(sig: DetectedSignal) {
+  if (sig.bit_length === 1) {
+    return <Badge variant="outline" className="text-[9px] border-sky-600/50 text-sky-400">Flag</Badge>
+  }
+  if (sig.change_rate >= 0.95) {
+    return <Badge variant="outline" className="text-[9px] border-amber-600/50 text-amber-400">Compteur?</Badge>
+  }
+  return <Badge variant="outline" className="text-[9px] border-emerald-600/50 text-emerald-400">Valeur</Badge>
+}
+
+type SignalSortKey = "confidence" | "entropy" | "range"
+
 // =============================================================================
 // Component: Byte Cell (Heatmap)
 // =============================================================================
@@ -117,11 +132,15 @@ function HeatmapRow({
   mode,
   expanded,
   onToggle,
+  onSendReplay,
+  onShowSignals,
 }: {
   entry: HeatmapIdEntry
   mode: "change_rate" | "entropy"
   expanded: boolean
   onToggle: () => void
+  onSendReplay: (canId: string) => void
+  onShowSignals: (canId: string) => void
 }) {
   const maxRate = Math.max(...entry.bytes.map((b) => b.change_rate))
 
@@ -164,6 +183,29 @@ function HeatmapRow({
         <span className="text-[10px] text-muted-foreground ml-auto shrink-0 tabular-nums">
           {entry.frame_count.toLocaleString()} trames
         </span>
+
+        {/* Actions */}
+        <div className="flex shrink-0 items-center gap-1">
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-6 gap-1 px-1.5 text-[10px] bg-transparent"
+            title="Voir les signaux detectes pour cet ID"
+            onClick={() => onShowSignals(entry.can_id)}
+          >
+            <Cpu className="h-3 w-3" /> Signaux
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-6 w-6 p-0 bg-transparent"
+            title="Pré-remplit l'ID dans Replay Rapide"
+            aria-label="Envoyer vers Replay Rapide"
+            onClick={() => onSendReplay(entry.can_id)}
+          >
+            <Send className="h-3 w-3" />
+          </Button>
+        </div>
       </div>
 
       {/* Expanded detail */}
@@ -245,6 +287,8 @@ function SignalByteMap({ signal, excludedBytes }: { signal: DetectedSignal; excl
 // =============================================================================
 
 export default function AnalyseCANPage() {
+  const router = useRouter()
+  const { addFrames } = useExportStore()
   // Mission & log selection
   const { missions, currentMissionId, fetchMissions } = useMissionStore()
   const [selectedMissionId, setSelectedMissionId] = useState<string>("")
@@ -279,6 +323,8 @@ export default function AnalyseCANPage() {
   const [inspectedSignal, setInspectedSignal] = useState<DetectedSignal | null>(null)
   const [savingDBC, setSavingDBC] = useState(false)
   const [savedSignals, setSavedSignals] = useState<Set<string>>(new Set())
+  const [signalSearch, setSignalSearch] = useState("")
+  const [signalSort, setSignalSort] = useState<{ key: SignalSortKey; dir: "asc" | "desc" } | null>(null)
 
   // Dependency state
   const [depResult, setDepResult] = useState<DependencyResult | null>(null)
@@ -287,6 +333,8 @@ export default function AnalyseCANPage() {
   const [depWindowMs, setDepWindowMs] = useState(10)
   const [depMinScore, setDepMinScore] = useState(0.1)
   const [depSelectedEdge, setDepSelectedEdge] = useState<DependencyEdge | null>(null)
+  const [depViewMinPct, setDepViewMinPct] = useState(0)
+  const [depSourceSearch, setDepSourceSearch] = useState("")
 
   // Causality validation state
   const [causalityResult, setCausalityResult] = useState<CausalityResult | null>(null)
@@ -510,14 +558,68 @@ export default function AnalyseCANPage() {
   }, [])
 
   // Select all signals
-  const selectAllSignals = useCallback(() => {
-    if (!detectResult) return
-    if (selectedSignals.size === detectResult.detected_signals.length) {
-      setSelectedSignals(new Set())
-    } else {
-      setSelectedSignals(new Set(detectResult.detected_signals.map((s) => s.name)))
+  // Detected signals: search + sort
+  const filteredSignals = useMemo(() => {
+    if (!detectResult) return []
+    const q = signalSearch.trim().toLowerCase()
+    let sigs = detectResult.detected_signals.filter(
+      (s) => !q || s.can_id.toLowerCase().includes(q) || s.name.toLowerCase().includes(q)
+    )
+    if (signalSort) {
+      const val = (s: DetectedSignal) =>
+        signalSort.key === "confidence" ? s.confidence
+          : signalSort.key === "entropy" ? s.entropy
+            : (s.value_range?.[1] ?? 0) - (s.value_range?.[0] ?? 0)
+      const mul = signalSort.dir === "asc" ? 1 : -1
+      sigs = [...sigs].sort((a, b) => (val(a) - val(b)) * mul)
     }
-  }, [detectResult, selectedSignals])
+    return sigs
+  }, [detectResult, signalSearch, signalSort])
+
+  const toggleSignalSort = useCallback((key: SignalSortKey) => {
+    setSignalSort((prev) =>
+      prev?.key === key ? { key, dir: prev.dir === "desc" ? "asc" : "desc" } : { key, dir: "desc" }
+    )
+  }, [])
+
+  // Dependencies: min-score + source filter
+  const filteredEdges = useMemo(() => {
+    if (!depResult) return []
+    const q = depSourceSearch.trim().toLowerCase()
+    return depResult.edges.filter(
+      (e) => e.score * 100 >= depViewMinPct && (!q || e.source.toLowerCase().includes(q))
+    )
+  }, [depResult, depViewMinPct, depSourceSearch])
+
+  // Select all (filtered set only)
+  const allFilteredSelected = filteredSignals.length > 0 && filteredSignals.every((s) => selectedSignals.has(s.name))
+  const selectAllSignals = useCallback(() => {
+    if (!detectResult || filteredSignals.length === 0) return
+    setSelectedSignals((prev) => {
+      const next = new Set(prev)
+      if (filteredSignals.every((s) => next.has(s.name))) {
+        filteredSignals.forEach((s) => next.delete(s.name))
+      } else {
+        filteredSignals.forEach((s) => next.add(s.name))
+      }
+      return next
+    })
+  }, [detectResult, filteredSignals])
+
+  // Send a CAN ID to Replay Rapide (no payload at this granularity: user fills it in)
+  const sendIdToReplay = useCallback((canId: string, label?: string) => {
+    addFrames([{ canId, data: "", timestamp: "0", source: `analyse-${label || canId}` }])
+    router.push("/replay-rapide")
+  }, [addFrames, router])
+
+  // Heatmap row -> auto-detect tab filtered on this ID (runs detection if no result yet)
+  const showSignalsForId = useCallback((canId: string) => {
+    setSignalSearch(canId)
+    setTab("autodetect")
+    if (!detectResult && !detectLoading && selectedLogId) {
+      runAutoDetect()
+    }
+  }, [detectResult, detectLoading, selectedLogId, runAutoDetect])
 
   // Save selected signals to DBC
   const saveSignalsToDBC = useCallback(async () => {
@@ -1019,6 +1121,8 @@ export default function AnalyseCANPage() {
                           mode={heatmapMode}
                           expanded={expandedIds.has(entry.can_id)}
                           onToggle={() => toggleExpanded(entry.can_id)}
+                          onSendReplay={(id) => sendIdToReplay(id)}
+                          onShowSignals={showSignalsForId}
                         />
                       ))}
 
@@ -1094,14 +1198,34 @@ export default function AnalyseCANPage() {
                     {detectResult && !detectLoading && detectResult.detected_signals.length > 0 && (
                       <>
                         {/* Action bar */}
-                        <div className="flex items-center gap-2 mb-3">
+                        <div className="flex flex-wrap items-center gap-2 mb-3">
+                          <div className="relative w-full sm:w-56">
+                            <Search className="absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+                            <Input
+                              value={signalSearch}
+                              onChange={(e) => setSignalSearch(e.target.value)}
+                              placeholder="Rechercher ID ou nom..."
+                              className="h-7 pl-7 text-xs"
+                            />
+                          </div>
+                          <Badge variant="outline" className="text-[10px] font-mono">
+                            {filteredSignals.length} / {detectResult.detected_signals.length} signaux
+                          </Badge>
+                          {signalSearch && (
+                            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setSignalSearch("")}>
+                              <X className="h-3 w-3 mr-1" /> Effacer
+                            </Button>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 mb-3">
                           <Button
                             variant="outline"
                             size="sm"
                             className="text-xs h-7"
                             onClick={selectAllSignals}
+                            disabled={filteredSignals.length === 0}
                           >
-                            {selectedSignals.size === detectResult.detected_signals.length ? (
+                            {allFilteredSelected ? (
                               <><EyeOff className="h-3 w-3 mr-1" /> Deselectionner tout</>
                             ) : (
                               <><Eye className="h-3 w-3 mr-1" /> Selectionner tout</>
@@ -1181,17 +1305,42 @@ export default function AnalyseCANPage() {
                                 <TableHead className="w-8"></TableHead>
                                 <TableHead className="text-[10px]">CAN ID</TableHead>
                                 <TableHead className="text-[10px]">Nom</TableHead>
+                                <TableHead className="text-[10px]">Type</TableHead>
                                 <TableHead className="text-[10px]">Bytes</TableHead>
                                 <TableHead className="text-[10px]">Taille</TableHead>
                                 <TableHead className="text-[10px]">Ordre</TableHead>
-                                <TableHead className="text-[10px]">Plage</TableHead>
-                                <TableHead className="text-[10px]">Entropie</TableHead>
-                                <TableHead className="text-[10px]">Confiance</TableHead>
-                                <TableHead className="text-[10px] w-8"></TableHead>
+                                {([["range", "Plage"], ["entropy", "Entropie"], ["confidence", "Confiance"]] as [SignalSortKey, string][]).map(([key, label]) => (
+                                  <TableHead key={key} className="text-[10px]">
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleSignalSort(key)}
+                                      className={cn(
+                                        "inline-flex items-center gap-1 hover:text-foreground transition-colors",
+                                        signalSort?.key === key && "text-foreground font-semibold"
+                                      )}
+                                      title={`Trier par ${label.toLowerCase()}`}
+                                    >
+                                      {label}
+                                      {signalSort?.key === key ? (
+                                        signalSort.dir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                                      ) : (
+                                        <ArrowUpDown className="h-3 w-3 opacity-50" />
+                                      )}
+                                    </button>
+                                  </TableHead>
+                                ))}
+                                <TableHead className="text-[10px] w-16"></TableHead>
                               </TableRow>
                             </TableHeader>
                             <TableBody>
-                              {detectResult.detected_signals.map((sig) => (
+                              {filteredSignals.length === 0 && (
+                                <TableRow>
+                                  <TableCell colSpan={11} className="text-center text-xs text-muted-foreground py-6">
+                                    Aucun signal ne correspond a la recherche
+                                  </TableCell>
+                                </TableRow>
+                              )}
+                              {filteredSignals.map((sig) => (
                                 <TableRow
                                   key={sig.name}
                                   className={cn(
@@ -1223,6 +1372,7 @@ export default function AnalyseCANPage() {
                                       )}
                                     </div>
                                   </TableCell>
+                                  <TableCell>{signalTypeBadge(sig)}</TableCell>
                                   <TableCell>
                                     <SignalByteMap
                                       signal={sig}
@@ -1247,15 +1397,29 @@ export default function AnalyseCANPage() {
                                     {confidenceBadge(sig.confidence)}
                                   </TableCell>
                                   <TableCell>
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation()
-                                        setInspectedSignal(sig)
-                                      }}
-                                      className="text-muted-foreground hover:text-foreground transition-colors"
-                                    >
-                                      <Eye className="h-3.5 w-3.5" />
-                                    </button>
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          setInspectedSignal(sig)
+                                        }}
+                                        className="text-muted-foreground hover:text-foreground transition-colors"
+                                        title="Inspecter"
+                                      >
+                                        <Eye className="h-3.5 w-3.5" />
+                                      </button>
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          sendIdToReplay(sig.can_id, sig.name)
+                                        }}
+                                        className="text-muted-foreground hover:text-primary transition-colors"
+                                        title="Pré-remplit l'ID dans Replay Rapide"
+                                        aria-label="Envoyer vers Replay Rapide"
+                                      >
+                                        <Send className="h-3.5 w-3.5" />
+                                      </button>
+                                    </div>
                                   </TableCell>
                                 </TableRow>
                               ))}
@@ -1360,6 +1524,37 @@ export default function AnalyseCANPage() {
                           </div>
                         </div>
 
+                        {/* Edges filters */}
+                        <div className="flex flex-wrap items-center gap-2 mb-3">
+                          <div className="relative w-full sm:w-48">
+                            <Search className="absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+                            <Input
+                              value={depSourceSearch}
+                              onChange={(e) => setDepSourceSearch(e.target.value)}
+                              placeholder="ID source..."
+                              className="h-7 pl-7 text-xs"
+                            />
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Label className="text-xs text-muted-foreground whitespace-nowrap">Score min. (%)</Label>
+                            <Input
+                              type="number"
+                              min={0}
+                              max={100}
+                              step={5}
+                              value={depViewMinPct}
+                              onChange={(e) => {
+                                const n = Number(e.target.value)
+                                setDepViewMinPct(Number.isFinite(n) ? Math.min(100, Math.max(0, n)) : 0)
+                              }}
+                              className="h-7 w-20 text-xs"
+                            />
+                          </div>
+                          <Badge variant="outline" className="text-[10px] font-mono">
+                            {filteredEdges.length} / {depResult.edges.length} aretes
+                          </Badge>
+                        </div>
+
                         {/* Edges table */}
                         <div className="max-h-[400px] overflow-y-auto overflow-x-auto rounded-md border border-border/30">
                           <Table>
@@ -1376,7 +1571,14 @@ export default function AnalyseCANPage() {
                               </TableRow>
                             </TableHeader>
                             <TableBody>
-                              {depResult.edges.map((edge, i) => {
+                              {filteredEdges.length === 0 && (
+                                <TableRow>
+                                  <TableCell colSpan={8} className="text-center text-xs text-muted-foreground py-6">
+                                    Aucune arete ne correspond aux filtres
+                                  </TableCell>
+                                </TableRow>
+                              )}
+                              {filteredEdges.map((edge, i) => {
                                 const scoreColor =
                                   edge.score >= 0.7 ? "text-emerald-400 bg-emerald-900/30 border-emerald-600/40"
                                     : edge.score >= 0.4 ? "text-amber-400 bg-amber-900/30 border-amber-600/40"
