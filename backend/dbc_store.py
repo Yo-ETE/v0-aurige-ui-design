@@ -23,6 +23,12 @@ def dbc_ident(name, fallback):
     return s
 
 
+def _dbc_str(s):
+    """Échappe une chaîne pour un champ entre guillemets DBC."""
+    return (str(s or "").replace("\\", "\\\\").replace('"', '\\"')
+            .replace("\n", " ").replace("\r", " "))
+
+
 def new_doc():
     now = datetime.now().isoformat()
     return {"messages": [], "created_at": now, "updated_at": now}
@@ -50,6 +56,7 @@ def _find_message(doc, can_id):
 def upsert_message(doc, can_id, name=None, dlc=None, comment=None):
     """Crée le message si absent; met à jour UNIQUEMENT name/dlc/comment fournis.
     Ne touche jamais aux signaux."""
+    can_id = str(can_id).upper()
     msg = _find_message(doc, can_id)
     if msg is None:
         msg = {"can_id": can_id, "name": f"MSG_{can_id}", "dlc": 8, "comment": "", "signals": []}
@@ -65,12 +72,13 @@ def upsert_message(doc, can_id, name=None, dlc=None, comment=None):
 
 def upsert_signal(doc, signal: dict) -> str:
     """Ajoute/maj un signal (match par id). Auto-crée le message de son can_id."""
-    can_id = signal["can_id"]
+    can_id = str(signal["can_id"]).upper()
     msg = _find_message(doc, can_id)
     if msg is None:
         msg = {"can_id": can_id, "name": f"MSG_{can_id}", "dlc": 8, "comment": "", "signals": []}
         doc["messages"].append(msg)
     sig = dict(signal)
+    sig["can_id"] = can_id
     sig["name"] = dbc_ident(sig.get("name"), f"SIG_{can_id}_{sig.get('start_bit', 0)}")
     if not sig.get("id"):
         sig["id"] = f"{can_id}_{sig['name']}_{datetime.now().strftime('%H%M%S')}{int(time.time()*1000)%1000}"
@@ -130,7 +138,7 @@ def dbc_to_text(doc: dict) -> str:
             unit = sig.get("unit", "")
             lines.append(
                 f' SG_ {sname} : {sig.get("start_bit",0)}|{sig.get("length",8)}@{bo}{sign}'
-                f' ({scale},{offset}) [{mn}|{mx}] "{unit}" Vector__XXX'
+                f' ({scale},{offset}) [{mn}|{mx}] "{_dbc_str(unit)}" Vector__XXX'
             )
         lines.append("")
     lines.append("")
@@ -139,9 +147,9 @@ def dbc_to_text(doc: dict) -> str:
         if bo_id > 0x7FF:
             bo_id |= 0x80000000
         if msg.get("comment"):
-            lines.append(f'CM_ BO_ {bo_id} "{msg["comment"]}";')
+            lines.append(f'CM_ BO_ {bo_id} "{_dbc_str(msg["comment"])}";')
         for sig in msg.get("signals", []):
             if sig.get("comment"):
                 sname = dbc_ident(sig.get("name"), f"SIG_{msg['can_id']}_{sig.get('start_bit',0)}")
-                lines.append(f'CM_ SG_ {bo_id} {sname} "{sig["comment"]}";')
+                lines.append(f'CM_ SG_ {bo_id} {sname} "{_dbc_str(sig["comment"])}";')
     return "\n".join(lines)

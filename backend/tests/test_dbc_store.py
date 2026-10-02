@@ -87,3 +87,66 @@ def test_valid_dbc_id():
         assert validators.valid_dbc_id(ok), ok
     for bad in ["", "A", "../x", "a/b", "a.b", "x" * 65, "a_b", None, 123]:
         assert not validators.valid_dbc_id(bad), bad
+
+
+def test_export_signed_flag():
+    doc = ds.new_doc()
+    ds.upsert_signal(doc, _sig(name="A", is_signed=True))
+    ds.upsert_signal(doc, _sig(name="B", is_signed=True, byte_order="big_endian", start_bit=8))
+    txt = ds.dbc_to_text(doc)
+    assert " SG_ A : 0|8@1- " in txt
+    assert " SG_ B : 8|8@0- " in txt
+
+
+def test_export_scale_offset_range_unit():
+    doc = ds.new_doc()
+    ds.upsert_signal(doc, _sig(scale=0.25, offset=-40, min_val=-40, max_val=215, unit="degC"))
+    txt = ds.dbc_to_text(doc)
+    assert '(0.25,-40) [-40|215] "degC" Vector__XXX' in txt
+
+
+def test_export_comments():
+    doc = ds.new_doc()
+    ds.upsert_message(doc, "0C6", comment="frein")
+    ds.upsert_signal(doc, _sig(name="Spd", comment="vitesse"))
+    txt = ds.dbc_to_text(doc)
+    assert 'CM_ BO_ 198 "frein";' in txt
+    assert 'CM_ SG_ 198 Spd "vitesse";' in txt
+
+
+def test_export_escapes_quotes_and_newlines():
+    doc = ds.new_doc()
+    ds.upsert_message(doc, "0C6", comment='dit "stop"\nligne2')
+    ds.upsert_signal(doc, _sig(name="Spd", unit='k"m', comment='a"b'))
+    txt = ds.dbc_to_text(doc)
+    assert 'CM_ BO_ 198 "dit \\"stop\\" ligne2";' in txt
+    assert '"k\\"m" Vector__XXX' in txt
+    assert 'CM_ SG_ 198 Spd "a\\"b";' in txt
+
+
+def test_upsert_signal_same_id_updates_in_place():
+    doc = ds.new_doc()
+    sid = ds.upsert_signal(doc, _sig(id="fixed", length=8))
+    sid2 = ds.upsert_signal(doc, _sig(id="fixed", length=12, scale=2))
+    assert sid == sid2 == "fixed"
+    sigs = doc["messages"][0]["signals"]
+    assert len(sigs) == 1
+    assert sigs[0]["length"] == 12 and sigs[0]["scale"] == 2
+
+
+def test_can_id_case_normalized():
+    doc = ds.new_doc()
+    ds.upsert_signal(doc, _sig(can_id="0c6", name="A"))
+    ds.upsert_signal(doc, _sig(can_id="0C6", name="B"))
+    assert len(doc["messages"]) == 1
+    assert doc["messages"][0]["can_id"] == "0C6"
+    assert len(doc["messages"][0]["signals"]) == 2
+
+
+def test_extended_id_boundary():
+    doc = ds.new_doc()
+    ds.upsert_message(doc, "7FF")
+    ds.upsert_message(doc, "800")
+    txt = ds.dbc_to_text(doc)
+    assert "BO_ 2047 MSG_7FF:" in txt
+    assert f"BO_ {0x800 | 0x80000000} MSG_800:" in txt
