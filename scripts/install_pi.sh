@@ -387,7 +387,7 @@ setup_git_repo() {
         
         # Save current branch for future updates (don't overwrite if branch.txt already exists)
         if [ ! -f "$AURIGE_DIR/branch.txt" ] || [ -z "$(cat "$AURIGE_DIR/branch.txt" 2>/dev/null)" ]; then
-            CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "v0/yo-ete-5c91d9cb")
+            CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "main")
             echo "$CURRENT_BRANCH" > "$AURIGE_DIR/branch.txt"
             log_info "Saved branch for updates: $CURRENT_BRANCH"
         else
