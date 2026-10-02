@@ -356,6 +356,49 @@ export default function AnalyseCANPage() {
     }
   }, [selectedMissionId, selectedLogId])
 
+  // --- Export des résultats (CSV / JSON), téléchargement côté client ---
+  const _download = (filename: string, text: string, mime: string) => {
+    const blob = new Blob([text], { type: mime })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+  const _csvCell = (v: unknown) => {
+    const s = String(v ?? "")
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+  }
+  const _logTag = () => (selectedLogId || "log").replace(/\.log$/, "")
+  const exportHeatmapCsv = () => {
+    if (!heatmapResult) return
+    const header = ["can_id", "frequency_hz", "frame_count", "dlc",
+      ...Array.from({ length: 8 }, (_, i) => `B${i}_change_rate`),
+      ...Array.from({ length: 8 }, (_, i) => `B${i}_entropy`)]
+    const rows = heatmapResult.ids.map((id) => {
+      const cr = Array.from({ length: 8 }, (_, i) => (id.bytes[i] ? id.bytes[i].change_rate.toFixed(4) : ""))
+      const en = Array.from({ length: 8 }, (_, i) => (id.bytes[i] ? id.bytes[i].entropy.toFixed(4) : ""))
+      return [id.can_id, id.frequency_hz, id.frame_count, id.dlc, ...cr, ...en].map(_csvCell).join(",")
+    })
+    _download(`heatmap_${_logTag()}.csv`, [header.join(","), ...rows].join("\n"), "text/csv")
+  }
+  const exportHeatmapJson = () => {
+    if (heatmapResult) _download(`heatmap_${_logTag()}.json`, JSON.stringify(heatmapResult, null, 2), "application/json")
+  }
+  const exportSignalsCsv = () => {
+    if (!detectResult) return
+    const header = ["can_id", "name", "start_byte", "length_bytes", "start_bit", "bit_length", "byte_order", "is_signed", "entropy", "change_rate", "value_min", "value_max", "confidence_pct"]
+    const rows = detectResult.detected_signals.map((s) => [
+      s.can_id, s.name, s.start_byte, s.length_bytes, s.start_bit, s.bit_length, s.byte_order, s.is_signed,
+      s.entropy.toFixed(4), s.change_rate.toFixed(4), s.value_range?.[0] ?? "", s.value_range?.[1] ?? "", (s.confidence * 100).toFixed(1),
+    ].map(_csvCell).join(","))
+    _download(`signaux_${_logTag()}.csv`, [header.join(","), ...rows].join("\n"), "text/csv")
+  }
+  const exportSignalsJson = () => {
+    if (detectResult) _download(`signaux_${_logTag()}.json`, JSON.stringify(detectResult, null, 2), "application/json")
+  }
+
   // Auto-detect: run analysis
   const runAutoDetect = useCallback(async () => {
     setDetectLoading(true)
@@ -910,15 +953,21 @@ export default function AnalyseCANPage() {
             {tab === "heatmap" && (
               <Card className="border-border/60">
                 <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <CardTitle className="text-sm flex items-center gap-2">
                       <BarChart3 className="h-4 w-4 text-primary" /> Matrice de variabilite
                     </CardTitle>
                     {heatmapResult && (
-                      <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                         <span>{filteredHeatmapIds.length} / {heatmapResult.total_ids} IDs</span>
                         <span>{heatmapResult.total_frames.toLocaleString()} trames</span>
                         <Badge variant="outline" className="text-[10px]">{heatmapResult.elapsed_ms} ms</Badge>
+                        <Button size="sm" variant="outline" className="h-7 gap-1 bg-transparent" onClick={exportHeatmapCsv}>
+                          <Download className="h-3 w-3" /> CSV
+                        </Button>
+                        <Button size="sm" variant="outline" className="h-7 gap-1 bg-transparent" onClick={exportHeatmapJson}>
+                          <Download className="h-3 w-3" /> JSON
+                        </Button>
                       </div>
                     )}
                   </div>
@@ -1005,6 +1054,16 @@ export default function AnalyseCANPage() {
                         </span>
                       )}
                       <Badge variant="outline" className="text-[10px]">{detectResult.elapsed_ms} ms</Badge>
+                      {detectResult.detected_signals.length > 0 && (
+                        <>
+                          <Button size="sm" variant="outline" className="h-7 gap-1 bg-transparent" onClick={exportSignalsCsv}>
+                            <Download className="h-3 w-3" /> CSV
+                          </Button>
+                          <Button size="sm" variant="outline" className="h-7 gap-1 bg-transparent" onClick={exportSignalsJson}>
+                            <Download className="h-3 w-3" /> JSON
+                          </Button>
+                        </>
+                      )}
                     </div>
                   )}
                     </div>
