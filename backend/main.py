@@ -39,7 +39,7 @@ import db
 import hotspot
 from auth import SessionAuthMiddleware, require_permission, router as auth_router
 from permissions import allows
-from validators import valid_git_ref
+from validators import valid_git_ref, valid_backup_filename
 from routers.users import router as users_router
 
 # =============================================================================
@@ -4821,7 +4821,13 @@ async def get_system_version():
         # Get commit date
         date_result = run_command(["git", "-C", repo_to_check, "log", "-1", "--format=%ci"], check=False)
         commit_date = date_result.stdout.strip() if date_result.returncode == 0 else ""
-        
+
+        # Message + auteur du commit courant (parité Theia)
+        msg_result = run_command(["git", "-C", repo_to_check, "log", "-1", "--format=%s"], check=False)
+        commit_message = msg_result.stdout.strip() if msg_result.returncode == 0 else ""
+        author_result = run_command(["git", "-C", repo_to_check, "log", "-1", "--format=%an"], check=False)
+        commit_author = author_result.stdout.strip() if author_result.returncode == 0 else ""
+
         # Check if there are updates available by fetching from remote
         run_command(["git", "-C", repo_to_check, "fetch", "origin"], check=False)
         
@@ -4836,13 +4842,35 @@ async def get_system_version():
             behind_result = run_command(["git", "-C", repo_to_check, "rev-list", "--count", "HEAD..origin/main"], check=False)
         
         commits_behind = int(behind_result.stdout.strip()) if behind_result.returncode == 0 and behind_result.stdout.strip().isdigit() else 0
-        
+
+        # Liste des 10 derniers commits de la branche distante (parité Theia).
+        # Format %h|%s|%ai|%an, split sur "|" (maxsplit 3 : le message peut en contenir).
+        latest_commits = []
+        log_result = run_command(
+            ["git", "-C", repo_to_check, "log", remote_branch,
+             "--pretty=format:%h|%s|%ai|%an", "--max-count=10"],
+            check=False,
+        )
+        if log_result.returncode == 0 and log_result.stdout.strip():
+            for line in log_result.stdout.strip().split("\n"):
+                parts = line.split("|", 3)
+                if len(parts) == 4:
+                    latest_commits.append({
+                        "hash": parts[0],
+                        "message": parts[1],
+                        "date": parts[2][:16],
+                        "author": parts[3],
+                    })
+
         return {
             "branch": saved_branch or branch,
             "commit": commit,
             "commitDate": commit_date,
+            "commitMessage": commit_message,
+            "commitAuthor": commit_author,
             "commitsBehind": commits_behind,
             "updateAvailable": commits_behind > 0,
+            "latestCommits": latest_commits,
             "repoPath": repo_to_check,
         }
     except Exception as e:
@@ -5015,6 +5043,72 @@ async def restore_backup(filename: str):
         return {"status": "error", "message": str(e)}
 
 
+@app.get("/api/system/backups/{filename}/download")
+async def download_backup(filename: str):
+    """Télécharger une archive de sauvegarde (parité Theia)."""
+    if not valid_backup_filename(filename):
+        raise HTTPException(status_code=400, detail="Nom de fichier invalide")
+    backup_path = Path("/opt/aurige") / filename
+    if not backup_path.exists():
+        raise HTTPException(status_code=404, detail="Sauvegarde introuvable")
+    return FileResponse(
+        path=str(backup_path),
+        media_type="application/gzip",
+        filename=filename,
+    )
+
+
+@app.post("/api/system/backups/upload")
+async def upload_backup(file: UploadFile = File(...)):
+    """Importer une archive de sauvegarde (.tar.gz) depuis le poste client (parité Theia).
+
+    Restauration sur un Pi neuf apres crash/reinstallation : importer puis restaurer.
+    """
+    MAX_BYTES = 500 * 1024 * 1024  # 500 Mo
+    # Nom de destination : on garde un nom conforme au motif data-backup-*.tar.gz,
+    # sinon on genere un nom sur depuis l'horodatage (jamais le nom client brut).
+    orig = os.path.basename(file.filename or "")
+    if valid_backup_filename(orig):
+        dest_name = orig
+    else:
+        ts = datetime.now().strftime("%Y-%m-%d-%H%M%S")
+        dest_name = f"data-backup-import-{ts}.tar.gz"
+    dest_path = Path("/opt/aurige") / dest_name
+
+    # Ecriture en flux avec plafond de taille (evite de saturer le disque du Pi).
+    total = 0
+    try:
+        with open(dest_path, "wb") as out:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_BYTES:
+                    out.close()
+                    dest_path.unlink(missing_ok=True)
+                    raise HTTPException(status_code=413, detail="Fichier trop volumineux (max 500 Mo)")
+                out.write(chunk)
+    except HTTPException:
+        raise
+    except Exception as e:
+        dest_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail=f"Ecriture echouee: {e}")
+
+    # Verifier que c'est bien une archive tar.gz valide avant de l'accepter.
+    verify = run_command(["tar", "-tzf", str(dest_path)], check=False, timeout=60)
+    if verify.returncode != 0:
+        dest_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail="Archive invalide (tar -tzf a echoue)")
+
+    run_command(["sudo", "chmod", "644", str(dest_path)], check=False)
+    try:
+        size = dest_path.stat().st_size
+    except Exception:
+        size = total
+    return {"status": "success", "filename": dest_name, "size": size, "message": f"Sauvegarde importee: {dest_name}"}
+
+
 @app.post("/api/system/update")
 async def start_update(request: Request):
     """Start update by fresh clone and install script. Optionally accepts JSON body with {branch: "..."} """
@@ -5027,6 +5121,9 @@ async def start_update(request: Request):
     _branch = _guard_body.get("branch") if isinstance(_guard_body, dict) else None
     if _branch and not valid_git_ref(_branch):
         raise HTTPException(status_code=400, detail="Branche invalide")
+    _commit = _guard_body.get("commit") if isinstance(_guard_body, dict) else None
+    if _commit and not valid_git_ref(_commit):
+        raise HTTPException(status_code=400, detail="Commit invalide")
     if update_output_store["running"]:
         return {"status": "error", "message": "Une mise à jour est déjà en cours"}
     
@@ -5035,8 +5132,9 @@ async def start_update(request: Request):
     # GitHub repo URL and target branch
     GITHUB_REPO = "https://github.com/Yo-ETE/v0-aurige-ui-design.git"
     TARGET_BRANCH = "main"
-    
-    # Check if a specific branch was requested in the body
+    TARGET_COMMIT = None  # commit precis a deployer (parité Theia), optionnel
+
+    # Check if a specific branch / commit was requested in the body
     try:
         body = await request.json()
         if body.get("branch"):
@@ -5048,6 +5146,8 @@ async def start_update(request: Request):
                 save_branch_file.write_text(TARGET_BRANCH)
             except:
                 pass
+        if body.get("commit"):
+            TARGET_COMMIT = body["commit"]
     except:
         pass
     
@@ -5159,7 +5259,30 @@ async def start_update(request: Request):
             )
             await save_branch_proc.wait()
             update_output_store["lines"].append(f"[OK] branch.txt sauvegarde: {TARGET_BRANCH}")
-            
+
+            # Step 3b: si un commit precis est demande (parité Theia), checkout
+            # de ce commit (HEAD detache) apres avoir positionne la branche.
+            if TARGET_COMMIT:
+                update_output_store["lines"].append(f">>> Checkout du commit {TARGET_COMMIT}...")
+                co_commit = await asyncio.create_subprocess_exec(
+                    "sudo", "git", "-C", GIT_REPO_PATH, "checkout", TARGET_COMMIT,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
+                )
+                while True:
+                    line = await co_commit.stdout.readline()
+                    if not line:
+                        break
+                    text = line.decode().strip()
+                    if text:
+                        update_output_store["lines"].append(text)
+                await co_commit.wait()
+                if co_commit.returncode != 0:
+                    update_output_store["lines"].append(f"[ERROR] Commit {TARGET_COMMIT} introuvable")
+                    update_output_store["running"] = False
+                    return
+                update_output_store["lines"].append(f"[OK] Commit {TARGET_COMMIT}")
+
             # Step 4: Run install script (this will stop/restart services at the end)
             update_output_store["lines"].append(">>> Execution du script d'installation...")
             update_output_store["lines"].append(">>> (Les services redemarreront automatiquement)")

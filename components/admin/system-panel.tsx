@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -9,6 +9,7 @@ import {
   RefreshCw,
   Globe,
   Download,
+  Upload,
   Power,
   PowerOff,
   Loader2,
@@ -53,6 +54,8 @@ import {
   getUpdateOutput,
   getGitBranches,
   restartServices,
+  backupDownloadUrl,
+  uploadBackup,
   type AptOutput,
   type VersionInfo,
   type BackupInfo,
@@ -76,6 +79,8 @@ export function SystemPanel() {
   const [gitBranches, setGitBranches] = useState<GitBranches | null>(null)
   const [selectedBranch, setSelectedBranch] = useState<string>("")
   const [isFetchingBranches, setIsFetchingBranches] = useState(false)
+  // Commit precis a deployer (null = dernier commit de la branche)
+  const [selectedCommit, setSelectedCommit] = useState<string | null>(null)
 
   // Backup state
   const [backups, setBackups] = useState<BackupInfo[]>([])
@@ -83,6 +88,8 @@ export function SystemPanel() {
   const [backupMessage, setBackupMessage] = useState<string | null>(null)
   const [needsRestart, setNeedsRestart] = useState(false)
   const [isRestarting, setIsRestarting] = useState(false)
+  const [isImporting, setIsImporting] = useState(false)
+  const importInputRef = useRef<HTMLInputElement>(null)
   
   // Licence / Guide state
   const [showLicence, setShowLicence] = useState(false)
@@ -206,13 +213,15 @@ export function SystemPanel() {
   // Handle update
   const handleStartUpdate = async () => {
     const branchToUse = selectedBranch || gitBranches?.current || ""
-    const msg = branchToUse 
-      ? `Mettre a jour Aurige depuis la branche "${branchToUse}" ? Les services seront redemarres.`
-      : "Voulez-vous mettre a jour Aurige ? Les services seront redemarres."
-    if (!confirm(msg)) return
+    const target = selectedCommit
+      ? `le commit ${selectedCommit.slice(0, 7)}`
+      : branchToUse
+        ? `la branche "${branchToUse}"`
+        : "la derniere version"
+    if (!confirm(`Mettre a jour Aurige vers ${target} ? Les services seront redemarres.`)) return
     setBackupMessage(null)
     try {
-      await startUpdate(branchToUse || undefined)
+      await startUpdate(branchToUse || undefined, selectedCommit || undefined)
     } catch {
       setBackupMessage("Erreur lors du lancement de la mise a jour")
     }
@@ -306,6 +315,25 @@ export function SystemPanel() {
       setBackupMessage("Erreur lors de la sauvegarde")
     } finally {
       setIsCreatingBackup(false)
+    }
+  }
+
+  // Handle import backup (upload depuis le poste client)
+  const handleImportBackup = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (e.target) e.target.value = "" // reset pour re-selectionner le meme fichier
+    if (!file) return
+    setIsImporting(true)
+    setBackupMessage(null)
+    try {
+      const result = await uploadBackup(file)
+      setBackupMessage(result.message || `Sauvegarde importee: ${result.filename}`)
+      fetchBackups()
+    } catch (err: unknown) {
+      const m = err && typeof err === "object" && "message" in err ? String(err.message) : "Erreur lors de l'import"
+      setBackupMessage(m)
+    } finally {
+      setIsImporting(false)
     }
   }
 
@@ -448,6 +476,15 @@ export function SystemPanel() {
                       <p className="text-sm">{versionInfo.commitDate}</p>
                     </div>
                   )}
+                  {versionInfo.commitMessage && (
+                    <div className="col-span-2 min-w-0">
+                      <p className="text-xs text-muted-foreground">Message</p>
+                      <p className="text-sm break-words">{versionInfo.commitMessage}</p>
+                      {versionInfo.commitAuthor && (
+                        <p className="text-xs text-muted-foreground">par {versionInfo.commitAuthor}</p>
+                      )}
+                    </div>
+                  )}
                 </div>
                 
                 {/* Branch selector */}
@@ -504,6 +541,61 @@ export function SystemPanel() {
                     </AlertDescription>
                   </Alert>
                 )}
+
+                {versionInfo.latestCommits && versionInfo.latestCommits.length > 0 && (
+                  <div className="space-y-2 rounded-lg border border-border/50 bg-secondary/20 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs font-medium min-w-0">
+                        {versionInfo.updateAvailable
+                          ? "Commits disponibles (cliquer pour deployer un commit precis)"
+                          : "Derniers commits"}
+                      </p>
+                      {selectedCommit && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setSelectedCommit(null)}
+                          className="h-6 shrink-0 px-2 text-xs"
+                        >
+                          Dernier commit
+                        </Button>
+                      )}
+                    </div>
+                    <ScrollArea className="h-40">
+                      <div className="space-y-1">
+                        {versionInfo.latestCommits.map((c) => {
+                          const isSel = selectedCommit === c.hash
+                          return (
+                            <button
+                              key={c.hash}
+                              type="button"
+                              onClick={() => setSelectedCommit(isSel ? null : c.hash)}
+                              className={`flex w-full items-start gap-2 rounded-md border p-2 text-left transition-colors ${
+                                isSel ? "border-primary bg-primary/10" : "border-transparent hover:bg-secondary/50"
+                              }`}
+                            >
+                              <span className="shrink-0 font-mono text-xs text-primary">{c.hash.slice(0, 7)}</span>
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-xs">{c.message}</span>
+                                <span className="block truncate text-[11px] text-muted-foreground">
+                                  {c.author} - {c.date}
+                                </span>
+                              </span>
+                              {isSel && <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" />}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </ScrollArea>
+                    {selectedCommit && (
+                      <p className="flex items-center gap-1 text-[11px] text-warning">
+                        <AlertTriangle className="h-3 w-3" />
+                        Deploiement du commit {selectedCommit.slice(0, 7)} (HEAD detache)
+                      </p>
+                    )}
+                  </div>
+                )}
+
                 <Button
                   onClick={handleStartUpdate}
                   disabled={updateOutput.running}
@@ -587,18 +679,36 @@ export function SystemPanel() {
             <p className="text-xs text-muted-foreground">
               Archive le dossier <code className="bg-secondary px-1 rounded">/opt/aurige/data/</code> contenant toutes les missions, captures CAN, logs d{"'"}isolation et fichiers DBC. Utilisez la restauration pour recuperer vos donnees apres un crash ou reinstallation.
             </p>
-            <Button
-              onClick={handleCreateBackup}
-              disabled={isCreatingBackup}
-              className="w-full gap-2"
-            >
-              {isCreatingBackup ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <HardDrive className="h-4 w-4" />
-              )}
-              {isCreatingBackup ? "Sauvegarde..." : "Creer une sauvegarde"}
-            </Button>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Button
+                onClick={handleCreateBackup}
+                disabled={isCreatingBackup || isImporting}
+                className="w-full gap-2 sm:flex-1"
+              >
+                {isCreatingBackup ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <HardDrive className="h-4 w-4" />
+                )}
+                {isCreatingBackup ? "Sauvegarde..." : "Creer une sauvegarde"}
+              </Button>
+              <input
+                ref={importInputRef}
+                type="file"
+                accept=".tar.gz,application/gzip"
+                className="hidden"
+                onChange={handleImportBackup}
+              />
+              <Button
+                variant="outline"
+                onClick={() => importInputRef.current?.click()}
+                disabled={isImporting || isCreatingBackup}
+                className="w-full gap-2 bg-transparent sm:flex-1"
+              >
+                {isImporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                {isImporting ? "Import..." : "Importer une sauvegarde"}
+              </Button>
+            </div>
 
             {backupMessage && (
               <Alert className={needsRestart ? "border-warning/50 bg-warning/10" : "border-muted"}>
@@ -637,6 +747,14 @@ export function SystemPanel() {
                           </p>
                         </div>
                         <div className="flex shrink-0 gap-1">
+                          <a
+                            href={backupDownloadUrl(backup.filename)}
+                            download={backup.filename}
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary"
+                            title="Telecharger"
+                          >
+                            <Download className="h-3 w-3" />
+                          </a>
                           <Button
                             size="icon"
                             variant="ghost"

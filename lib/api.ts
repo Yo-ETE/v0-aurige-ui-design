@@ -1041,12 +1041,22 @@ export async function tailscaleSetExitNode(peerIp: string): Promise<{ status: st
 // Update and Backup
 // =============================================================================
 
+export interface GitCommit {
+  hash: string
+  message: string
+  date: string
+  author: string
+}
+
 export interface VersionInfo {
   branch: string
   commit: string
   commitDate?: string
+  commitMessage?: string
+  commitAuthor?: string
   commitsBehind: number
   updateAvailable: boolean
+  latestCommits?: GitCommit[]
 }
 
 export interface BackupInfo {
@@ -1092,10 +1102,36 @@ export async function restoreBackup(filename: string): Promise<{ status: string;
   return fetchApi(`/system/backups/${filename}/restore`, { method: "POST" })
 }
 
-export async function startUpdate(branch?: string): Promise<{ status: string; message: string }> {
-  return fetchApi("/system/update", { 
+// URL de téléchargement direct d'une archive (le navigateur gère le download).
+export function backupDownloadUrl(filename: string): string {
+  return `${getApiBaseUrl()}/api/system/backups/${encodeURIComponent(filename)}/download`
+}
+
+// Import d'une archive .tar.gz depuis le poste client (multipart).
+export async function uploadBackup(
+  file: File,
+): Promise<{ status: string; message: string; filename?: string; size?: number }> {
+  const form = new FormData()
+  form.append("file", file)
+  const res = await apiFetch(`${getApiBaseUrl()}/api/system/backups/upload`, {
     method: "POST",
-    ...(branch ? { body: JSON.stringify({ branch }) } : {}),
+    body: form,
+  })
+  const text = await res.text()
+  const data = text ? JSON.parse(text) : {}
+  if (!res.ok) {
+    throw new APIError(res.status, data.detail || `API Error: ${res.status}`)
+  }
+  return data
+}
+
+export async function startUpdate(branch?: string, commit?: string): Promise<{ status: string; message: string }> {
+  const payload: { branch?: string; commit?: string } = {}
+  if (branch) payload.branch = branch
+  if (commit) payload.commit = commit
+  return fetchApi("/system/update", {
+    method: "POST",
+    ...(Object.keys(payload).length ? { body: JSON.stringify(payload) } : {}),
   })
 }
 
