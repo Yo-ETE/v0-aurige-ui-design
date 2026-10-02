@@ -4,7 +4,7 @@ import React from "react"
 
 import { useState, useEffect } from "react"
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useSearchParams } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { useMissionStore } from "@/lib/mission-store"
 import { apiFetch, getApiBaseUrl, getApiHost } from "@/lib/api-config"
@@ -113,6 +113,7 @@ const baseNavigation: NavSection[] = [
 
 export function Sidebar() {
   const pathname = usePathname()
+  const searchParams = useSearchParams()
   const { hasArea, logout } = useAuth()
   const currentMission = useMissionStore((state) => state.getCurrentMission())
 
@@ -279,9 +280,13 @@ export function Sidebar() {
                 {expandedSections.includes(section.title) && (
                   <div className="mt-1 space-y-1">
                     {section.items.map((item) => {
-                      const isActive =
-                        pathname === item.href ||
-                        (item.href !== "/" && pathname.startsWith(item.href))
+                      const [itemPath, itemQuery] = item.href.split("?tab=")
+                      const isActive = itemQuery
+                        ? pathname === itemPath &&
+                          (searchParams.get("tab") ??
+                            (hasArea("area_administration") ? "comptes" : "systeme")) === itemQuery
+                        : pathname === item.href ||
+                          (item.href !== "/" && pathname.startsWith(item.href))
 
                       return (
 <Link
