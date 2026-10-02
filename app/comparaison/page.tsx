@@ -47,6 +47,7 @@ import {
   compareLogs,
   listMissionLogs,
   sendCANFrame,
+  startInjectFrame,
   addDBCSignal,
   listComparisons,
   getComparison,
@@ -62,6 +63,7 @@ import { useExportStore } from "@/lib/export-store"
 import { useRouter } from "next/navigation"
 import { useToast } from "@/hooks/use-toast"
 import { LogImportButton } from "@/components/log-import-button"
+import { InjectStatusBar } from "@/components/inject-status"
 
 // Tree node type for hierarchical logs
 interface LogTreeNode extends LogEntry {
@@ -102,6 +104,10 @@ function LogSelectItem({ log, depth, disabledId }: { log: LogTreeNode; depth: nu
       ))}
     </>
   )
+}
+
+function countChangedBits(frame: CompareFrameDiff): number {
+  return (frame.byte_change_detail ?? []).reduce((sum, bd) => sum + (bd.changed_bits?.length ?? 0), 0)
 }
 
 type ViewMode = "list" | "new" | "view"
@@ -368,6 +374,16 @@ export default function ComparaisonPage() {
     }
   }
 
+  const handleLoopFrame = async (frame: CompareFrameDiff) => {
+    if (!frame.payload_b) return
+    try {
+      await startInjectFrame(canInterface, frame.can_id, frame.payload_b)
+      toast({ title: "Rejeu en boucle", description: `${frame.can_id}#${frame.payload_b} sur ${canInterface}` })
+    } catch (e) {
+      toast({ title: "Erreur", description: e instanceof Error ? e.message : "Echec du rejeu en boucle", variant: "destructive" })
+    }
+  }
+
   const handleSendToReplay = (frame: CompareFrameDiff) => {
     const frames = []
     if (frame.payload_a) {
@@ -495,6 +511,11 @@ export default function ComparaisonPage() {
   // =========================================================================
   const renderResults = () => {
     if (!comparisonResult) return null
+    // Trame candidate : plus fort command_score (> 0)
+    const candidateFrame = comparisonResult.frames.reduce<CompareFrameDiff | null>(
+      (best, f) => ((f.command_score ?? 0) > (best?.command_score ?? 0) ? f : best),
+      null,
+    )
     return (
       <Card className="border-border bg-card">
         <CardHeader className="pb-4">
@@ -539,6 +560,39 @@ export default function ComparaisonPage() {
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
+          <InjectStatusBar className="mb-4" />
+          {candidateFrame && (
+            <div className="p-3 rounded-lg bg-violet-500/10 border border-violet-500/30 space-y-2">
+              <div className="flex flex-wrap items-center gap-2 text-sm font-medium text-violet-400">
+                <Zap className="h-4 w-4" />
+                Commande candidate
+                <Badge variant="outline" className="font-mono">{candidateFrame.can_id}</Badge>
+                <Badge variant="secondary" className="bg-violet-500/20 text-violet-400 text-[10px] h-5 font-mono">
+                  score {(candidateFrame.command_score ?? 0).toFixed(0)}
+                </Badge>
+                {countChangedBits(candidateFrame) === 1 && (
+                  <Badge variant="secondary" className="bg-emerald-500/20 text-emerald-500 text-[10px] h-5">bit unique</Badge>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+                <span className="text-muted-foreground">
+                  Octets: {candidateFrame.bytes_changed.map(b => `#${b}`).join(", ") || "-"}
+                </span>
+                {(candidateFrame.byte_change_detail ?? []).some(bd => bd.changed_bits?.length) && (
+                  <span className="font-mono text-muted-foreground">
+                    Bits: {(candidateFrame.byte_change_detail ?? []).flatMap(bd => (bd.changed_bits ?? []).map(n => `#${bd.index}.bit${n}`)).join(", ")}
+                  </span>
+                )}
+                <span className="font-mono">payload B: {candidateFrame.payload_b}</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" className="gap-2 bg-transparent" onClick={() => handleLoopFrame(candidateFrame)} disabled={!candidateFrame.payload_b}>
+                  <Play className="h-3 w-3" />
+                  Rejouer en boucle
+                </Button>
+              </div>
+            </div>
+          )}
           {/* Summary */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-center">
@@ -661,6 +715,11 @@ export default function ComparaisonPage() {
                         }`}>
                           <Zap className="h-2.5 w-2.5" />
                           {(frame.command_score ?? 0).toFixed(0)}
+                        </Badge>
+                      )}
+                      {countChangedBits(frame) === 1 && (
+                        <Badge variant="secondary" className="bg-emerald-500/20 text-emerald-500 text-[10px] h-5" title="Un seul bit change : fort indice de drapeau de commande">
+                          bit unique
                         </Badge>
                       )}
                       {frame.classification !== "identical" && (frame.stability_score ?? 0) > 0 && (
@@ -875,16 +934,23 @@ export default function ComparaisonPage() {
                                     <span className="text-muted-foreground">{">"}</span>
                                     <span className="text-emerald-400">{bd.val_b}</span>
                                     <span className="text-amber-500/70">(+/-{bd.hex_diff})</span>
+                                    {bd.changed_bits?.map((n) => (
+                                      <span key={n} className="px-1 rounded bg-violet-500/20 text-violet-400">bit{n}</span>
+                                    ))}
                                   </span>
                                 ))}
                               </div>
                             )}
                           </div>
                         )}
-                        <div className="flex gap-2">
+                        <div className="flex flex-wrap gap-2">
                           <Button size="sm" variant="outline" className="gap-2 bg-transparent" onClick={(e) => { e.stopPropagation(); handleSendToReplay(frame) }}>
                             <Send className="h-3 w-3" />
                             Envoyer vers Replay
+                          </Button>
+                          <Button size="sm" variant="outline" className="gap-2 bg-transparent" disabled={!frame.payload_b} onClick={(e) => { e.stopPropagation(); handleLoopFrame(frame) }}>
+                            <Play className="h-3 w-3" />
+                            Rejouer en boucle
                           </Button>
                         </div>
                       </div>

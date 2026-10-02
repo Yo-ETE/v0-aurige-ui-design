@@ -1503,6 +1503,7 @@ export interface ByteChangeDetail {
   val_b: string
   hex_diff: string
   decimal_diff: number
+  changed_bits?: number[]
 }
 
 export interface RarePayloadInfo {
