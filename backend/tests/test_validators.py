@@ -7,8 +7,7 @@ def test_valid_git_ref_accepts():
 
 
 def test_valid_git_ref_rejects():
-    for r in ["", "-rm", "-rf", "a..b", "a b", "a;b", "a$b", "a//b", "/lead", "x" * 201, "main
-", "main	"]:
+    for r in ["", "-rm", "-rf", "a..b", "a b", "a;b", "a$b", "a//b", "/lead", "x" * 201, "main\n", "main\t"]:
         assert not validators.valid_git_ref(r), r
     assert not validators.valid_git_ref(None)  # type: ignore
     assert not validators.valid_git_ref(123)  # type: ignore

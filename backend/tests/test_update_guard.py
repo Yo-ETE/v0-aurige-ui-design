@@ -53,8 +53,7 @@ def no_side_effects(monkeypatch):
 def test_update_rejects_bad_branch(client, no_side_effects):
     c, main = client
     spawned, writes = no_side_effects
-    for bad in ["-rm", "a;b", "a b", "x" * 201, "a..b", "main
-", 123]:
+    for bad in ["-rm", "a;b", "a b", "x" * 201, "a..b", "main\n", 123]:
         r = c.post("/api/system/update", json={"branch": bad})
         assert r.status_code == 400, bad
     # rien n'a ete planifie ni ecrit
