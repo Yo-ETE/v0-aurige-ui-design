@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, Suspense } from "react"
+import { useState, useEffect, useRef, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
 import { AppShell } from "@/components/app-shell"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -41,6 +41,7 @@ import {
   attemptCrashRecovery,
   getFuzzingHistory,
   compareLogsWithFuzzing,
+  analyzeCrash,
   listMissionLogs,
   listKnownFrames,
   createKnownFrame,
@@ -51,6 +52,9 @@ import {
   type FuzzingHistory,
   type CrashRecoveryResponse,
   type LogComparisonResult,
+  type CrashAnalysisResult,
+  type CrashCulprit,
+  type FuzzingHistoryFrame,
   type CANInterface,
   type LogEntry,
   type KnownFrame,
@@ -63,6 +67,18 @@ const SEVERITY_CLASS: Record<string, string> = {
   info: "text-primary border-primary/50",
   warning: "text-warning border-warning/50",
   danger: "text-destructive border-destructive/50",
+}
+
+const ANOMALY_SEVERITY_CLASS: Record<string, string> = {
+  critical: "text-destructive border-destructive/50",
+  high: "text-warning border-warning/50",
+  medium: "text-muted-foreground border-border",
+}
+
+const ANOMALY_TYPE_LABEL: Record<string, string> = {
+  disappeared: "Disparu",
+  zeroed: "Valeur zéro",
+  new_error: "Nouvel ID erreur",
 }
 
 function errMsg(e: unknown): string {
@@ -90,9 +106,18 @@ function CrashRecoveryContent() {
   const [isComparing, setIsComparing] = useState(false)
   const [isRecovering, setIsRecovering] = useState(false)
   const [selectedPreFuzzLog, setSelectedPreFuzzLog] = useState<string>("")
+  const [selectedDuringLog, setSelectedDuringLog] = useState<string>("")
   const [customSuspectIds, setCustomSuspectIds] = useState<string>("")
   const [availableLogs, setAvailableLogs] = useState<LogEntry[]>([])
   const [isLoadingLogs, setIsLoadingLogs] = useState(false)
+  const [compareError, setCompareError] = useState<string | null>(null)
+  const [recoveryError, setRecoveryError] = useState<string | null>(null)
+
+  // Analyse crash avancee (analyzeCrash)
+  const [crashAnalysis, setCrashAnalysis] = useState<CrashAnalysisResult | null>(null)
+  const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [analysisError, setAnalysisError] = useState<string | null>(null)
+  const libraryCardRef = useRef<HTMLDivElement>(null)
 
   // Bibliotheque de trames remarquables (crash / reinit)
   const [frames, setFrames] = useState<KnownFrame[]>([])
@@ -154,8 +179,9 @@ function CrashRecoveryContent() {
   }
 
   const handleCompare = async () => {
+    setCompareError(null)
     if (!currentMission || !selectedPreFuzzLog) {
-      alert("Selectionnez une mission et un log pre-fuzz")
+      setCompareError("Selectionnez une mission et un log pre-fuzz")
       return
     }
     setIsComparing(true)
@@ -164,13 +190,14 @@ function CrashRecoveryContent() {
       setComparison(result)
     } catch (error) {
       console.error("Failed to compare logs:", error)
-      alert("Erreur lors de la comparaison")
+      setCompareError("Erreur lors de la comparaison")
     } finally {
       setIsComparing(false)
     }
   }
 
   const handleRecovery = async (suspectIds?: string[]) => {
+    setRecoveryError(null)
     setIsRecovering(true)
     setRecoveryResult(null)
     try {
@@ -178,7 +205,7 @@ function CrashRecoveryContent() {
       setRecoveryResult(result)
     } catch (error) {
       console.error("Recovery failed:", error)
-      alert("Erreur lors du recovery")
+      setRecoveryError("Erreur lors du recovery")
     } finally {
       setIsRecovering(false)
     }
@@ -189,20 +216,66 @@ function CrashRecoveryContent() {
   }
 
   const handleTargetedRecovery = () => {
+    setRecoveryError(null)
     if (!comparison || comparison.suspect_ids.length === 0) {
-      alert("Aucun ID suspect identifie. Lancez d'abord la comparaison.")
+      setRecoveryError("Aucun ID suspect identifie. Lancez d'abord la comparaison.")
       return
     }
     handleRecovery(comparison.suspect_ids)
   }
 
   const handleCustomRecovery = () => {
+    setRecoveryError(null)
     const ids = customSuspectIds.split(",").map(id => id.trim().toUpperCase()).filter(Boolean)
     if (ids.length === 0) {
-      alert("Entrez au moins un ID")
+      setRecoveryError("Entrez au moins un ID")
       return
     }
     handleRecovery(ids)
+  }
+
+  // ---- Analyse crash avancee (analyzeCrash) ----
+
+  const handleAnalyzeCrash = async () => {
+    setAnalysisError(null)
+    if (!currentMission || !selectedPreFuzzLog || !selectedDuringLog) {
+      setAnalysisError("Selectionnez une mission, un log pre-fuzz et un log pendant fuzz")
+      return
+    }
+    setIsAnalyzing(true)
+    setCrashAnalysis(null)
+    try {
+      const result = await analyzeCrash(currentMission.id, selectedPreFuzzLog, selectedDuringLog)
+      setCrashAnalysis(result)
+    } catch (error) {
+      console.error("Failed to analyze crash:", error)
+      setAnalysisError(errMsg(error))
+    } finally {
+      setIsAnalyzing(false)
+    }
+  }
+
+  const scrollToLibrary = () => {
+    libraryCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+  }
+
+  const prefillFromCulpritFrame = (frame: FuzzingHistoryFrame) => {
+    const byteCount = Math.max(1, Math.ceil(frame.data.length / 2))
+    setFormCanId(frame.id)
+    setFormCrashData(frame.data)
+    setFormResetData("00".repeat(byteCount))
+    setFormLabel("crash " + frame.id)
+    setFormSeverity("danger")
+    scrollToLibrary()
+  }
+
+  const prefillFromRecoveryFrame = (frameStr: string) => {
+    const [idPart, dataPart] = frameStr.split("#")
+    if (!idPart) return
+    setFormCanId(idPart)
+    setFormResetData(dataPart || "")
+    setFormLabel("reinit " + idPart)
+    scrollToLibrary()
   }
 
   // ---- Bibliotheque de trames remarquables ----
@@ -340,6 +413,7 @@ function CrashRecoveryContent() {
       </Card>
 
       {/* Trames remarquables (crash / reinit) */}
+      <div ref={libraryCardRef}>
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -468,6 +542,7 @@ function CrashRecoveryContent() {
           </div>
         </CardContent>
       </Card>
+      </div>
 
       {/* IDs critiques AUD-06 */}
       <Card>
@@ -659,6 +734,13 @@ function CrashRecoveryContent() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
+          {compareError && (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{compareError}</AlertDescription>
+            </Alert>
+          )}
+
           <div className="flex flex-wrap items-center gap-3">
             <label className="text-sm font-medium w-32">Log pre-fuzz:</label>
             {availableLogs.length > 0 ? (
@@ -686,6 +768,148 @@ function CrashRecoveryContent() {
               {isComparing ? "Analyse..." : "Comparer"}
             </Button>
           </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="text-sm font-medium w-32">Log pendant fuzz:</label>
+            {availableLogs.length > 0 ? (
+              <div className="flex-1 min-w-[200px]">
+                <LogSelector
+                  logs={availableLogs}
+                  value={selectedDuringLog}
+                  onValueChange={setSelectedDuringLog}
+                  placeholder="Selectionnez un log..."
+                  disabled={isLoadingLogs}
+                  triggerClassName="h-9 text-sm"
+                />
+              </div>
+            ) : (
+              <input
+                type="text"
+                value={selectedDuringLog}
+                onChange={(e) => setSelectedDuringLog(e.target.value)}
+                placeholder="Ex: 20250211_150500"
+                className="flex-1 min-w-[200px] rounded border border-border bg-background px-3 py-2 text-sm"
+              />
+            )}
+            <Button
+              onClick={handleAnalyzeCrash}
+              disabled={isAnalyzing || !currentMission || !selectedPreFuzzLog || !selectedDuringLog}
+              variant="outline"
+              className="border-primary/50 text-primary hover:bg-primary/10"
+            >
+              <Zap className="h-4 w-4 mr-2" />
+              {isAnalyzing ? "Analyse..." : "Analyse avancee"}
+            </Button>
+          </div>
+
+          {analysisError && (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{analysisError}</AlertDescription>
+            </Alert>
+          )}
+
+          {isAnalyzing && (
+            <Alert>
+              <RefreshCw className="h-4 w-4 animate-spin" />
+              <AlertDescription>Analyse avancee du crash en cours...</AlertDescription>
+            </Alert>
+          )}
+
+          {crashAnalysis && (
+            <div className="space-y-3">
+              <Alert className="border-l-4 border-l-primary bg-primary/5">
+                <AlertTriangle className="h-4 w-4" />
+                <AlertDescription>
+                  <strong>{crashAnalysis.message}</strong>
+                  <div className="mt-2 text-xs space-y-1">
+                    <p>IDs pre-fuzz: {crashAnalysis.pre_fuzz_ids.length}</p>
+                    <p>IDs pendant fuzz: {crashAnalysis.during_fuzz_ids.length}</p>
+                  </div>
+                </AlertDescription>
+              </Alert>
+
+              {crashAnalysis.disappeared_ids.length > 0 && (
+                <div className="rounded border border-destructive/30 bg-destructive/5 p-3">
+                  <p className="text-sm font-medium mb-2">IDs disparus:</p>
+                  <div className="flex flex-wrap gap-2">
+                    {crashAnalysis.disappeared_ids.map((id) => (
+                      <Badge key={id} variant="outline" className="font-mono text-destructive border-destructive/50">
+                        {id}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {crashAnalysis.new_error_ids.length > 0 && (
+                <div className="rounded border border-warning/30 bg-warning/5 p-3">
+                  <p className="text-sm font-medium mb-2">Nouveaux IDs erreur:</p>
+                  <div className="flex flex-wrap gap-2">
+                    {crashAnalysis.new_error_ids.map((id) => (
+                      <Badge key={id} variant="outline" className="font-mono text-warning border-warning/50">
+                        {id}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {crashAnalysis.anomalies.length > 0 && (
+                <div className="rounded border border-border bg-secondary/10 p-3 space-y-2">
+                  <p className="text-sm font-medium">Anomalies detectees:</p>
+                  {crashAnalysis.anomalies.map((anomaly, i) => (
+                    <div key={i} className="flex flex-wrap items-center gap-2 rounded bg-background p-2 text-xs">
+                      <Badge variant="outline">{ANOMALY_TYPE_LABEL[anomaly.type] ?? anomaly.type}</Badge>
+                      <Badge variant="outline" className={ANOMALY_SEVERITY_CLASS[anomaly.severity] ?? ""}>
+                        {anomaly.severity}
+                      </Badge>
+                      <span className="font-mono font-bold text-primary">{anomaly.id}</span>
+                      <span className="text-muted-foreground flex-1">{anomaly.description}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {crashAnalysis.culprits.length > 0 && (
+                <div className="rounded border border-destructive/30 bg-destructive/5 p-3 space-y-3">
+                  <p className="text-sm font-medium">Coupables identifies:</p>
+                  {crashAnalysis.culprits.map((culprit: CrashCulprit, i) => (
+                    <div key={i} className="rounded border border-border bg-background p-3 space-y-2">
+                      <div className="flex flex-wrap items-center gap-2 text-xs">
+                        <Badge variant="outline">{ANOMALY_TYPE_LABEL[culprit.anomaly.type] ?? culprit.anomaly.type}</Badge>
+                        <Badge variant="outline" className={ANOMALY_SEVERITY_CLASS[culprit.anomaly.severity] ?? ""}>
+                          {culprit.anomaly.severity}
+                        </Badge>
+                        <span className="font-mono font-bold text-primary">{culprit.anomaly.id}</span>
+                        <span className="text-muted-foreground flex-1">{culprit.anomaly.description}</span>
+                        <span className="text-muted-foreground">delta: {culprit.timing_delta}ms</span>
+                      </div>
+                      <div className="space-y-1">
+                        {culprit.suspect_frames.map((frame, j) => (
+                          <div key={j} className="flex flex-wrap items-center gap-2 rounded bg-secondary/10 p-2 text-xs">
+                            <span className="font-mono">
+                              {frame.id}#{frame.data}
+                            </span>
+                            <span className="text-muted-foreground">+{culprit.timing_delta}ms</span>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="ml-auto"
+                              onClick={() => prefillFromCulpritFrame(frame)}
+                            >
+                              <Library className="h-3 w-3 mr-1" />
+                              Enregistrer dans la bibliotheque
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {comparison && (
             <div className="space-y-3">
@@ -732,6 +956,13 @@ function CrashRecoveryContent() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {recoveryError && (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{recoveryError}</AlertDescription>
+            </Alert>
+          )}
+
           <div className="grid gap-3">
             {/* Quick recovery */}
             <div className="rounded border border-border bg-secondary/10 p-4">
@@ -797,7 +1028,7 @@ function CrashRecoveryContent() {
 
               <div className="space-y-2">
                 {recoveryResult.results.map((result, i) => (
-                  <div key={i} className="flex items-center gap-3 rounded bg-background p-2 text-xs">
+                  <div key={i} className="flex flex-wrap items-center gap-3 rounded bg-background p-2 text-xs">
                     {result.status === "sent" ? (
                       <CheckCircle2 className="h-4 w-4 text-success flex-shrink-0" />
                     ) : (
@@ -805,6 +1036,16 @@ function CrashRecoveryContent() {
                     )}
                     <span className="font-mono font-bold text-primary w-12">{result.id}</span>
                     <span className="text-muted-foreground flex-1">{result.frame || result.error}</span>
+                    {result.status === "sent" && result.frame && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => prefillFromRecoveryFrame(result.frame as string)}
+                      >
+                        <Library className="h-3 w-3 mr-1" />
+                        Enregistrer reinit
+                      </Button>
+                    )}
                   </div>
                 ))}
               </div>
