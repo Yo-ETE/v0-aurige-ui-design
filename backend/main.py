@@ -21,6 +21,7 @@ import shutil
 import asyncio
 import subprocess
 import signal
+import shlex
 import time
 from datetime import datetime
 from pathlib import Path
@@ -1533,11 +1534,14 @@ async def force_cleanup_replay():
 # Injection de fond (boucle d'une trame ou keep-alive d'un log)
 # =============================================================================
 
-INJECT_SCRIPT_PATH = Path("/tmp/aurige_inject.sh")  # distinct du script de replay
-_HEX_ID = re.compile(r"^[0-9A-Fa-f]{1,8}$")
-_HEX_DATA = re.compile(r"^([0-9A-Fa-f]{2}){0,8}$")
-_IFACE_RE = re.compile(r"^[A-Za-z0-9_.-]{1,15}$")
-_SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+INJECT_SCRIPT_PATH = DATA_DIR / "aurige_inject.sh"  # distinct du replay, hors /tmp (symlink/race)
+INJECT_MAX_FRAMES = 5000
+# Toujours fullmatch (jamais ^...$ : $ accepte un saut de ligne final)
+_HEX_ID = re.compile(r"[0-9A-Fa-f]{1,8}")
+_HEX_DATA = re.compile(r"([0-9A-Fa-f]{2}){0,8}")
+_IFACE_RE = re.compile(r"[A-Za-z0-9_.-]{1,15}")
+_SAFE_ID_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*")  # pas de '.' initial ni de separateur
+_LOG_FRAME_RE = re.compile(r"[0-9A-Fa-f]{1,8}#([0-9A-Fa-f]{2}){0,8}")
 
 
 def _injectable_or_block(frames: list[str]) -> Optional[str]:
@@ -1562,7 +1566,8 @@ async def inject_start(req: InjectRequest):
     """Demarre une injection de fond en boucle (une seule a la fois)."""
     if state.inject_process and state.inject_process.returncode is None:
         raise HTTPException(status_code=409, detail="Injection de fond deja en cours")
-    if not _IFACE_RE.match(req.interface or ""):
+    iface = (req.interface or "").strip()
+    if not _IFACE_RE.fullmatch(iface):
         raise HTTPException(status_code=400, detail="Interface invalide")
     interval = max(10, min(5000, int(req.intervalMs)))
     sleep_s = interval / 1000.0
@@ -1570,14 +1575,14 @@ async def inject_start(req: InjectRequest):
     if req.mode == "frame":
         cid = (req.canId or "").strip()
         data = (req.data or "").strip()
-        if not _HEX_ID.match(cid) or not _HEX_DATA.match(data):
+        if not _HEX_ID.fullmatch(cid) or not _HEX_DATA.fullmatch(data):
             raise HTTPException(status_code=400, detail="Trame invalide (ID 1..8 hex, data hex paire <= 16)")
         frames = [f"{cid.upper()}#{data.upper()}"]
         desc = f"Trame {frames[0]} ({interval} ms)"
     elif req.mode == "log":
         if not req.missionId or not req.logId:
             raise HTTPException(status_code=400, detail="missionId et logId requis")
-        if not _SAFE_ID_RE.match(req.missionId) or not _SAFE_ID_RE.match(req.logId):
+        if not _SAFE_ID_RE.fullmatch(req.missionId) or not _SAFE_ID_RE.fullmatch(req.logId):
             raise HTTPException(status_code=400, detail="Identifiant invalide")
         log_file = get_mission_logs_dir(req.missionId) / f"{req.logId}.log"
         if not log_file.exists():
@@ -1587,13 +1592,19 @@ async def inject_start(req: InjectRequest):
                 for line in f:
                     parts = line.strip().split()
                     # Format : (1234.567890) can0 123#DEADBEEF
-                    if len(parts) >= 3 and "#" in parts[2]:
-                        frames.append(parts[2])
+                    # Seules les trames strictement hex sont gardees (jamais de jeton brut vers le shell)
+                    if len(parts) >= 3 and _LOG_FRAME_RE.fullmatch(parts[2]):
+                        frames.append(parts[2].upper())
+                        if len(frames) > INJECT_MAX_FRAMES:
+                            break
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Lecture du log impossible: {e}")
         if not frames:
             raise HTTPException(status_code=400, detail="Log vide ou illisible")
-        desc = f"Keep-alive log {req.logId} ({len(frames)} trames, {interval} ms)"
+        truncated = len(frames) > INJECT_MAX_FRAMES
+        frames = frames[:INJECT_MAX_FRAMES]
+        suffix = " - tronque" if truncated else ""
+        desc = f"Keep-alive log {req.logId} ({len(frames)} trames{suffix}, {interval} ms)"
     else:
         raise HTTPException(status_code=400, detail="mode invalide")
 
@@ -1601,11 +1612,18 @@ async def inject_start(req: InjectRequest):
     if blocked:
         raise HTTPException(status_code=403, detail=blocked)
 
-    body = "\n".join(f"  cansend {req.interface} {f}\n  sleep {sleep_s}" for f in frames)
+    qiface = shlex.quote(iface)
+    body = "\n".join(f"  cansend {qiface} {shlex.quote(f)}\n  sleep {sleep_s}" for f in frames)
     script = f"#!/bin/bash\nwhile true; do\n{body}\ndone\n"
+    # Script prive : dossier cree si besoin, ancien fichier supprime (pas de suivi de symlink)
+    INJECT_SCRIPT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        INJECT_SCRIPT_PATH.unlink()
+    except FileNotFoundError:
+        pass
     INJECT_SCRIPT_PATH.write_text(script)
     try:
-        INJECT_SCRIPT_PATH.chmod(0o755)
+        INJECT_SCRIPT_PATH.chmod(0o700)
     except OSError:
         pass
     state.inject_process = await run_command_async(["bash", str(INJECT_SCRIPT_PATH)])
@@ -1623,6 +1641,7 @@ async def inject_stop():
             await asyncio.wait_for(p.wait(), timeout=5.0)
         except asyncio.TimeoutError:
             p.kill()
+            await p.wait()  # recolte le process (pas de zombie)
     state.inject_process = None
     state.inject_desc = ""
     return {"status": "stopped"}
