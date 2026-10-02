@@ -3896,8 +3896,10 @@ async def health_check():
 async def scan_wifi_networks():
     """Scan for available Wi-Fi networks"""
     try:
-        # Use nmcli to scan for networks
-        result = run_command(["nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY,BSSID", "device", "wifi", "list", "--rescan", "yes"], check=False)
+        # Use nmcli to scan for networks.
+        # --rescan yes force un scan radio frais : il peut dépasser 10s (radio
+        # occupée, nombreux APs). Timeout porté à 30s pour éviter le 504.
+        result = run_command(["nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY,BSSID", "device", "wifi", "list", "--rescan", "yes"], check=False, timeout=30)
         if result.returncode != 0:
             return {"status": "error", "message": "Failed to scan Wi-Fi networks", "networks": []}
         

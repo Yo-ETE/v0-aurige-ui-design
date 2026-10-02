@@ -313,7 +313,7 @@ export function RaspberryPiStatus() {
             <StatusTileComponent key={tile.id} tile={tile} />
           ))}
         </div>
-        {!isApiAvailable && (
+        {lastUpdate && !isApiAvailable && (
           <p className="mt-4 text-xs text-destructive italic border-t border-border pt-4">
             Connexion au Raspberry Pi impossible. Vérifiez que l'API backend est en cours d'exécution sur le port 8000 et que l'adresse IP est correctement configurée.
           </p>
