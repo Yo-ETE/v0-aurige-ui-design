@@ -348,7 +348,7 @@ export default function MissionPage() {
             )}
 
             {/* Stats */}
-            <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <div className="flex items-center gap-3 rounded-lg border border-border bg-secondary/30 p-3">
                 <FileText className="h-5 w-5 text-primary" />
                 <div>
@@ -396,7 +396,7 @@ export default function MissionPage() {
           <h3 className="text-lg font-semibold text-foreground mb-4">
             Modules d'analyse
           </h3>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {moduleLinks.map((module) => (
               <Link key={module.href} href={module.href}>
                 <Card className="bg-card border-border transition-all hover:border-primary/50 hover:bg-card/80 cursor-pointer h-full">

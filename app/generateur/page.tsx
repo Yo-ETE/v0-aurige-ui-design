@@ -140,7 +140,7 @@ export default function Generateur() {
       title="Générateur"
       description="Génération de trames CAN (cangen)"
     >
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Alerts */}
         {(error || success) && (
           <div className="lg:col-span-2">
@@ -335,7 +335,7 @@ export default function Generateur() {
             </div>
 
             {/* Stats */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="rounded-lg bg-secondary p-3 text-center">
                 <p className="text-2xl font-bold text-foreground">
                   {Math.round(1000 / (parseInt(delay) || 100))}

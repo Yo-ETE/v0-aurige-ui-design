@@ -20,7 +20,7 @@ export function PermissionEditor({ value, onChange }: {
       {[{ title: "Zones", flags: AREA }, { title: "Actions", flags: ACTION }].map((grp) => (
         <div key={grp.title} className="space-y-2">
           <p className="text-xs font-semibold text-muted-foreground">{grp.title}</p>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {grp.flags.map((f) => (
               <label key={f} className="flex items-center justify-between gap-2 rounded border border-border px-2 py-1 text-xs">
                 <span className="font-mono">{f}</span>

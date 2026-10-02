@@ -734,7 +734,7 @@ export default function ComparaisonPage() {
                                 CmdScore: {(frame.command_score ?? 0).toFixed(0)}
                               </Badge>
                             </div>
-                            <div className="grid gap-2 sm:grid-cols-2">
+                            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                               {/* Exclusifs A */}
                               <div className="space-y-1">
                                 <div className="flex items-center justify-between">
@@ -827,7 +827,7 @@ export default function ComparaisonPage() {
                           </div>
                         )}
 
-                        <div className="grid gap-2 sm:grid-cols-2">
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                           <div className="p-2 rounded bg-card border border-border">
                             <div className="flex items-center justify-between mb-1">
                               <span className="text-xs text-muted-foreground">Log A ({frame.count_a} trames)</span>
@@ -1011,7 +1011,7 @@ export default function ComparaisonPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5 items-start">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5 items-start">
                   <div className="space-y-2 lg:col-span-2">
                     <Label htmlFor="log-a">Log A (ex: ouverture)</Label>
                     <Select value={logAId} onValueChange={setLogAId} disabled={isLoadingLogs}>

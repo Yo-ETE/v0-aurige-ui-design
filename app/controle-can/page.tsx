@@ -176,7 +176,7 @@ export default function ControleCAN() {
           </div>
         </CardHeader>
         <CardContent className="space-y-6">
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="interface">Interface CAN</Label>
               <Select
@@ -243,7 +243,7 @@ export default function ControleCAN() {
 
           {/* Stats if up */}
           {isInitialized && canStatus && (
-            <div className="grid grid-cols-3 gap-4 text-center">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-center">
               <div className="rounded-lg bg-secondary p-3">
                 <p className="text-lg font-bold text-foreground">{canStatus.txPackets}</p>
                 <p className="text-xs text-muted-foreground">TX Packets</p>
@@ -290,7 +290,7 @@ export default function ControleCAN() {
       </Card>
 
       {/* Scan Bitrate - can0 and can1 side by side */}
-      <div className="grid gap-6 lg:grid-cols-2 mb-6">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 mb-6">
         {(["can0", "can1"] as const).map((iface) => {
           const isScanning = scanningInterfaces.includes(iface)
           const result = scanResults[iface]

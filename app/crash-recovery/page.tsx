@@ -212,7 +212,7 @@ export default function CrashRecoveryPage() {
             
             return (
             <>
-              <div className="grid grid-cols-3 gap-3 text-sm">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
                 <div className="rounded border border-border bg-secondary/20 p-3">
                   <p className="text-muted-foreground text-xs">Trames envoyees</p>
                   <p className="text-2xl font-bold text-foreground">{history.total_sent || 0}</p>

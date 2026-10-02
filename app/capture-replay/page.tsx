@@ -275,7 +275,7 @@ const handleDeleteLog = async (logId: string) => {
       title="Capture & Replay"
       description={currentMission ? `Mission: ${currentMission.name}` : "Capturer et rejouer des logs CAN"}
     >
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Alerts */}
         {(error || success) && (
           <div className="lg:col-span-2">

@@ -241,7 +241,7 @@ export function MissionWizard({
         {/* Step 2: Vehicle details */}
         {step === 2 && (
           <div className="space-y-4 py-2">
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="brand">
                   Marque <span className="text-destructive">*</span>
@@ -268,7 +268,7 @@ export function MissionWizard({
                 />
               </div>
             </div>
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="year">
                   Année <span className="text-destructive">*</span>
@@ -320,7 +320,7 @@ export function MissionWizard({
                   Options avancées
                 </AccordionTrigger>
                 <AccordionContent className="space-y-4 pt-2">
-                  <div className="grid gap-4 sm:grid-cols-3">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                     <div className="space-y-2">
                       <Label htmlFor="fuel">Carburant</Label>
                       <Input

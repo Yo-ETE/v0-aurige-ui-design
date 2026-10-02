@@ -90,7 +90,7 @@ export function UserManagement() {
 
       <form onSubmit={handleCreate} className="space-y-4 rounded border border-border p-4">
         <h2 className="text-sm font-semibold">Nouveau compte</h2>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1">
             <Label htmlFor="nu">Identifiant</Label>
             <Input id="nu" autoComplete="off" value={username} onChange={(e) => setUsername(e.target.value)} />

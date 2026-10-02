@@ -360,7 +360,7 @@ export function SystemPanel() {
   }, [fetchVersionInfo, fetchBranches, fetchBackups])
 
   return (
-    <div className="grid gap-6 lg:grid-cols-2">
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* System Updates Card */}
         <Card className="border-border bg-card lg:col-span-2">
           <CardHeader>

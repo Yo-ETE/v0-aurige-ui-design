@@ -11,7 +11,7 @@ export default function AccueilPage() {
       title="Accueil"
       description="Dashboard AURIGE - Tableau de bord et gestion des missions"
     >
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Section A - Raspberry Pi Status */}
         <div className="lg:col-span-2">
           <RaspberryPiStatus />

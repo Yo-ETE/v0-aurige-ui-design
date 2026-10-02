@@ -396,7 +396,7 @@ export default function Fuzzing() {
           </AlertDescription>
         </Alert>
 
-        <div className="grid gap-6 lg:grid-cols-5">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
           {/* Left column: Mode + Config */}
           <div className="lg:col-span-3 space-y-6">
             {/* Data Mode Selection */}
@@ -413,7 +413,7 @@ export default function Fuzzing() {
                 </div>
               </CardHeader>
               <CardContent>
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <DataModeOption
                     mode="random"
                     selected={dataMode === "random"}
@@ -466,7 +466,7 @@ export default function Fuzzing() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid gap-4 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
                     <Label>Interface CAN</Label>
                     <Select
@@ -507,7 +507,7 @@ export default function Fuzzing() {
 
                 {/* ID range - only for sweep modes (not targeted) */}
                 {(dataMode === "random" || dataMode === "static") && (
-                  <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div className="space-y-2">
                       <Label>ID Start (hex)</Label>
                       <Input
@@ -546,7 +546,7 @@ export default function Fuzzing() {
                   </div>
                 )}
 
-                <div className="grid gap-4 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
                     <Label>Iterations</Label>
                     <Input
@@ -666,7 +666,7 @@ export default function Fuzzing() {
                 {hasMission && !isLoadingLogs && logsAnalysis && (
                   <div className="space-y-4">
                     {/* Summary */}
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                       <div className="rounded-md bg-secondary/50 p-2 text-center">
                         <p className="text-lg font-bold text-foreground">{logsAnalysis.totalUniqueIds}</p>
                         <p className="text-[10px] text-muted-foreground">IDs uniques</p>

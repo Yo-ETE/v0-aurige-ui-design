@@ -445,7 +445,7 @@ export default function OBDII() {
 
   return (
     <AppShell title="OBD-II" description="Diagnostic OBD-II du vehicule">
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
 
         {/* Configuration */}
         <Card className="bg-card border-border">
@@ -573,7 +573,7 @@ export default function OBDII() {
                     <Label className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">
                       Decodage VIN
                     </Label>
-                    <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
                       <div>
                         <span className="text-xs text-muted-foreground">Constructeur</span>
                         <p className="font-medium text-foreground">{vinInfo.manufacturer}</p>
@@ -859,7 +859,7 @@ export default function OBDII() {
                     </div>
                   </div>
 
-                  <div className="grid gap-4 md:grid-cols-3 mt-3">
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-3 mt-3">
                     <div className="rounded bg-background/50 p-3">
                       <Label className="text-xs text-muted-foreground">VIN</Label>
                       <p className="font-mono text-sm">

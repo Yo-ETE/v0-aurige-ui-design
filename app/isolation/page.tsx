@@ -952,7 +952,7 @@ export default function Isolation() {
       title="Isolation"
       description={currentMission ? `Mission: ${currentMission.name}` : "Isoler une trame CAN responsable d'une action"}
     >
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Instructions Card */}
         <Card className="border-border bg-card lg:col-span-1">
           <CardHeader>

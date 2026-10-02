@@ -170,7 +170,7 @@ function HeatmapRow({
       {/* Expanded detail */}
       {expanded && (
         <div className="px-10 pb-2 pt-1">
-          <div className="grid grid-cols-4 gap-2 text-[10px] font-mono">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px] font-mono">
             {entry.bytes.map((b) => (
               <div key={b.index} className="bg-muted/30 rounded px-2 py-1.5 border border-border/30">
                 <div className="font-semibold text-foreground mb-0.5">Byte {b.index}</div>
@@ -1749,7 +1749,7 @@ export default function AnalyseCANPage() {
                     </div>
 
                     {/* Metrics row */}
-                    <div className="mt-4 grid grid-cols-3 gap-3">
+                    <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-3">
                       <div className="text-center">
                         <p className="text-[10px] text-muted-foreground">Entropie</p>
                         <p className="font-mono text-sm font-semibold text-foreground">{inspectedSignal.entropy.toFixed(3)} bits</p>
