@@ -782,6 +782,7 @@ export default function Fuzzing() {
         <SentFramesHistory
           frames={frames}
           onClear={clearHistory}
+          showExport
           onReplayFrame={(f) => {
             addFrames([{ canId: f.canId, data: f.data, timestamp: "0", source: "fuzz" }])
             router.push("/replay-rapide")

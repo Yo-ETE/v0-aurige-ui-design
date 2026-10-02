@@ -138,12 +138,14 @@ export function SentFramesHistory({
   onToggleSuccess,
   onReplayFrame,
   onMarkCrash,
+  showExport,
 }: {
   frames: SentFrame[]
   onClear: () => void
   onToggleSuccess?: (id: string) => void
   onReplayFrame?: (f: SentFrame) => void
   onMarkCrash?: (f: SentFrame) => void
+  showExport?: boolean
 }) {
   if (frames.length === 0) {
     return (
@@ -193,6 +195,8 @@ export function SentFramesHistory({
             )}
           </div>
           <div className="flex flex-wrap items-center gap-1">
+            {showExport && (
+              <>
             <Button variant="ghost" size="sm" onClick={() => exportHistoryCsv(frames)} className="h-7 text-xs">
               <Download className="h-3 w-3 mr-1" />
               CSV
@@ -201,6 +205,8 @@ export function SentFramesHistory({
               <Download className="h-3 w-3 mr-1" />
               JSON
             </Button>
+              </>
+            )}
             <Button variant="ghost" size="sm" onClick={onClear} className="h-7 text-xs">
               <Trash2 className="h-3 w-3 mr-1" />
               Vider
