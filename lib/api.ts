@@ -1404,6 +1404,68 @@ export function getDBCExportUrl(missionId: string): string {
   return `${getApiBaseUrl()}/api/missions/${missionId}/dbc/export`
 }
 
+export interface DBCLibrarySummary {
+  id: string
+  name: string
+  message_count: number
+  signal_count: number
+  updated_at: string
+}
+
+export interface DBCLibraryDoc {
+  id: string
+  name: string
+  messages: DBCMessage[]
+  created_at: string
+  updated_at: string
+}
+
+// --- Édition message (mission) ---
+export async function addDBCMessage(
+  missionId: string,
+  meta: { can_id: string; name?: string; dlc?: number; comment?: string },
+): Promise<{ status: string; can_id: string }> {
+  return fetchApi(`/missions/${missionId}/dbc/message`, { method: "POST", body: JSON.stringify(meta) })
+}
+
+// --- Bibliothèque DBC autonome ---
+export async function listDBCLibraries(): Promise<{ libraries: DBCLibrarySummary[] }> {
+  return fetchApi(`/dbc`)
+}
+export async function createDBCLibrary(name: string): Promise<{ id: string; name: string }> {
+  return fetchApi(`/dbc`, { method: "POST", body: JSON.stringify({ name }) })
+}
+export async function getDBCLibrary(dbcId: string): Promise<DBCLibraryDoc> {
+  return fetchApi(`/dbc/${dbcId}`)
+}
+export async function renameDBCLibrary(dbcId: string, name: string): Promise<{ id: string; name: string }> {
+  return fetchApi(`/dbc/${dbcId}`, { method: "PATCH", body: JSON.stringify({ name }) })
+}
+export async function deleteDBCLibrary(dbcId: string): Promise<{ status: string }> {
+  return fetchApi(`/dbc/${dbcId}`, { method: "DELETE" })
+}
+export async function addLibDBCSignal(dbcId: string, signal: Partial<DBCSignal>): Promise<{ status: string; signal_id: string }> {
+  return fetchApi(`/dbc/${dbcId}/signal`, { method: "POST", body: JSON.stringify(signal) })
+}
+export async function deleteLibDBCSignal(dbcId: string, signalId: string): Promise<{ status: string }> {
+  return fetchApi(`/dbc/${dbcId}/signal/${signalId}`, { method: "DELETE" })
+}
+export async function addLibDBCMessage(dbcId: string, meta: { can_id: string; name?: string; dlc?: number; comment?: string }): Promise<{ status: string }> {
+  return fetchApi(`/dbc/${dbcId}/message`, { method: "POST", body: JSON.stringify(meta) })
+}
+export async function deleteLibDBCMessage(dbcId: string, canId: string): Promise<{ status: string }> {
+  return fetchApi(`/dbc/${dbcId}/message/${canId}`, { method: "DELETE" })
+}
+export function getLibDBCExportUrl(dbcId: string): string {
+  return `${getApiBaseUrl()}/api/dbc/${dbcId}/export`
+}
+export async function dbcFromMission(dbcId: string, missionId: string): Promise<{ status: string; message_count: number }> {
+  return fetchApi(`/dbc/${dbcId}/from-mission/${missionId}`, { method: "POST" })
+}
+export async function missionDbcFromLibrary(missionId: string, dbcId: string): Promise<{ status: string; message_count: number }> {
+  return fetchApi(`/missions/${missionId}/dbc/from-library/${dbcId}`, { method: "POST" })
+}
+
 export function getMissionExportUrl(missionId: string): string {
   return `${getApiBaseUrl()}/api/missions/${missionId}/export`
 }
