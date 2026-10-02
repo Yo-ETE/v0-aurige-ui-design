@@ -59,6 +59,7 @@ _ROUTE_RULES = [
     ("POST", r"^/api/can/send", ["can_inject"]),
     ("POST", r"^/api/can/(init|stop|scan-bitrate)", ["can_inject"]),
     ("POST", r"^/api/generator/", ["can_inject"]),
+    ("POST", r"^/api/inject/", ["can_inject"]),
     ("POST", r"^/api/fuzzing/(start|run|stop|force-cleanup)", ["fuzzing_run"]),
     ("POST", r"^/api/fuzzing/crash-recovery", ["crash_recovery_run"]),
     ("POST", r"^/api/analysis/validate-causality", ["causality_validate"]),

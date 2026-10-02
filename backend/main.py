@@ -70,6 +70,8 @@ class ProcessState:
     capture_start_time: Optional[datetime] = None
     cangen_process: Optional[asyncio.subprocess.Process] = None
     canplayer_process: Optional[asyncio.subprocess.Process] = None
+    inject_process: Optional[asyncio.subprocess.Process] = None
+    inject_desc: str = ""
     fuzzing_process: Optional[asyncio.subprocess.Process] = None
     websocket_clients: list[WebSocket] = []
 
@@ -91,7 +93,8 @@ async def lifespan(app: FastAPI):
   
   # Stop all processes on shutdown
   for proc in [state.candump_process, state.capture_process,
-               state.cangen_process, state.canplayer_process, state.fuzzing_process]:
+               state.cangen_process, state.canplayer_process, state.fuzzing_process,
+               state.inject_process]:
     if proc and proc.returncode is None:
       proc.terminate()
       try:
@@ -1522,8 +1525,113 @@ async def force_cleanup_replay():
         except:
             pass
     state.canplayer_process = None
-    
+
     return {"status": "cleaned", "message": "Forced cleanup of replay processes"}
+
+
+# =============================================================================
+# Injection de fond (boucle d'une trame ou keep-alive d'un log)
+# =============================================================================
+
+INJECT_SCRIPT_PATH = Path("/tmp/aurige_inject.sh")  # distinct du script de replay
+_HEX_ID = re.compile(r"^[0-9A-Fa-f]{1,8}$")
+_HEX_DATA = re.compile(r"^([0-9A-Fa-f]{2}){0,8}$")
+_IFACE_RE = re.compile(r"^[A-Za-z0-9_.-]{1,15}$")
+_SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+
+
+def _injectable_or_block(frames: list[str]) -> Optional[str]:
+    """Point de garde unique pour toute injection de fond.
+    AUD-06 (is_id_blocked) se branchera ICI. Retourne None = autorise,
+    sinon un message de refus. Pour l'instant : aucun blocage."""
+    return None
+
+
+class InjectRequest(BaseModel):
+    interface: str = "can0"
+    mode: str = "frame"  # "frame" | "log"
+    canId: Optional[str] = None
+    data: Optional[str] = None
+    missionId: Optional[str] = None
+    logId: Optional[str] = None
+    intervalMs: int = 100
+
+
+@app.post("/api/inject/start")
+async def inject_start(req: InjectRequest):
+    """Demarre une injection de fond en boucle (une seule a la fois)."""
+    if state.inject_process and state.inject_process.returncode is None:
+        raise HTTPException(status_code=409, detail="Injection de fond deja en cours")
+    if not _IFACE_RE.match(req.interface or ""):
+        raise HTTPException(status_code=400, detail="Interface invalide")
+    interval = max(10, min(5000, int(req.intervalMs)))
+    sleep_s = interval / 1000.0
+    frames: list[str] = []
+    if req.mode == "frame":
+        cid = (req.canId or "").strip()
+        data = (req.data or "").strip()
+        if not _HEX_ID.match(cid) or not _HEX_DATA.match(data):
+            raise HTTPException(status_code=400, detail="Trame invalide (ID 1..8 hex, data hex paire <= 16)")
+        frames = [f"{cid.upper()}#{data.upper()}"]
+        desc = f"Trame {frames[0]} ({interval} ms)"
+    elif req.mode == "log":
+        if not req.missionId or not req.logId:
+            raise HTTPException(status_code=400, detail="missionId et logId requis")
+        if not _SAFE_ID_RE.match(req.missionId) or not _SAFE_ID_RE.match(req.logId):
+            raise HTTPException(status_code=400, detail="Identifiant invalide")
+        log_file = get_mission_logs_dir(req.missionId) / f"{req.logId}.log"
+        if not log_file.exists():
+            raise HTTPException(status_code=404, detail="Log introuvable")
+        try:
+            with open(log_file, "r") as f:
+                for line in f:
+                    parts = line.strip().split()
+                    # Format : (1234.567890) can0 123#DEADBEEF
+                    if len(parts) >= 3 and "#" in parts[2]:
+                        frames.append(parts[2])
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Lecture du log impossible: {e}")
+        if not frames:
+            raise HTTPException(status_code=400, detail="Log vide ou illisible")
+        desc = f"Keep-alive log {req.logId} ({len(frames)} trames, {interval} ms)"
+    else:
+        raise HTTPException(status_code=400, detail="mode invalide")
+
+    blocked = _injectable_or_block(frames)
+    if blocked:
+        raise HTTPException(status_code=403, detail=blocked)
+
+    body = "\n".join(f"  cansend {req.interface} {f}\n  sleep {sleep_s}" for f in frames)
+    script = f"#!/bin/bash\nwhile true; do\n{body}\ndone\n"
+    INJECT_SCRIPT_PATH.write_text(script)
+    try:
+        INJECT_SCRIPT_PATH.chmod(0o755)
+    except OSError:
+        pass
+    state.inject_process = await run_command_async(["bash", str(INJECT_SCRIPT_PATH)])
+    state.inject_desc = desc
+    return {"status": "started", "description": desc}
+
+
+@app.post("/api/inject/stop")
+async def inject_stop():
+    """Arrete l'injection de fond (idempotent)."""
+    p = state.inject_process
+    if p and p.returncode is None:
+        p.terminate()
+        try:
+            await asyncio.wait_for(p.wait(), timeout=5.0)
+        except asyncio.TimeoutError:
+            p.kill()
+    state.inject_process = None
+    state.inject_desc = ""
+    return {"status": "stopped"}
+
+
+@app.get("/api/inject/status")
+async def inject_status():
+    running = bool(state.inject_process and state.inject_process.returncode is None)
+    return {"running": running, "description": state.inject_desc if running else ""}
 
 
 # =============================================================================
