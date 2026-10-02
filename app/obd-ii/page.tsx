@@ -307,6 +307,9 @@ export default function OBDII() {
   const [statusInfo, setStatusInfo] = useState<OBDStatusInfo | null>(null)
   const [freezePid, setFreezePid] = useState("0C")
   const [freezeResult, setFreezeResult] = useState<OBDPidValue | null>(null)
+  const [isPolling, setIsPolling] = useState(false)
+  // Un seul utilisateur du bus OBD a la fois : actions ponctuelles XOR dashboard live
+  const busy = isLoading !== null || isPolling
 
   const { frames, trackFrame, clearHistory } = useSentFramesHistory()
   const { getCurrentMission, updateMissionVehicle } = useMissionStore()
@@ -551,6 +554,15 @@ export default function OBDII() {
               </AlertDescription>
             </Alert>
 
+            {isPolling && (
+              <Alert className="border-warning/50 bg-warning/10">
+                <AlertTriangle className="h-4 w-4 text-warning" />
+                <AlertDescription className="text-warning text-xs">
+                  Arretez le dashboard live pour utiliser les actions OBD ponctuelles.
+                </AlertDescription>
+              </Alert>
+            )}
+
             {error && (
               <Alert className="border-destructive/50 bg-destructive/10">
                 <AlertTriangle className="h-4 w-4 text-destructive" />
@@ -610,7 +622,7 @@ export default function OBDII() {
           <CardContent className="space-y-4">
             <Button
               onClick={handleRetrieveVIN}
-              disabled={isLoading !== null}
+              disabled={busy}
               className="w-full"
             >
               {isLoading === "vin" ? (
@@ -720,7 +732,7 @@ export default function OBDII() {
             <div className="flex flex-wrap items-center gap-2">
               <Button
                 onClick={handleReadDTC}
-                disabled={isLoading !== null}
+                disabled={busy}
                 variant="secondary"
                 className="flex-1 min-w-32"
               >
@@ -735,7 +747,7 @@ export default function OBDII() {
               </Button>
               <Button
                 onClick={handleClearDTC}
-                disabled={isLoading !== null || !dtcCodes || dtcCodes.length === 0}
+                disabled={busy || !dtcCodes || dtcCodes.length === 0}
                 variant="destructive"
               >
                 {isLoading === "clear" ? (
@@ -782,7 +794,7 @@ export default function OBDII() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex flex-wrap items-center gap-2">
-              <Button onClick={handleReadPending} disabled={isLoading !== null} variant="secondary" className="flex-1 min-w-32">
+              <Button onClick={handleReadPending} disabled={busy} variant="secondary" className="flex-1 min-w-32">
                 {isLoading === "pending" ? (<><Loader2 className="h-4 w-4 mr-2 animate-spin" />Lecture...</>) : "Lire les DTC en attente"}
               </Button>
             </div>
@@ -809,7 +821,7 @@ export default function OBDII() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex flex-wrap items-center gap-2">
-              <Button onClick={handleReadPermanent} disabled={isLoading !== null} variant="secondary" className="flex-1 min-w-32">
+              <Button onClick={handleReadPermanent} disabled={busy} variant="secondary" className="flex-1 min-w-32">
                 {isLoading === "permanent" ? (<><Loader2 className="h-4 w-4 mr-2 animate-spin" />Lecture...</>) : "Lire les DTC permanents"}
               </Button>
             </div>
@@ -826,7 +838,7 @@ export default function OBDII() {
         </Card>
 
         {/* Dashboard live */}
-        <LiveDashboard iface={canInterface} />
+        <LiveDashboard iface={canInterface} busy={isLoading !== null} onPollingChange={setIsPolling} />
 
         {/* Statut emissions */}
         <Card className="bg-card border-border">
@@ -839,7 +851,7 @@ export default function OBDII() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex flex-wrap items-center gap-2">
-              <Button onClick={handleReadStatus} disabled={isLoading !== null} variant="secondary" className="flex-1 min-w-32">
+              <Button onClick={handleReadStatus} disabled={busy} variant="secondary" className="flex-1 min-w-32">
                 {isLoading === "status" ? (<><Loader2 className="h-4 w-4 mr-2 animate-spin" />Lecture...</>) : "Lire le statut"}
               </Button>
             </div>
@@ -889,7 +901,7 @@ export default function OBDII() {
                   ))}
                 </SelectContent>
               </Select>
-              <Button onClick={handleFreezeFrame} disabled={isLoading !== null} variant="secondary">
+              <Button onClick={handleFreezeFrame} disabled={busy} variant="secondary">
                 {isLoading === "freeze" ? (<><Loader2 className="h-4 w-4 mr-2 animate-spin" />Lecture...</>) : "Lire"}
               </Button>
             </div>
@@ -931,7 +943,7 @@ export default function OBDII() {
 
             <Button
               onClick={handleResetECU}
-              disabled={isLoading !== null}
+              disabled={busy}
               variant="destructive"
               className="w-full"
             >
@@ -965,7 +977,7 @@ export default function OBDII() {
             <div className="flex flex-wrap items-center gap-2">
               <Button
                 onClick={handleFullScan}
-                disabled={isLoading !== null}
+                disabled={busy}
                 className="flex-1"
                 size="lg"
               >
@@ -985,7 +997,7 @@ export default function OBDII() {
                 variant="outline"
                 size="lg"
                 className="bg-transparent gap-2"
-                disabled={isLoading !== null}
+                disabled={busy}
                 onClick={async () => {
                   setIsLoading("loadreport")
                   setError(null)

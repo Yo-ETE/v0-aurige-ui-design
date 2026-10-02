@@ -31,7 +31,14 @@ const MIN_INTERVAL_MS = 100
 
 interface Point { t: number; value: number }
 
-export function LiveDashboard({ iface }: { iface: CANInterface }) {
+interface LiveDashboardProps {
+  iface: CANInterface
+  /** Une action OBD ponctuelle est en cours : on ne peut pas demarrer */
+  busy?: boolean
+  onPollingChange?: (polling: boolean) => void
+}
+
+export function LiveDashboard({ iface, busy = false, onPollingChange }: LiveDashboardProps) {
   const [selected, setSelected] = useState<string[]>(["0C", "0D"])
   const [intervalMs, setIntervalMs] = useState(500)
   const [running, setRunning] = useState(false)
@@ -44,6 +51,8 @@ export function LiveDashboard({ iface }: { iface: CANInterface }) {
   const selectedRef = useRef<string[]>(selected)
   const ifaceRef = useRef(iface)
   const startRef = useRef(0)
+  // Compteur de generation : un lot d'un ancien run ne doit jamais ecrire dans le run courant
+  const runIdRef = useRef(0)
   selectedRef.current = selected
   ifaceRef.current = iface
 
@@ -61,6 +70,7 @@ export function LiveDashboard({ iface }: { iface: CANInterface }) {
     // Garde anti-chevauchement : on saute le tick si le lot precedent n'est pas fini
     if (inFlightRef.current) return
     inFlightRef.current = true
+    const myRun = runIdRef.current
     try {
       const pids = [...selectedRef.current]
       // Lecture sequentielle : le bus OBD ne gere qu'une requete a la fois
@@ -68,13 +78,17 @@ export function LiveDashboard({ iface }: { iface: CANInterface }) {
       for (const pid of pids) {
         try {
           const r = await readOBDPidValue(ifaceRef.current, pid)
+          if (myRun !== runIdRef.current) return
           results.push({ pid, value: r.status === "error" ? null : r.value })
+          if (r.status !== "error") setPollError(null)
         } catch (e) {
+          if (myRun !== runIdRef.current) return
           setPollError(e instanceof Error ? e.message : "Erreur de lecture PID")
           results.push({ pid, value: null })
         }
         if (!timerRef.current) break // arret demande pendant le lot
       }
+      if (myRun !== runIdRef.current) return
       const t = (Date.now() - startRef.current) / 1000
       setLatest((prev) => {
         const next = { ...prev }
@@ -101,15 +115,18 @@ export function LiveDashboard({ iface }: { iface: CANInterface }) {
     setSeries({})
     setLatest({})
     startRef.current = Date.now()
-    inFlightRef.current = false
+    runIdRef.current += 1
     setRunning(true)
+    onPollingChange?.(true)
     timerRef.current = setInterval(() => void tick(), Math.max(MIN_INTERVAL_MS, intervalMs || 500))
     void tick()
   }
 
   const handleStop = () => {
     stopTimer()
+    runIdRef.current += 1
     setRunning(false)
+    onPollingChange?.(false)
   }
 
   const toggle = (pid: string, on: boolean) =>
@@ -160,7 +177,7 @@ export function LiveDashboard({ iface }: { iface: CANInterface }) {
               <Square className="h-4 w-4" /> Arreter
             </Button>
           ) : (
-            <Button onClick={handleStart} disabled={selected.length === 0} className="gap-2">
+            <Button onClick={handleStart} disabled={selected.length === 0 || busy} className="gap-2">
               <Play className="h-4 w-4" /> Demarrer
             </Button>
           )}
