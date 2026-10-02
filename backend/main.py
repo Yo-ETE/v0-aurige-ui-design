@@ -6748,6 +6748,7 @@ async def compare_logs(mission_id: str, request: CompareLogsRequest):
                             "val_b": byte_b,
                             "hex_diff": f"{abs(val_a - val_b):02X}",
                             "decimal_diff": abs(val_a - val_b),
+                            "changed_bits": [bit for bit in range(8) if (val_a ^ val_b) >> bit & 1],
                         })
                     except ValueError:
                         byte_change_detail.append({
@@ -6756,6 +6757,7 @@ async def compare_logs(mission_id: str, request: CompareLogsRequest):
                             "val_b": byte_b,
                             "hex_diff": "??",
                             "decimal_diff": 0,
+                            "changed_bits": [],
                         })
         
         # ============================================================
