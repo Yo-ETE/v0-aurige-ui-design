@@ -3541,34 +3541,38 @@ async def read_vin(request: OBDRequest):
     }
 
 
+async def _read_dtcs(interface: str, mode: str):
+    """Lit les DTC d'un mode OBD (03 stockés, 07 en attente, 0A permanents).
+
+    Retourne (codes, details, frames, error) ; error est None en cas de succès.
+    """
+    result = await obd_send_with_flow_control(interface, "7DF", f"01{mode}00000000000000", "7E8")
+    if not result["success"]:
+        return None, None, None, result["error"]
+    responses = result["responses"]
+    service = int(mode, 16) + 0x40
+    details = decode_dtcs_from_frames(responses, response_service=service) if responses else []
+    return [d["code"] for d in details], details, responses, None
+
+
 @app.post("/api/obd/dtc/read")
 async def read_dtc(request: OBDRequest):
     """
-    Read Diagnostic Trouble Codes.
-    
+    Read Diagnostic Trouble Codes (Service 03).
+
     Protocol:
     1. Send: 7DF#0103000000000000 (Service 03 - Read DTCs)
     2. Send: 7E0#3000000000000000 (Flow control)
     3. Receive response on 7E8
     """
-    result = await obd_send_with_flow_control(
-        request.interface,
-        "7DF",
-        "0103000000000000",
-        "7E8"
-    )
-    
-    if not result["success"]:
+    codes, decoded, responses, err = await _read_dtcs(request.interface, "03")
+    if err:
         return {
             "status": "error",
-            "message": result["error"],
+            "message": err,
             "frames": [],
         }
-    
-    responses = result["responses"]
-    decoded = decode_dtcs_from_frames(responses) if responses else []
-    codes = [d["code"] for d in decoded]
-    
+
     return {
         "status": "success" if responses else "sent",
         "message": f"DTC read completed: {len(codes)} code(s) detecte(s)" if codes else ("No DTC found" if responses else "DTC request sent"),
@@ -3576,6 +3580,36 @@ async def read_dtc(request: OBDRequest):
         "frames": responses,
         "dtcs": codes,
         "dtc_details": decoded,
+    }
+
+
+@app.post("/api/obd/dtc/pending")
+async def read_dtc_pending(request: OBDRequest):
+    """DTC en attente (Service 07)."""
+    codes, details, frames, err = await _read_dtcs(request.interface, "07")
+    if err:
+        return {"status": "error", "message": err, "dtcs": [], "dtc_details": [], "frames": []}
+    return {
+        "status": "success" if frames else "sent",
+        "message": f"{len(codes)} DTC en attente" if codes else "Aucun DTC en attente",
+        "dtcs": codes,
+        "dtc_details": details,
+        "frames": frames,
+    }
+
+
+@app.post("/api/obd/dtc/permanent")
+async def read_dtc_permanent(request: OBDRequest):
+    """DTC permanents (Service 0A)."""
+    codes, details, frames, err = await _read_dtcs(request.interface, "0A")
+    if err:
+        return {"status": "error", "message": err, "dtcs": [], "dtc_details": [], "frames": []}
+    return {
+        "status": "success" if frames else "sent",
+        "message": f"{len(codes)} DTC permanent(s)" if codes else "Aucun DTC permanent",
+        "dtcs": codes,
+        "dtc_details": details,
+        "frames": frames,
     }
 
 
