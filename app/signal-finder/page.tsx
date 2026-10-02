@@ -550,6 +550,7 @@ export default function SignalFinderPage() {
   const [liveCanIds, setLiveCanIds] = useState(0)
   const [liveHistory, setLiveHistory] = useState<{ t: number; value: number }[]>([])
   const wsRef = useRef<WebSocket | null>(null)
+  const liveRunningRef = useRef(false)
 
   // Results (shared)
   const [candidates, setCandidates] = useState<CorrelationCandidate[]>([])
@@ -565,7 +566,7 @@ export default function SignalFinderPage() {
     let list = q ? candidates.filter((c) => c.can_id.toLowerCase().includes(q)) : candidates
     if (candSort) {
       const val = (c: CorrelationCandidate) =>
-        candSort.key === "confidence" ? c.confidence : Math.abs(c[candSort.key])
+        candSort.key === "confidence" ? (c.confidence ?? 0) : Math.abs(c[candSort.key] ?? 0)
       const dir = candSort.dir === "asc" ? 1 : -1
       list = [...list].sort((a, b) => (val(a) - val(b)) * dir)
     }
@@ -717,6 +718,7 @@ export default function SignalFinderPage() {
     setLiveSampleCount(0)
     setLiveCanIds(0)
     setLiveRunning(true)
+    liveRunningRef.current = true
 
     const wsUrl = getSignalFinderWsUrl(iface)
     const ws = new WebSocket(wsUrl)
@@ -738,7 +740,7 @@ export default function SignalFinderPage() {
         const data = JSON.parse(event.data)
         if (data.type === "obd_sample") {
           setLiveValue(data.value)
-          if (typeof data.value === "number") {
+          if (liveRunningRef.current && typeof data.value === "number") {
             const point = { t: Date.now(), value: data.value as number }
             setLiveHistory((h) => [...h, point].slice(-120))
           }
@@ -763,10 +765,12 @@ export default function SignalFinderPage() {
 
     ws.onerror = () => {
       setError("Erreur de connexion WebSocket. Verifiez que le backend est accessible.")
+      liveRunningRef.current = false
       setLiveRunning(false)
     }
 
     ws.onclose = () => {
+      liveRunningRef.current = false
       setLiveRunning(false)
     }
   }, [iface, selectedPid])
@@ -775,6 +779,7 @@ export default function SignalFinderPage() {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ action: "stop" }))
     }
+    liveRunningRef.current = false
     setLiveRunning(false)
     setLiveHistory([])
   }, [])
