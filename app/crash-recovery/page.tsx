@@ -1,37 +1,85 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, Suspense } from "react"
+import { useSearchParams } from "next/navigation"
 import { AppShell } from "@/components/app-shell"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
-import { 
-  AlertTriangle, 
-  RefreshCw, 
-  Shield, 
-  CheckCircle2, 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import { InjectStatusBar } from "@/components/inject-status"
+import {
+  AlertTriangle,
+  RefreshCw,
+  Shield,
+  CheckCircle2,
   XCircle,
   AlertCircle,
   FileSearch,
   Zap,
+  Trash2,
+  Play,
+  Repeat,
+  RotateCcw,
+  Plus,
+  X,
+  Library,
+  Ban,
 } from "lucide-react"
-import { 
-  attemptCrashRecovery, 
-  getFuzzingHistory, 
+import {
+  attemptCrashRecovery,
+  getFuzzingHistory,
   compareLogsWithFuzzing,
   listMissionLogs,
+  listKnownFrames,
+  createKnownFrame,
+  deleteKnownFrame,
+  replayKnownFrame,
+  getBlocklist,
+  setBlocklist,
   type FuzzingHistory,
   type CrashRecoveryResponse,
   type LogComparisonResult,
   type CANInterface,
   type LogEntry,
+  type KnownFrame,
 } from "@/lib/api"
 import { useMissionStore } from "@/lib/mission-store"
 import { LogSelector } from "@/components/log-selector"
 import { cn } from "@/lib/utils"
 
+const SEVERITY_CLASS: Record<string, string> = {
+  info: "text-primary border-primary/50",
+  warning: "text-warning border-warning/50",
+  danger: "text-destructive border-destructive/50",
+}
+
+function errMsg(e: unknown): string {
+  return e instanceof Error ? e.message : String(e)
+}
+
 export default function CrashRecoveryPage() {
+  // useSearchParams() exige une frontiere Suspense en app-router (prerendu statique)
+  return (
+    <Suspense fallback={null}>
+      <CrashRecoveryContent />
+    </Suspense>
+  )
+}
+
+function CrashRecoveryContent() {
+  const searchParams = useSearchParams()
   const currentMission = useMissionStore((state) => state.getCurrentMission())
 
   const [selectedInterface, setSelectedInterface] = useState<CANInterface>("can0")
@@ -46,13 +94,36 @@ export default function CrashRecoveryPage() {
   const [availableLogs, setAvailableLogs] = useState<LogEntry[]>([])
   const [isLoadingLogs, setIsLoadingLogs] = useState(false)
 
+  // Bibliotheque de trames remarquables (crash / reinit)
+  const [frames, setFrames] = useState<KnownFrame[]>([])
+  const [framesError, setFramesError] = useState<string | null>(null)
+  const [formLabel, setFormLabel] = useState("")
+  const [formCanId, setFormCanId] = useState(searchParams.get("crashFrame") ?? "")
+  const [formCrashData, setFormCrashData] = useState(searchParams.get("crashData") ?? "")
+  const [formResetData, setFormResetData] = useState("")
+  const [formSeverity, setFormSeverity] = useState<"info" | "warning" | "danger">("warning")
+  const [formNotes, setFormNotes] = useState("")
+  const [isCreating, setIsCreating] = useState(false)
+  const [pendingReplay, setPendingReplay] = useState<{ frame: KnownFrame; loop: boolean } | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<KnownFrame | null>(null)
+
+  // Liste de blocage AUD-06
+  const [blockIds, setBlockIds] = useState<string[]>([])
+  const [blockInput, setBlockInput] = useState("")
+  const [blockError, setBlockError] = useState<string | null>(null)
+
   useEffect(() => {
     loadHistory()
     if (currentMission?.id) {
       loadLogs()
     }
   }, [currentMission?.id])
-  
+
+  useEffect(() => {
+    loadFrames()
+    loadBlocklist()
+  }, [])
+
   const loadLogs = async () => {
     if (!currentMission?.id) return
     setIsLoadingLogs(true)
@@ -134,6 +205,96 @@ export default function CrashRecoveryPage() {
     handleRecovery(ids)
   }
 
+  // ---- Bibliotheque de trames remarquables ----
+
+  const loadFrames = async () => {
+    try {
+      const r = await listKnownFrames()
+      setFrames(r.frames)
+      setFramesError(null)
+    } catch (e) {
+      setFramesError(errMsg(e))
+    }
+  }
+
+  const handleCreateFrame = async () => {
+    setIsCreating(true)
+    setFramesError(null)
+    try {
+      await createKnownFrame({
+        label: formLabel.trim(),
+        can_id: formCanId.trim(),
+        crash_data: formCrashData.trim(),
+        reset_data: formResetData.trim() || undefined,
+        severity: formSeverity,
+        notes: formNotes.trim() || undefined,
+      })
+      setFormLabel("")
+      setFormCanId("")
+      setFormCrashData("")
+      setFormResetData("")
+      setFormNotes("")
+      await loadFrames()
+    } catch (e) {
+      setFramesError(errMsg(e))
+    } finally {
+      setIsCreating(false)
+    }
+  }
+
+  const doReplay = async (frame: KnownFrame, kind: "crash" | "reset", loop: boolean) => {
+    setFramesError(null)
+    try {
+      await replayKnownFrame(frame.id, { interface: selectedInterface, kind, loop })
+    } catch (e) {
+      setFramesError(errMsg(e))
+    }
+  }
+
+  const doDelete = async (frame: KnownFrame) => {
+    setFramesError(null)
+    try {
+      await deleteKnownFrame(frame.id)
+      await loadFrames()
+    } catch (e) {
+      setFramesError(errMsg(e))
+    }
+  }
+
+  // ---- Liste de blocage AUD-06 ----
+
+  const loadBlocklist = async () => {
+    try {
+      const r = await getBlocklist()
+      setBlockIds(r.ids)
+      setBlockError(null)
+    } catch (e) {
+      setBlockError(errMsg(e))
+    }
+  }
+
+  const updateBlocklist = async (ids: string[]) => {
+    setBlockError(null)
+    try {
+      const r = await setBlocklist(ids)
+      setBlockIds(r.ids)
+      return true
+    } catch (e) {
+      setBlockError(errMsg(e))
+      return false
+    }
+  }
+
+  const handleAddBlockId = async () => {
+    const id = blockInput.trim().toUpperCase().replace(/^0X/, "")
+    if (!id) return
+    if (blockIds.includes(id)) {
+      setBlockInput("")
+      return
+    }
+    if (await updateBlocklist([...blockIds, id])) setBlockInput("")
+  }
+
   return (
     <AppShell>
     <div className="container mx-auto space-y-6 py-6">
@@ -178,6 +339,238 @@ export default function CrashRecoveryPage() {
         </CardContent>
       </Card>
 
+      {/* Trames remarquables (crash / reinit) */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Library className="h-5 w-5 text-primary" />
+            Trames remarquables (crash / réinit)
+          </CardTitle>
+          <CardDescription>
+            Bibliothèque de trames connues pour provoquer un crash ou le réinitialiser, rejouables sur l'interface sélectionnée
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <InjectStatusBar className="mb-4" />
+
+          {framesError && (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{framesError}</AlertDescription>
+            </Alert>
+          )}
+
+          <div className="overflow-x-auto rounded border border-border">
+            <table className="w-full text-sm">
+              <thead className="bg-secondary/30 text-left text-xs text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-2">Label</th>
+                  <th className="px-3 py-2">CAN ID</th>
+                  <th className="px-3 py-2">Data crash</th>
+                  <th className="px-3 py-2">Data réinit</th>
+                  <th className="px-3 py-2">Gravité</th>
+                  <th className="px-3 py-2">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {frames.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="px-3 py-4 text-center text-muted-foreground">
+                      Aucune trame enregistrée
+                    </td>
+                  </tr>
+                )}
+                {frames.map((f) => (
+                  <tr key={f.id} className="border-t border-border align-top">
+                    <td className="px-3 py-2">
+                      {f.label}
+                      {f.notes && <p className="text-xs text-muted-foreground">{f.notes}</p>}
+                    </td>
+                    <td className="px-3 py-2 font-mono font-bold text-primary">{f.can_id}</td>
+                    <td className="px-3 py-2 font-mono">{f.crash_data}</td>
+                    <td className="px-3 py-2 font-mono">{f.reset_data || "-"}</td>
+                    <td className="px-3 py-2">
+                      <Badge variant="outline" className={SEVERITY_CLASS[f.severity] ?? ""}>
+                        {f.severity}
+                      </Badge>
+                    </td>
+                    <td className="px-3 py-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button size="sm" variant="outline" onClick={() => setPendingReplay({ frame: f, loop: false })}>
+                          <Play className="h-4 w-4 mr-1" />
+                          Rejouer crash
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => setPendingReplay({ frame: f, loop: true })}>
+                          <Repeat className="h-4 w-4 mr-1" />
+                          Rejouer crash en boucle
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={!f.reset_data}
+                          onClick={() => doReplay(f, "reset", false)}
+                        >
+                          <RotateCcw className="h-4 w-4 mr-1" />
+                          Rejouer réinit
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => setPendingDelete(f)}>
+                          <Trash2 className="h-4 w-4 mr-1" />
+                          Supprimer
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="rounded border border-border bg-secondary/10 p-4 space-y-3">
+            <h3 className="font-medium text-sm">Ajouter une trame</h3>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Input placeholder="Label" value={formLabel} onChange={(e) => setFormLabel(e.target.value)} />
+              <Input
+                placeholder="CAN ID (ex: 4C8)"
+                className="font-mono"
+                value={formCanId}
+                onChange={(e) => setFormCanId(e.target.value)}
+              />
+              <Input
+                placeholder="Data crash (ex: FF00FF00)"
+                className="font-mono"
+                value={formCrashData}
+                onChange={(e) => setFormCrashData(e.target.value)}
+              />
+              <Input
+                placeholder="Data réinit (optionnel)"
+                className="font-mono"
+                value={formResetData}
+                onChange={(e) => setFormResetData(e.target.value)}
+              />
+              <select
+                value={formSeverity}
+                onChange={(e) => setFormSeverity(e.target.value as "info" | "warning" | "danger")}
+                className="rounded border border-border bg-background px-3 py-2 text-sm"
+                aria-label="Gravité"
+              >
+                <option value="info">info</option>
+                <option value="warning">warning</option>
+                <option value="danger">danger</option>
+              </select>
+              <Input placeholder="Notes (optionnel)" value={formNotes} onChange={(e) => setFormNotes(e.target.value)} />
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button onClick={handleCreateFrame} disabled={isCreating || !formLabel.trim() || !formCanId.trim() || !formCrashData.trim()}>
+                <Plus className="h-4 w-4 mr-2" />
+                {isCreating ? "Ajout..." : "Ajouter"}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* IDs critiques AUD-06 */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Ban className="h-5 w-5 text-destructive" />
+            IDs critiques (AUD-06)
+          </CardTitle>
+          <CardDescription>
+            Le fuzzing et la génération ne balaient jamais ces IDs. OBD (7DF / 7E0–7EF) n'est jamais bloqué.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {blockError && (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{blockError}</AlertDescription>
+            </Alert>
+          )}
+          <div className="flex flex-wrap items-center gap-2">
+            {blockIds.length === 0 && <span className="text-sm text-muted-foreground">Aucun ID bloqué</span>}
+            {blockIds.map((id) => (
+              <Badge key={id} variant="outline" className="font-mono gap-1 pr-1">
+                {id}
+                <button
+                  type="button"
+                  aria-label={`Retirer ${id}`}
+                  className="rounded p-0.5 hover:bg-destructive/20"
+                  onClick={() => updateBlocklist(blockIds.filter((x) => x !== id))}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </Badge>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              placeholder="ID hex (ex: 5E8)"
+              className="font-mono w-40"
+              value={blockInput}
+              onChange={(e) => setBlockInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleAddBlockId()}
+            />
+            <Button onClick={handleAddBlockId} disabled={!blockInput.trim()}>
+              <Plus className="h-4 w-4 mr-2" />
+              Ajouter
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Confirmation injection crash */}
+      <AlertDialog open={!!pendingReplay} onOpenChange={(o) => !o && setPendingReplay(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirmer l'injection</AlertDialogTitle>
+            <AlertDialogDescription>
+              Injection volontaire sur un ID potentiellement critique — confirmer
+              {pendingReplay && (
+                <span className="mt-2 block font-mono">
+                  {pendingReplay.frame.can_id}#{pendingReplay.frame.crash_data} sur {selectedInterface}
+                  {pendingReplay.loop ? " (en boucle)" : ""}
+                </span>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annuler</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (pendingReplay) doReplay(pendingReplay.frame, "crash", pendingReplay.loop)
+                setPendingReplay(null)
+              }}
+            >
+              Confirmer
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Confirmation suppression */}
+      <AlertDialog open={!!pendingDelete} onOpenChange={(o) => !o && setPendingDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Supprimer la trame</AlertDialogTitle>
+            <AlertDialogDescription>
+              Supprimer « {pendingDelete?.label} » de la bibliothèque ?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annuler</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (pendingDelete) doDelete(pendingDelete)
+                setPendingDelete(null)
+              }}
+            >
+              Supprimer
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* Fuzzing history */}
       <Card>
         <CardHeader>
@@ -209,7 +602,7 @@ export default function CrashRecoveryPage() {
             // Use frames_sent (new format) or frames (legacy)
             const allFrames = history.frames_sent || history.frames || []
             const uniqueIds = new Set(allFrames.map(f => f.id)).size
-            
+
             return (
             <>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
@@ -266,10 +659,10 @@ export default function CrashRecoveryPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <label className="text-sm font-medium w-32">Log pre-fuzz:</label>
             {availableLogs.length > 0 ? (
-              <div className="flex-1">
+              <div className="flex-1 min-w-[200px]">
                 <LogSelector
                   logs={availableLogs}
                   value={selectedPreFuzzLog}
@@ -285,7 +678,7 @@ export default function CrashRecoveryPage() {
                 value={selectedPreFuzzLog}
                 onChange={(e) => setSelectedPreFuzzLog(e.target.value)}
                 placeholder="Ex: 20250211_143022"
-                className="flex-1 rounded border border-border bg-background px-3 py-2 text-sm"
+                className="flex-1 min-w-[200px] rounded border border-border bg-background px-3 py-2 text-sm"
               />
             )}
             <Button onClick={handleCompare} disabled={isComparing || !currentMission || !selectedPreFuzzLog}>
@@ -358,8 +751,8 @@ export default function CrashRecoveryPage() {
               <p className="text-xs text-muted-foreground mb-3">
                 Envoie des resets uniquement sur les IDs suspects identifies par analyse
               </p>
-              <Button 
-                onClick={handleTargetedRecovery} 
+              <Button
+                onClick={handleTargetedRecovery}
                 disabled={isRecovering || !comparison || comparison.suspect_ids.length === 0}
                 variant="outline"
                 className="w-full border-warning/50 text-warning hover:bg-warning/10"
@@ -375,13 +768,13 @@ export default function CrashRecoveryPage() {
               <p className="text-xs text-muted-foreground mb-3">
                 Entrez les IDs manuellement (separes par virgules)
               </p>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <input
                   type="text"
                   value={customSuspectIds}
                   onChange={(e) => setCustomSuspectIds(e.target.value)}
                   placeholder="Ex: 4C8, 303, 360"
-                  className="flex-1 rounded border border-border bg-background px-3 py-2 text-sm font-mono"
+                  className="flex-1 min-w-[200px] rounded border border-border bg-background px-3 py-2 text-sm font-mono"
                 />
                 <Button onClick={handleCustomRecovery} disabled={isRecovering} variant="outline">
                   <Zap className="h-4 w-4 mr-2" />
@@ -401,7 +794,7 @@ export default function CrashRecoveryPage() {
                 </Badge>
               </div>
               <p className="text-sm text-muted-foreground">{recoveryResult.message}</p>
-              
+
               <div className="space-y-2">
                 {recoveryResult.results.map((result, i) => (
                   <div key={i} className="flex items-center gap-3 rounded bg-background p-2 text-xs">
