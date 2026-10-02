@@ -89,12 +89,12 @@ async def lifespan(app: FastAPI):
     await db.close_db()
   
   # Stop all processes on shutdown
-  for proc in [state.candump_process, state.capture_process, 
+  for proc in [state.candump_process, state.capture_process,
                state.cangen_process, state.canplayer_process, state.fuzzing_process]:
     if proc and proc.returncode is None:
       proc.terminate()
       try:
-        proc.wait(timeout=2.0)
+        await asyncio.wait_for(proc.wait(), timeout=2.0)
       except:
         proc.kill()
 
@@ -4754,10 +4754,10 @@ async def get_git_branches():
                 saved_branch_file = Path("/opt/aurige/branch.txt")
                 if saved_branch_file.exists():
                     saved_branch = saved_branch_file.read_text().strip()
-                
+
                 return {
                     "branches": sorted(set(branches)),
-                    "current": saved_branch or "v0/yo-ete-5c91d9cb",
+                    "current": saved_branch or "main",
                 }
         
         # Fallback: use git ls-remote (works without local clone)
@@ -4776,10 +4776,10 @@ async def get_git_branches():
             saved_branch_file = Path("/opt/aurige/branch.txt")
             if saved_branch_file.exists():
                 saved_branch = saved_branch_file.read_text().strip()
-            
+
             return {
                 "branches": sorted(branches),
-                "current": saved_branch or "v0/yo-ete-5c91d9cb",
+                "current": saved_branch or "main",
             }
         
         return {"branches": [], "current": "", "error": "Impossible de lister les branches"}
@@ -5032,7 +5032,7 @@ async def start_update(request: Request):
     
     # GitHub repo URL and target branch
     GITHUB_REPO = "https://github.com/Yo-ETE/v0-aurige-ui-design.git"
-    TARGET_BRANCH = "v0/yo-ete-5c91d9cb"
+    TARGET_BRANCH = "main"
     
     # Check if a specific branch was requested in the body
     try:
@@ -5050,7 +5050,7 @@ async def start_update(request: Request):
         pass
     
     # If no branch in body, check for saved branch preference
-    if TARGET_BRANCH == "v0/yo-ete-5c91d9cb":
+    if TARGET_BRANCH == "main":
         saved_branch_file = Path("/opt/aurige/branch.txt")
         if saved_branch_file.exists():
             saved = saved_branch_file.read_text().strip()
