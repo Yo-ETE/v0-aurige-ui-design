@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { AppShell } from "@/components/app-shell"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Zap, Keyboard, Send, AlertTriangle, Loader2, Import, Trash2, Play, FlaskConical } from "lucide-react"
+import { Zap, Keyboard, Send, AlertTriangle, Loader2, Import, Trash2, Play, FlaskConical, Square, Plus, X } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -23,13 +23,27 @@ interface QuickSlot {
   data: string
 }
 
+const DEFAULT_SLOTS: QuickSlot[] = [
+  { key: "a", label: "A", id: "7DF", data: "02010C00000000" },
+  { key: "z", label: "Z", id: "7DF", data: "02010D00000000" },
+  { key: "e", label: "E", id: "7E0", data: "0301000000000000" },
+]
+const SLOTS_STORAGE_KEY = "aurige_replay_slots"
+
+// Validation d'une trame CAN avant envoi (ID hex 1-8 car ; data hex, octets pairs, <=8 octets).
+const CAN_ID_RE = /^[0-9A-Fa-f]{1,8}$/
+const CAN_DATA_RE = /^([0-9A-Fa-f]{2}){0,8}$/
+function validateFrame(id: string, data: string): string | null {
+  const i = (id || "").trim()
+  const d = (data || "").trim()
+  if (!CAN_ID_RE.test(i)) return `ID invalide: "${id}" (hex, 1 a 8 caracteres)`
+  if (!CAN_DATA_RE.test(d)) return `Data invalide: "${data}" (hex, octets pairs, max 8 octets)`
+  return null
+}
+
 export default function ReplayRapide() {
   const [canInterface, setCanInterface] = useState<CANInterface>("can0")
-  const [slots, setSlots] = useState<QuickSlot[]>([
-    { key: "a", label: "A", id: "7DF", data: "02010C00000000" },
-    { key: "z", label: "Z", id: "7DF", data: "02010D00000000" },
-    { key: "e", label: "E", id: "7E0", data: "0301000000000000" },
-  ])
+  const [slots, setSlots] = useState<QuickSlot[]>(DEFAULT_SLOTS)
   const [keyboardEnabled, setKeyboardEnabled] = useState(false)
   const [burstId, setBurstId] = useState("7DF")
   const [burstData, setBurstData] = useState("02010C00000000")
@@ -48,18 +62,56 @@ export default function ReplayRapide() {
   const { frames: exportedFrames, clearFrames: clearExported, removeFrame: removeExportedFrame } = useExportStore()
   const [isReplayingExported, setIsReplayingExported] = useState(false)
   const router = useRouter()
-  
+  const burstCancelRef = useRef(false)
+
+  // Charger les slots persistes (localStorage) au montage.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SLOTS_STORAGE_KEY)
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        if (Array.isArray(parsed) && parsed.length > 0) setSlots(parsed)
+      }
+    } catch {
+      // localStorage indisponible : on garde les slots par defaut
+    }
+  }, [])
+
+  // Sauver les slots a chaque changement.
+  useEffect(() => {
+    try {
+      localStorage.setItem(SLOTS_STORAGE_KEY, JSON.stringify(slots))
+    } catch {
+      // ignore
+    }
+  }, [slots])
+
   const handleSlotChange = (index: number, field: "id" | "data", value: string) => {
     const newSlots = [...slots]
     newSlots[index][field] = value
     setSlots(newSlots)
   }
 
+  const addSlot = () => {
+    const used = new Set(slots.map((s) => s.key))
+    const key = "abcdefghijklmnopqrstuvwxyz".split("").find((k) => !used.has(k)) || ""
+    setSlots([...slots, { key, label: key.toUpperCase(), id: "7DF", data: "02010C00000000" }])
+  }
+
+  const removeSlot = (index: number) => {
+    setSlots(slots.filter((_, i) => i !== index))
+  }
+
   const handleSendSlot = useCallback(async (index: number) => {
     const slot = slots[index]
     setError(null)
+    const invalid = validateFrame(slot.id, slot.data)
+    if (invalid) {
+      setError(invalid)
+      return
+    }
     setIsLoading(`slot-${index}`)
-    
+
     await trackFrame(
       { canId: slot.id, data: slot.data, interface: canInterface, description: `Slot ${slot.label}` },
       () => sendCANFrame({ interface: canInterface, canId: slot.id, data: slot.data })
@@ -86,13 +138,20 @@ export default function ReplayRapide() {
   }, [keyboardEnabled, slots, handleSendSlot])
 
   const handleBurstSend = async () => {
-    setIsBurstRunning(true)
     setError(null)
+    const invalid = validateFrame(burstId, burstData)
+    if (invalid) {
+      setError(invalid)
+      return
+    }
+    // Clamp : Count 1..1000, Interval >= 0 (meme si saisie manuelle hors bornes HTML).
+    const count = Math.min(1000, Math.max(1, parseInt(burstCount, 10) || 1))
+    const interval = Math.max(0, parseInt(burstInterval, 10) || 0)
+    burstCancelRef.current = false
+    setIsBurstRunning(true)
     try {
-      const count = parseInt(burstCount, 10)
-      const interval = parseInt(burstInterval, 10)
-      
       for (let i = 0; i < count; i++) {
+        if (burstCancelRef.current) break
         await trackFrame(
           { canId: burstId, data: burstData, interface: canInterface, description: `Burst ${i + 1}/${count}` },
           () => sendCANFrame({ interface: canInterface, canId: burstId, data: burstData })
@@ -108,6 +167,10 @@ export default function ReplayRapide() {
     }
   }
 
+  const handleStopBurst = () => {
+    burstCancelRef.current = true
+  }
+
   const handleManualSend = async () => {
     if (!manualFrame) return
     setError(null)
@@ -118,7 +181,11 @@ export default function ReplayRapide() {
       if (!canId || !data) {
         throw new Error("Format invalide. Utilisez: ID#DATA (ex: 7DF#02010C)")
       }
-      
+      const invalid = validateFrame(canId, data)
+      if (invalid) {
+        throw new Error(invalid)
+      }
+
       await trackFrame(
         { canId: canId.trim(), data: data.trim(), interface: canInterface, description: "Envoi manuel" },
         () => sendCANFrame({ interface: canInterface, canId: canId.trim(), data: data.trim() })
@@ -135,8 +202,13 @@ export default function ReplayRapide() {
     setIsReplayingExported(true)
     setError(null)
     try {
+      let skipped = 0
       for (let i = 0; i < exportedFrames.length; i++) {
         const frame = exportedFrames[i]
+        if (validateFrame(frame.canId, frame.data)) {
+          skipped++
+          continue
+        }
         await trackFrame(
           { canId: frame.canId, data: frame.data, interface: canInterface, description: `Export ${i + 1}/${exportedFrames.length}` },
           () => sendCANFrame({ interface: canInterface, canId: frame.canId, data: frame.data })
@@ -146,6 +218,7 @@ export default function ReplayRapide() {
           await new Promise(resolve => setTimeout(resolve, 10))
         }
       }
+      if (skipped > 0) setError(`${skipped} trame(s) ignoree(s) (format invalide)`)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur lors du replay")
     } finally {
@@ -156,6 +229,11 @@ export default function ReplayRapide() {
   const handleSendExportedFrame = async (index: number) => {
     const frame = exportedFrames[index]
     setError(null)
+    const invalid = validateFrame(frame.canId, frame.data)
+    if (invalid) {
+      setError(invalid)
+      return
+    }
     try {
       await trackFrame(
         { canId: frame.canId, data: frame.data, interface: canInterface, description: `Trame isolee` },
@@ -228,7 +306,7 @@ export default function ReplayRapide() {
           <CardContent className="space-y-4">
             {slots.map((slot, index) => (
               <div key={slot.key} className="flex items-center gap-2">
-                <div className="flex h-10 w-10 items-center justify-center rounded-md border border-border bg-secondary font-mono font-semibold text-foreground">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-border bg-secondary font-mono font-semibold text-foreground">
                   {slot.label}
                 </div>
                 <Input
@@ -247,7 +325,7 @@ export default function ReplayRapide() {
                   onClick={() => handleSendSlot(index)}
                   disabled={isLoading !== null}
                   size="icon"
-                  className="h-10 w-10"
+                  className="h-10 w-10 shrink-0"
                 >
                   {isLoading === `slot-${index}` ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -255,11 +333,24 @@ export default function ReplayRapide() {
                     <Send className="h-4 w-4" />
                   )}
                 </Button>
+                <Button
+                  onClick={() => removeSlot(index)}
+                  variant="ghost"
+                  size="icon"
+                  className="h-10 w-10 shrink-0 text-destructive"
+                  title="Retirer ce slot"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
               </div>
             ))}
-            {keyboardEnabled && (
+            <Button onClick={addSlot} variant="outline" size="sm" className="gap-2 bg-transparent">
+              <Plus className="h-4 w-4" />
+              Ajouter un slot
+            </Button>
+            {keyboardEnabled && slots.length > 0 && (
               <p className="text-xs text-success">
-                Raccourcis clavier actives - Appuyez sur A, Z ou E pour envoyer
+                Raccourcis clavier actives - Appuyez sur {slots.map((s) => s.label).join(", ")} pour envoyer
               </p>
             )}
           </CardContent>
@@ -322,18 +413,25 @@ export default function ReplayRapide() {
                 />
               </div>
             </div>
-            <Button
-              onClick={handleBurstSend}
-              disabled={isBurstRunning || isLoading !== null}
-              className="w-full gap-2"
-            >
-              {isBurstRunning ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
+            {isBurstRunning ? (
+              <Button
+                variant="destructive"
+                onClick={handleStopBurst}
+                className="w-full gap-2"
+              >
+                <Square className="h-4 w-4" />
+                Arreter le burst
+              </Button>
+            ) : (
+              <Button
+                onClick={handleBurstSend}
+                disabled={isLoading !== null}
+                className="w-full gap-2"
+              >
                 <Send className="h-4 w-4" />
-              )}
-              {isBurstRunning ? "Envoi en cours..." : `Envoyer ${burstCount} trames`}
-            </Button>
+                Envoyer {burstCount} trames
+              </Button>
+            )}
           </CardContent>
         </Card>
 
