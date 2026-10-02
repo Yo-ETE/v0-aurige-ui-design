@@ -6032,7 +6032,7 @@ def _lib_doc_or_404(dbc_id: str):
 
 def _mission_dbc_path(mission_id: str) -> Path:
     """Chemin dbc.json d'une mission ; refuse les identifiants avec separateurs/traversal."""
-    if not isinstance(mission_id, str) or not mission_id or ".." in mission_id or "/" in mission_id or "\\" in mission_id:
+    if not isinstance(mission_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", mission_id):
         raise HTTPException(status_code=400, detail="Identifiant de mission invalide")
     return Path(MISSIONS_DIR) / mission_id / "dbc.json"
 

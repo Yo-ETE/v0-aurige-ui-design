@@ -97,3 +97,21 @@ def test_bridges_mission_library(client):
     assert "1B0" in ids
     assert c.post(f"/api/dbc/{did}/from-mission/nope").status_code == 404
     assert c.post(f"/api/missions/{mid}/dbc/from-library/zzz").status_code == 404
+
+
+def test_dbc_lib_path_rejects_bad_ids(client):
+    from fastapi import HTTPException
+    import main
+    for bad in ["../x", "a..b", "UPPER", "a/b", "a\b", ""]:
+        with pytest.raises(HTTPException) as e:
+            main._dbc_lib_path(bad)
+        assert e.value.status_code == 400
+
+
+def test_mission_dbc_path_rejects_bad_ids(client):
+    from fastapi import HTTPException
+    import main
+    for bad in ["..", ".", "a/b", "a\b", ""]:
+        with pytest.raises(HTTPException) as e:
+            main._mission_dbc_path(bad)
+        assert e.value.status_code == 400
