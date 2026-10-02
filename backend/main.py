@@ -3546,7 +3546,7 @@ async def _read_dtcs(interface: str, mode: str):
 
     Retourne (codes, details, frames, error) ; error est None en cas de succès.
     """
-    result = await obd_send_with_flow_control(interface, "7DF", f"01{mode}00000000000000", "7E8")
+    result = await obd_send_with_flow_control(interface, "7DF", f"01{mode}000000000000", "7E8")
     if not result["success"]:
         return None, None, None, result["error"]
     responses = result["responses"]

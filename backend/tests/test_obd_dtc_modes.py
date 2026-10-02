@@ -20,7 +20,11 @@ def client(tmp_path, monkeypatch):
 
     monkeypatch.setattr(hotspot, "auto_hotspot_once", _noop)
 
+    captured = []
+    monkeypatch.setattr(main, "_captured_request_data", captured, raising=False)
+
     async def fake_flow(interface, request_id, request_data, response_id="7E8"):
+        captured.append(request_data)
         # Réponse à un DTC ; octet de service = mode demandé + 0x40 (47 / 4A)
         mode = request_data[2:4]
         svc = f"{(int(mode, 16) + 0x40):02X}"
@@ -37,20 +41,31 @@ def client(tmp_path, monkeypatch):
         sys.modules.pop("main", None)
 
 
+def _assert_valid_frame(client, prefix):
+    import main
+    data = main._captured_request_data[-1]
+    # can_send_frame n'accepte que 16 caract�res hex maximum
+    assert len(data) == 16
+    assert data.startswith(prefix)
+
+
 def test_pending(client):
     r = client.post("/api/obd/dtc/pending", json={"interface": "can0"})
     assert r.status_code == 200
     j = r.json()
     assert j["dtcs"] == ["P0103"]
     assert j["dtc_details"][0]["category"] == "P"
+    _assert_valid_frame(client, "0107")
 
 
 def test_permanent(client):
     r = client.post("/api/obd/dtc/permanent", json={"interface": "can0"})
     assert r.json()["dtcs"] == ["P0103"]
+    _assert_valid_frame(client, "010A")
 
 
 def test_read_still_works(client):
     r = client.post("/api/obd/dtc/read", json={"interface": "can0"})
     assert r.json()["dtcs"] == ["P0103"]
     assert r.json()["data"] == "P0103"
+    _assert_valid_frame(client, "0103")
