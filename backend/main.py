@@ -39,7 +39,8 @@ import db
 import hotspot
 from auth import SessionAuthMiddleware, require_permission, router as auth_router
 from permissions import allows
-from validators import valid_git_ref, valid_backup_filename
+from validators import valid_git_ref, valid_backup_filename, valid_dbc_id
+import dbc_store
 from routers.users import router as users_router
 
 # =============================================================================
@@ -5850,68 +5851,53 @@ async def import_dbc_file_endpoint(mission_id: str, file: UploadFile = File(...)
     raise HTTPException(status_code=500, detail=f"Failed to import DBC: {str(e)}")
 
 
+_CAN_ID_RE = re.compile(r"^[0-9A-Fa-f]{1,8}$")
+
+
+def _valid_can_id(s) -> bool:
+    """CAN ID hexadecimal de 1 a 8 caracteres."""
+    return isinstance(s, str) and bool(_CAN_ID_RE.fullmatch(s.strip()))
+
+
+class DBCMessageMeta(BaseModel):
+    can_id: str
+    name: Optional[str] = None
+    dlc: Optional[int] = None
+    comment: Optional[str] = None
+
+
+@app.post("/api/missions/{mission_id}/dbc/message")
+async def add_dbc_message(mission_id: str, meta: DBCMessageMeta):
+    """Cree ou met a jour les metadonnees d'un message (sans toucher aux signaux)"""
+    if not _valid_can_id(meta.can_id):
+        raise HTTPException(status_code=400, detail="CAN ID invalide (hex 1-8)")
+    if meta.dlc is not None and not (0 <= meta.dlc <= 64):
+        raise HTTPException(status_code=400, detail="DLC invalide (0-64)")
+    mission_dir = Path(MISSIONS_DIR) / mission_id
+    if not mission_dir.exists():
+        raise HTTPException(status_code=404, detail="Mission non trouvee")
+    dbc_file = mission_dir / "dbc.json"
+    doc = dbc_store.load_doc(dbc_file) if dbc_file.exists() else dbc_store.new_doc()
+    doc.setdefault("mission_id", mission_id)
+    dbc_store.upsert_message(doc, meta.can_id.strip(), name=meta.name, dlc=meta.dlc, comment=meta.comment)
+    dbc_store.save_doc(dbc_file, doc)
+    return {"status": "ok", "can_id": meta.can_id.strip()}
+
+
 @app.post("/api/missions/{mission_id}/dbc/signal")
 async def add_dbc_signal(mission_id: str, signal: DBCSignal):
-  """Add or update a signal in the mission DBC"""
-  mission_dir = Path(MISSIONS_DIR) / mission_id
-  dbc_file = mission_dir / "dbc.json"
-  
-  if not mission_dir.exists():
-    raise HTTPException(status_code=404, detail="Mission non trouvee")
-  
-  # Load existing or create new
-  if dbc_file.exists():
-    with open(dbc_file, "r") as f:
-      data = json.load(f)
-  else:
-    data = {
-      "mission_id": mission_id,
-      "messages": [],
-      "created_at": datetime.now().isoformat(),
-      "updated_at": ""
-    }
-  
-  # Find or create message for this CAN ID
-  message = None
-  for msg in data["messages"]:
-    if msg["can_id"] == signal.can_id:
-      message = msg
-      break
-    
-    if not message:
-        message = {
-            "can_id": signal.can_id,
-            "name": f"MSG_{signal.can_id}",
-            "dlc": 8,
-            "signals": [],
-            "comment": ""
-        }
-        data["messages"].append(message)
-    
-    # Generate unique ID if not provided
-    if not signal.id:
-        unique_suffix = datetime.now().strftime("%H%M%S") + str(int(time.time() * 1000) % 1000)
-        signal.id = f"{signal.can_id}_{signal.name}_{unique_suffix}"
-    
-    # Match par ID exact uniquement (permet d'avoir plusieurs signaux sur le meme octet)
-    signal_dict = signal.model_dump()
-    existing_idx = None
-    for idx, s in enumerate(message["signals"]):
-        if s.get("id") and s["id"] == signal.id:
-            existing_idx = idx
-            break
-    
-    if existing_idx is not None:
-        message["signals"][existing_idx] = signal_dict
-    else:
-        message["signals"].append(signal_dict)
-    
-    data["updated_at"] = datetime.now().isoformat()
-    
-    with open(dbc_file, "w") as f:
-        json.dump(data, f, indent=2)
-    
-    return {"status": "ok", "signal_id": signal.id}
+    """Add or update a signal in the mission DBC"""
+    if not _valid_can_id(signal.can_id):
+        raise HTTPException(status_code=400, detail="CAN ID invalide (hex 1-8)")
+    mission_dir = Path(MISSIONS_DIR) / mission_id
+    if not mission_dir.exists():
+        raise HTTPException(status_code=404, detail="Mission non trouvee")
+    dbc_file = mission_dir / "dbc.json"
+    doc = dbc_store.load_doc(dbc_file) if dbc_file.exists() else dbc_store.new_doc()
+    doc.setdefault("mission_id", mission_id)
+    sid = dbc_store.upsert_signal(doc, signal.model_dump())
+    dbc_store.save_doc(dbc_file, doc)
+    return {"status": "ok", "signal_id": sid}
 
 @app.delete("/api/missions/{mission_id}/dbc/signal/{signal_id}")
 async def delete_dbc_signal(mission_id: str, signal_id: str):
@@ -5989,57 +5975,9 @@ async def export_dbc(mission_id: str):
     if not dbc_file.exists():
         raise HTTPException(status_code=404, detail="DBC non trouve")
     
-    with open(dbc_file, "r") as f:
-        data = json.load(f)
-    
-    # Generate DBC content
-    lines = []
-    lines.append('VERSION ""')
-    lines.append("")
-    lines.append("NS_ :")
-    lines.append("")
-    lines.append("BS_:")
-    lines.append("")
-    lines.append("BU_:")
-    lines.append("")
-    
-    # Messages and signals
-    for msg in data.get("messages", []):
-        can_id = int(msg["can_id"], 16)
-        dlc = msg.get("dlc", 8)
-        name = msg.get("name", f"MSG_{msg['can_id']}").replace(" ", "_")
-        
-        lines.append(f"BO_ {can_id} {name}: {dlc} Vector__XXX")
-        
-        for sig in msg.get("signals", []):
-            sig_name = sig["name"].replace(" ", "_")
-            start_bit = sig["start_bit"]
-            length = sig["length"]
-            byte_order = 1 if sig.get("byte_order") == "little_endian" else 0
-            sign = "-" if sig.get("is_signed") else "+"
-            scale = sig.get("scale", 1.0)
-            offset = sig.get("offset", 0.0)
-            min_val = sig.get("min_val", 0.0)
-            max_val = sig.get("max_val", 0.0)
-            unit = sig.get("unit", "")
-            
-            lines.append(f' SG_ {sig_name} : {start_bit}|{length}@{byte_order}{sign} ({scale},{offset}) [{min_val}|{max_val}] "{unit}" Vector__XXX')
-        
-        lines.append("")
-    
-    # Comments
-    lines.append("")
-    for msg in data.get("messages", []):
-        if msg.get("comment"):
-            can_id = int(msg["can_id"], 16)
-            lines.append(f'CM_ BO_ {can_id} "{msg["comment"]}";')
-        for sig in msg.get("signals", []):
-            if sig.get("comment"):
-                can_id = int(msg["can_id"], 16)
-                lines.append(f'CM_ SG_ {can_id} {sig["name"]} "{sig["comment"]}";')
-    
-    dbc_content = "\n".join(lines)
-    
+    doc = dbc_store.load_doc(dbc_file)
+    dbc_content = dbc_store.dbc_to_text(doc)
+
     return Response(
         content=dbc_content,
         media_type="application/octet-stream",
