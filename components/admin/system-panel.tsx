@@ -415,7 +415,7 @@ export function SystemPanel() {
         {/* Aurige Update Card */}
         <Card className="border-border bg-card">
           <CardHeader>
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center justify-between min-w-0 gap-2">
               <div className="flex min-w-0 items-center gap-3">
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-success/10">
                   <GitBranch className="h-5 w-5 text-success" />
@@ -631,7 +631,7 @@ export function SystemPanel() {
                     {backups.map((backup) => (
                       <div key={backup.filename} className="flex items-center justify-between gap-2 p-2 rounded bg-secondary/50">
                         <div className="flex-1 min-w-0">
-                          <p className="text-xs font-mono truncate" title={backup.filename}>{backup.filename}</p>
+                          <p className="text-xs font-mono break-all" title={backup.filename}>{backup.filename}</p>
                           <p className="text-xs text-muted-foreground">
                             {backup.size > 0 ? `${(backup.size / 1024 / 1024).toFixed(2)} Mo` : "Vide"}
                           </p>
@@ -719,13 +719,13 @@ export function SystemPanel() {
         {/* Licence */}
         <Card className="border-border bg-card lg:col-span-2">
           <CardHeader>
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center justify-between min-w-0 gap-2">
               <div className="flex min-w-0 items-center gap-3">
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
                   <Scale className="h-5 w-5 text-primary" />
                 </div>
                 <div className="min-w-0">
-                  <CardTitle className="text-lg truncate">Licence</CardTitle>
+                  <CardTitle className="text-lg break-words">Licence</CardTitle>
                   <CardDescription>Propriete intellectuelle et conditions d{"'"}utilisation</CardDescription>
                 </div>
               </div>
@@ -793,13 +793,13 @@ CONTACT : contact@aurige.io`}
         {/* Guide d'utilisation */}
         <Card className="border-border bg-card lg:col-span-2">
           <CardHeader>
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center justify-between min-w-0 gap-2">
               <div className="flex min-w-0 items-center gap-3">
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
                   <BookOpen className="h-5 w-5 text-primary" />
                 </div>
                 <div className="min-w-0">
-                  <CardTitle className="text-lg truncate">Guide d{"'"}utilisation</CardTitle>
+                  <CardTitle className="text-lg break-words">Guide d{"'"}utilisation</CardTitle>
                   <CardDescription>Notice complete de chaque page et fonctionnalite</CardDescription>
                 </div>
               </div>

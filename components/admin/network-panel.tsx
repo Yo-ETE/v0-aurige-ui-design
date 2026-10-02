@@ -324,7 +324,7 @@ export function NetworkPanel() {
         {/* Connection Status Card */}
         <Card className="border-border bg-card">
           <CardHeader>
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center justify-between min-w-0 gap-2">
               <div className="flex min-w-0 items-center gap-3">
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
                   <Globe className="h-5 w-5 text-primary" />
@@ -360,7 +360,7 @@ export function NetworkPanel() {
                   <div className="pl-6 text-sm space-y-3">
                     <Alert className="border-primary/50 bg-primary/10 py-2">
                       <Wifi className="h-4 w-4 text-primary" />
-                      <AlertDescription className="text-primary text-xs">
+                      <AlertDescription className="text-primary text-xs break-words">
                         Hotspot &quot;{wifiStatus.hotspotSsid || "Aurige"}&quot; actif
                       </AlertDescription>
                     </Alert>
@@ -457,9 +457,9 @@ export function NetworkPanel() {
                   </div>
                 ) : (
                   <div className="grid grid-cols-2 gap-3 pl-6 text-sm">
-                    <div>
+                    <div className="min-w-0">
                       <p className="text-xs text-muted-foreground">SSID</p>
-                      <p className="font-medium">{wifiStatus.ssid || "-"}</p>
+                      <p className="min-w-0 break-all font-medium">{wifiStatus.ssid || "-"}</p>
                     </div>
                     <div>
                       <p className="text-xs text-muted-foreground">Signal</p>
@@ -547,7 +547,7 @@ export function NetworkPanel() {
         {/* Tailscale VPN Card */}
         <Card className="border-border bg-card">
           <CardHeader>
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center justify-between min-w-0 gap-2">
               <div className="flex min-w-0 items-center gap-3">
                 <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${
                   tsStatus?.running && tsStatus.online ? "bg-success/10" : "bg-muted"
@@ -692,7 +692,7 @@ export function NetworkPanel() {
                               <OsIcon className={`h-4 w-4 shrink-0 ${peer.online ? "text-primary" : "text-muted-foreground"}`} />
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2">
-                                  <span className="text-xs font-medium truncate">{peer.hostname}</span>
+                                  <span className="min-w-0 text-xs font-medium break-all">{peer.hostname}</span>
                                   {peer.online && (
                                     <span className="h-1.5 w-1.5 rounded-full bg-success shrink-0" />
                                   )}
@@ -785,13 +785,13 @@ export function NetworkPanel() {
         {/* Wi-Fi Networks Card */}
         <Card className="border-border bg-card">
           <CardHeader>
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center justify-between min-w-0 gap-2">
               <div className="flex min-w-0 items-center gap-3">
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
                   <Network className="h-5 w-5 text-primary" />
                 </div>
                 <div className="min-w-0">
-                  <CardTitle className="text-lg truncate">Reseaux disponibles</CardTitle>
+                  <CardTitle className="text-lg break-words">Reseaux disponibles</CardTitle>
                   <CardDescription>Selectionnez un reseau Wi-Fi</CardDescription>
                 </div>
               </div>
@@ -833,7 +833,7 @@ export function NetworkPanel() {
                       ) : (
                         <Unlock className="h-4 w-4 text-muted-foreground" />
                       )}
-                      <span className="min-w-0 truncate font-medium" title={network.ssid}>{network.ssid}</span>
+                      <span className="min-w-0 break-all font-medium" title={network.ssid}>{network.ssid}</span>
                       {savedNetworks.includes(network.ssid) && (
                         <Star className="h-3 w-3 text-warning fill-warning" title="Reseau enregistre" />
                       )}
@@ -914,7 +914,7 @@ export function NetworkPanel() {
         {/* Hotspot Card */}
         <Card className="border-border bg-card">
           <CardHeader>
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center justify-between min-w-0 gap-2">
               <div className="flex min-w-0 items-center gap-3">
                 <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${hsStatus?.active ? "bg-success/10" : "bg-primary/10"}`}>
                   <Wifi className={`h-5 w-5 ${hsStatus?.active ? "text-success" : "text-primary"}`} />
