@@ -44,6 +44,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { useIsolationStore, type IsolationLog } from "@/lib/isolation-store"
 import { useExportStore } from "@/lib/export-store"
 import { listMissionLogs, startReplay, stopReplay, forceCleanupReplay, getReplayStatus, splitLog, renameLog, deleteLog, getLogContent, getLogDownloadUrl, getLogFamilyDownloadUrl, analyzeCoOccurrence, analyzeFamilyDiff, addDBCSignal, getMissionDBC, getDBCExportUrl, sendCANFrame, createFrameLog, type LogEntry, type CANInterface, type LogFrame, type CoOccurrenceResponse, type CoOccurrenceFrame, type EcuFamily, type FamilyAnalysisResponse, type FrameDiff, type DBCSignal } from "@/lib/api"
+import { IsolationAssistant } from "@/components/isolation/isolation-assistant"
 import { useRouter as useNavRouter } from "next/navigation"
 import { useMissionStore } from "@/lib/mission-store"
 import { useToast } from "@/hooks/use-toast"
@@ -1083,6 +1084,18 @@ export default function Isolation() {
             )}
           </CardContent>
         </Card>
+
+        {/* Assistant d'isolation guidé (recherche binaire pas à pas) */}
+        {missionId && logs.length > 0 && (
+          <div className="lg:col-span-3">
+            <IsolationAssistant
+              logs={logs}
+              canInterface={canInterface}
+              onMarkSuccess={({ id }) => handleTagChange(id, "success")}
+              onView={handleViewLog}
+            />
+          </div>
+        )}
 
         {/* Dossier Success - logs tagues success */}
         {(() => {
