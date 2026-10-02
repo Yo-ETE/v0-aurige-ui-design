@@ -309,7 +309,7 @@ const handleDeleteLog = async (logId: string) => {
         {/* Interface Selector */}
         <Card className="lg:col-span-2 border-border bg-card">
           <CardContent className="py-4">
-            <div className="flex items-center gap-4">
+            <div className="flex flex-wrap items-center gap-4">
               <Label htmlFor="can-interface" className="whitespace-nowrap">Interface CAN:</Label>
               <Select
                 value={canInterface}
@@ -387,7 +387,7 @@ const handleDeleteLog = async (logId: string) => {
                     onChange={(e) => setCaptureDescription(e.target.value)}
                   />
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-3">
                   <Label htmlFor="countdown" className="whitespace-nowrap text-sm">Decompte:</Label>
                   <Select value={String(countdownSeconds)} onValueChange={(v) => setCountdownSeconds(Number(v))}>
                     <SelectTrigger id="countdown" className="w-24">

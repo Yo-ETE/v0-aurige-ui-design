@@ -2250,9 +2250,9 @@ onClick={async () => {
                 </div>
               </div>
               
-              <div className="flex-1 overflow-hidden flex gap-4 min-h-0">
+              <div className="flex-1 overflow-hidden flex flex-col sm:flex-row gap-4 min-h-0">
                 {/* Frame list with confidence scores */}
-                <div className="w-80 shrink-0 overflow-auto border rounded-lg">
+                <div className="w-full sm:w-80 shrink-0 overflow-auto border rounded-lg">
                   {familyDiffResult.frames_analysis.map((frame, idx) => (
                     <div
                       key={idx}

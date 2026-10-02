@@ -398,7 +398,7 @@ export default function ControleCAN() {
                 {Object.entries(scanResults).map(([iface, result]) => (
                   <div key={iface}>
                     <h3 className="font-semibold text-sm mb-3">{iface}</h3>
-                    <div className="rounded-md border border-border overflow-hidden">
+                    <div className="rounded-md border border-border overflow-x-auto">
                       <table className="w-full text-xs">
                         <thead>
                           <tr className="bg-secondary text-muted-foreground">

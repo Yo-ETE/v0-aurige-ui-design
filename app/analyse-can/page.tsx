@@ -8,7 +8,6 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { LogSelector } from "@/components/log-selector"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
@@ -948,7 +947,7 @@ export default function AnalyseCANPage() {
                   )}
 
                   {heatmapResult && !heatmapLoading && (
-                    <ScrollArea className="max-h-[600px]">
+                    <div className="max-h-[600px] overflow-auto">
                       {/* Column headers */}
                       <div className="flex items-center gap-2 py-1.5 px-2 border-b border-border/60 sticky top-0 bg-card z-10">
                         <div className="w-3.5" /> {/* expand icon space */}
@@ -979,7 +978,7 @@ export default function AnalyseCANPage() {
                           Aucun ID ne correspond aux filtres actuels
                         </div>
                       )}
-                    </ScrollArea>
+                    </div>
                   )}
                 </CardContent>
               </Card>
@@ -1116,7 +1115,7 @@ export default function AnalyseCANPage() {
                           </div>
                         )}
 
-                        <div className="max-h-[500px] overflow-y-auto overflow-x-hidden rounded-md border border-border/30">
+                        <div className="max-h-[500px] overflow-y-auto overflow-x-auto rounded-md border border-border/30">
                           <Table>
                             <TableHeader className="sticky top-0 z-10 bg-card">
                               <TableRow>
@@ -1303,7 +1302,7 @@ export default function AnalyseCANPage() {
                         </div>
 
                         {/* Edges table */}
-                        <div className="max-h-[400px] overflow-y-auto overflow-x-hidden rounded-md border border-border/30">
+                        <div className="max-h-[400px] overflow-y-auto overflow-x-auto rounded-md border border-border/30">
                           <Table>
                             <TableHeader className="sticky top-0 z-10 bg-card">
                               <TableRow>
