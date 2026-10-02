@@ -4,7 +4,7 @@ import React from "react"
 
 import { useState, useEffect } from "react"
 import Link from "next/link"
-import { usePathname, useSearchParams } from "next/navigation"
+import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { useMissionStore } from "@/lib/mission-store"
 import { apiFetch, getApiBaseUrl, getApiHost } from "@/lib/api-config"
@@ -25,7 +25,6 @@ import {
   Home,
   Menu,
   X,
-  Cog,
   FileCode,
   ShieldAlert,
   Search,
@@ -54,6 +53,8 @@ interface NavItem {
   icon: React.ComponentType<{ className?: string }>
   badge?: string
   area?: PermissionFlag
+  /** Visible if the user has ANY of these areas (alternative to `area`) */
+  anyArea?: PermissionFlag[]
 }
 
 interface NavSection {
@@ -105,15 +106,18 @@ const baseNavigation: NavSection[] = [
   {
     title: "Administration",
     items: [
-      { name: "Comptes", href: "/administration?tab=comptes", icon: Users, area: "area_administration" },
-      { name: "Configuration Pi", href: "/administration?tab=systeme", icon: Cog, area: "area_configuration" },
+      {
+        name: "Administration",
+        href: "/administration",
+        icon: Users,
+        anyArea: ["area_administration", "area_configuration"],
+      },
     ],
   },
 ]
 
 export function Sidebar() {
   const pathname = usePathname()
-  const searchParams = useSearchParams()
   const { hasArea, logout } = useAuth()
   const currentMission = useMissionStore((state) => state.getCurrentMission())
 
@@ -175,7 +179,7 @@ export function Sidebar() {
   }
 
   // Build navigation with dynamic mission item
-  const navigation = baseNavigation.map((section) => {
+  const navigation = baseNavigation.map((section): NavSection => {
     if (section.showMission && currentMission) {
       return {
         ...section,
@@ -195,7 +199,9 @@ export function Sidebar() {
     // Per-area gating: keep permitted items, drop sections left empty
     .map((section) => ({
       ...section,
-      items: section.items.filter((item) => !item.area || hasArea(item.area)),
+      items: section.items.filter((item) =>
+        item.anyArea ? item.anyArea.some((a) => hasArea(a)) : !item.area || hasArea(item.area)
+      ),
     }))
     .filter((section) => section.items.length > 0)
 
@@ -280,13 +286,9 @@ export function Sidebar() {
                 {expandedSections.includes(section.title) && (
                   <div className="mt-1 space-y-1">
                     {section.items.map((item) => {
-                      const [itemPath, itemQuery] = item.href.split("?tab=")
-                      const isActive = itemQuery
-                        ? pathname === itemPath &&
-                          (searchParams.get("tab") ??
-                            (hasArea("area_administration") ? "comptes" : "systeme")) === itemQuery
-                        : pathname === item.href ||
-                          (item.href !== "/" && pathname.startsWith(item.href))
+                      const isActive =
+                        pathname === item.href ||
+                        (item.href !== "/" && pathname.startsWith(item.href))
 
                       return (
 <Link
