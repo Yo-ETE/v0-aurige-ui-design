@@ -71,6 +71,10 @@ _ROUTE_RULES = [
     ("PUT", r"^/api/missions/[^/]+/dbc", ["dbc_manage"]),
     ("PATCH", r"^/api/missions/[^/]+/dbc", ["dbc_manage"]),
     ("DELETE", r"^/api/missions/[^/]+/dbc", ["dbc_manage"]),
+    ("POST", r"^/api/dbc", ["dbc_manage"]),
+    ("PUT", r"^/api/dbc", ["dbc_manage"]),
+    ("PATCH", r"^/api/dbc", ["dbc_manage"]),
+    ("DELETE", r"^/api/dbc", ["dbc_manage"]),
     # --- Missions ---
     ("POST", r"^/api/missions$", ["missions_create"]),
     ("POST", r"^/api/missions/[^/]+/duplicate$", ["missions_create"]),
