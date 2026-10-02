@@ -25,3 +25,15 @@ def valid_backup_filename(name) -> bool:
     if "/" in name or "\\" in name or ".." in name:
         return False
     return bool(_BACKUP_NAME.fullmatch(name))
+
+
+_DBC_ID = re.compile(r"^[a-z0-9-]{1,64}$")
+
+
+def valid_dbc_id(s) -> bool:
+    """Identifiant de DBC bibliothèque : slug sûr, pas de traversée de chemin."""
+    if not isinstance(s, str):
+        return False
+    if "/" in s or "\\" in s or ".." in s:
+        return False
+    return bool(_DBC_ID.fullmatch(s))
