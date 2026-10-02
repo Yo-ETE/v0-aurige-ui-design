@@ -564,7 +564,7 @@ export default function OBDII() {
                       </Button>
                     </div>
                   </div>
-                  <p className="font-mono text-lg font-bold text-success tracking-wider">{vin}</p>
+                  <p className="font-mono text-lg font-bold text-success tracking-wider break-all">{vin}</p>
                 </div>
 
                 {/* VIN decoded */}
@@ -844,7 +844,7 @@ export default function OBDII() {
               <div className="space-y-4">
                 {/* Summary */}
                 <div className="rounded-lg border border-success/30 bg-success/10 p-4">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <Activity className="h-5 w-5 text-success" />
                       <span className="font-semibold text-success">Scan termine</span>
