@@ -1,5 +1,5 @@
 "use client"
-import { Suspense, useEffect, useMemo, useState } from "react"
+import { Suspense, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { AppShell } from "@/components/app-shell"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -25,11 +25,25 @@ function AdministrationConsole() {
 
   const requested = params.get("tab")
   const [active, setActive] = useState<string>("")
+  const tabsRef = useRef(tabs)
+  tabsRef.current = tabs
+
+  // Deep-link / URL change: honor ?tab= when it points to a visible tab.
+  useEffect(() => {
+    if (requested && tabsRef.current.some((t) => t.id === requested)) setActive(requested)
+  }, [requested])
+
+  // Init / fallback: only when active is empty or no longer a visible tab.
   useEffect(() => {
     if (!tabs.length) return
-    const want = tabs.find((t) => t.id === requested)?.id ?? tabs[0].id
-    setActive(want)
-  }, [tabs, requested])
+    if (active && tabs.some((t) => t.id === active)) return
+    setActive(tabs.find((t) => t.id === requested)?.id ?? tabs[0].id)
+  }, [tabs, active, requested])
+
+  const handleTabChange = (id: string) => {
+    setActive(id)
+    router.replace(`/administration?tab=${id}`, { scroll: false })
+  }
 
   useEffect(() => {
     if (!isLoading && (!user || tabs.length === 0)) router.replace("/")
@@ -39,7 +53,7 @@ function AdministrationConsole() {
 
   return (
     <AppShell title="Administration">
-      <Tabs value={active} onValueChange={setActive} className="w-full">
+      <Tabs value={active} onValueChange={handleTabChange} className="w-full">
         <TabsList>
           {tabs.map((t) => (
             <TabsTrigger key={t.id} value={t.id}>
