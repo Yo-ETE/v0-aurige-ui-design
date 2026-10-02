@@ -39,6 +39,7 @@ import db
 import hotspot
 from auth import SessionAuthMiddleware, require_permission, router as auth_router
 from permissions import allows
+from validators import valid_git_ref
 from routers.users import router as users_router
 
 # =============================================================================
@@ -5016,6 +5017,14 @@ async def restore_backup(filename: str):
 async def start_update(request: Request):
     """Start update by fresh clone and install script. Optionally accepts JSON body with {branch: "..."} """
     global update_output_store
+    # Garde : valider la branche demandee avant toute ecriture / planification
+    try:
+        _guard_body = await request.json()
+    except Exception:
+        _guard_body = None
+    if isinstance(_guard_body, dict) and _guard_body.get("branch") is not None:
+        if not valid_git_ref(str(_guard_body["branch"])):
+            raise HTTPException(status_code=400, detail="Branche invalide")
     if update_output_store["running"]:
         return {"status": "error", "message": "Une mise à jour est déjà en cours"}
     
@@ -6675,35 +6684,6 @@ async def delete_comparison(mission_id: str, comparison_id: str):
     save_comparisons(mission_id, new_comparisons)
     return {"status": "deleted", "id": comparison_id}
 
-
-# Service management endpoints
-@app.post("/api/system/restart-services")
-async def restart_services():
-    """Restart aurige-web and aurige-api services after update"""
-    import subprocess
-    try:
-        # Create a script that will restart services after a delay
-        # This allows the API to respond before being killed
-        script = """
-#!/bin/bash
-sleep 2
-systemctl restart aurige-web
-# Note: we don't restart aurige-api here as it would kill this script
-"""
-        script_path = "/tmp/restart_services.sh"
-        with open(script_path, "w") as f:
-            f.write(script)
-        os.chmod(script_path, 0o755)
-        
-        # Run in background
-        subprocess.Popen(["sudo", script_path], 
-                        stdout=subprocess.DEVNULL, 
-                        stderr=subprocess.DEVNULL,
-                        start_new_session=True)
-        
-        return {"success": True, "message": "Services will restart in 2 seconds"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to restart: {str(e)}")
 
 @app.get("/api/system/check-update")
 async def check_update():
