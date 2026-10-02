@@ -1684,7 +1684,11 @@ def _load_blocklist() -> list:
             data = json.load(f)
         ids = data.get("ids", []) if isinstance(data, dict) else []
         return [_norm_id(i) for i in ids if isinstance(i, str)]
-    except (FileNotFoundError, ValueError, OSError):
+    except FileNotFoundError:
+        return []
+    except (ValueError, OSError) as e:
+        # Fichier present mais illisible : la garde ne doit pas planter, mais on le signale
+        log_error("aud06_blocklist.json corrompu — garde AUD-06 potentiellement inactive", e)
         return []
 
 
@@ -1723,6 +1727,8 @@ async def get_aud06_blocklist():
 
 @app.put("/api/aud06/blocklist")
 async def put_aud06_blocklist(request: BlocklistRequest):
+    if len(request.ids) > 512:
+        raise HTTPException(status_code=400, detail="Trop d'IDs (max 512)")
     ids = []
     for raw in request.ids:
         if not isinstance(raw, str) or not re.match(r'^[0-9A-Fa-f]{1,8}$', raw.strip()):
