@@ -42,6 +42,7 @@ from auth import SessionAuthMiddleware, require_permission, router as auth_route
 from permissions import allows
 from validators import valid_git_ref, valid_backup_filename, valid_dbc_id
 import dbc_store
+import known_frames
 from routers.users import router as users_router
 
 # =============================================================================
@@ -1570,7 +1571,6 @@ async def inject_start(req: InjectRequest):
     if not _IFACE_RE.fullmatch(iface):
         raise HTTPException(status_code=400, detail="Interface invalide")
     interval = max(10, min(5000, int(req.intervalMs)))
-    sleep_s = interval / 1000.0
     frames: list[str] = []
     if req.mode == "frame":
         cid = (req.canId or "").strip()
@@ -1612,7 +1612,20 @@ async def inject_start(req: InjectRequest):
     if blocked:
         raise HTTPException(status_code=403, detail=blocked)
 
-    qiface = shlex.quote(iface)
+    return await _start_inject_frames(iface, frames, req.intervalMs, desc)
+
+
+async def _start_inject_frames(interface: str, frames: list[str], interval_ms: int, desc: str) -> dict:
+    """Demarre la boucle d'injection de fond (mecanisme unique, un seul producteur a
+    la fois) pour une liste de trames deja validees "CANID#DATA" (hex uniquement).
+    Factorise pour etre reutilise par /api/inject/start (modes frame/log) ET par le
+    rejeu en boucle de /api/known-frames/{fid}/replay, sans dupliquer la construction
+    du script shell."""
+    if state.inject_process and state.inject_process.returncode is None:
+        raise HTTPException(status_code=409, detail="Injection de fond deja en cours")
+    interval = max(10, min(5000, int(interval_ms)))
+    sleep_s = interval / 1000.0
+    qiface = shlex.quote(interface)
     body = "\n".join(f"  cansend {qiface} {shlex.quote(f)}\n  sleep {sleep_s}" for f in frames)
     script = f"#!/bin/bash\nwhile true; do\n{body}\ndone\n"
     # Script prive : dossier cree si besoin, ancien fichier supprime (pas de suivi de symlink)
@@ -1651,6 +1664,103 @@ async def inject_stop():
 async def inject_status():
     running = bool(state.inject_process and state.inject_process.returncode is None)
     return {"running": running, "description": state.inject_desc if running else ""}
+
+
+# =============================================================================
+# Bibliotheque globale de trames connues (crash / reinit) - rejouables
+# Ex. Peugeot : 4C8#0003000000000000 (crash) / 4C8#0000000000000000 (reset).
+# =============================================================================
+
+class KnownFrameCreate(BaseModel):
+    can_id: str
+    crash_data: str
+    reset_data: Optional[str] = ""
+    label: str
+    severity: Optional[str] = None
+    notes: Optional[str] = ""
+
+
+class KnownFramePatch(BaseModel):
+    can_id: Optional[str] = None
+    crash_data: Optional[str] = None
+    reset_data: Optional[str] = None
+    label: Optional[str] = None
+    severity: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class KnownFrameReplayRequest(BaseModel):
+    interface: str = "can0"
+    kind: str = "crash"  # "crash" | "reset"
+    loop: bool = False
+    intervalMs: int = 100
+
+
+@app.get("/api/known-frames")
+async def list_known_frames():
+    return {"frames": known_frames.load_frames()}
+
+
+@app.post("/api/known-frames")
+async def create_known_frame(body: KnownFrameCreate):
+    try:
+        frame = known_frames.add_frame(body.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return frame
+
+
+@app.patch("/api/known-frames/{fid}")
+async def patch_known_frame(fid: str, body: KnownFramePatch):
+    patch = {k: v for k, v in body.model_dump().items() if v is not None}
+    try:
+        updated = known_frames.update_frame(fid, patch)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Trame introuvable")
+    return updated
+
+
+@app.delete("/api/known-frames/{fid}")
+async def delete_known_frame(fid: str):
+    if not known_frames.delete_frame(fid):
+        raise HTTPException(status_code=404, detail="Trame introuvable")
+    return {"status": "deleted"}
+
+
+@app.post("/api/known-frames/{fid}/replay")
+async def replay_known_frame(fid: str, req: KnownFrameReplayRequest):
+    """Rejoue une trame connue (crash ou reinit). Action explicite et deliberee de
+    l'utilisateur sur une trame qu'il a lui-meme cataloguee : ne passe JAMAIS par
+    is_id_blocked (AUD-06), par design (cf. spec known-frames ~5). AUD-06 reste le
+    garde-fou du fuzzing/balayage aveugle, pas de ce rejeu cible."""
+    frame = known_frames.get_frame(fid)
+    if frame is None:
+        raise HTTPException(status_code=404, detail="Trame introuvable")
+    if req.kind not in ("crash", "reset"):
+        raise HTTPException(status_code=400, detail="kind invalide (crash|reset)")
+
+    can_id = frame["can_id"]
+    data = frame.get("crash_data", "") if req.kind == "crash" else frame.get("reset_data", "")
+    if req.kind == "reset" and not data:
+        raise HTTPException(status_code=400, detail="Cette trame n'a pas de reset_data")
+
+    iface = (req.interface or "").strip()
+    if not _IFACE_RE.fullmatch(iface):
+        raise HTTPException(status_code=400, detail="Interface invalide")
+
+    if not req.loop:
+        success, error = can_send_frame(iface, can_id, data)
+        if not success:
+            raise HTTPException(status_code=500, detail=f"Echec envoi trame: {error}")
+        return {"status": "sent", "interface": iface, "canId": can_id.upper(), "data": data.upper()}
+
+    # Boucle : reutilise le mecanisme d'injection de fond (meme script shell que
+    # /api/inject/start), sans passer par is_id_blocked.
+    full_frame = f"{can_id.upper()}#{data.upper()}"
+    desc = f"Trame connue \"{frame.get('label', '')}\" [{req.kind}] {full_frame} ({req.intervalMs} ms)"
+    return await _start_inject_frames(iface, [full_frame], req.intervalMs, desc)
 
 
 # =============================================================================
