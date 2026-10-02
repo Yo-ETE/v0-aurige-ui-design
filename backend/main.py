@@ -5762,34 +5762,11 @@ async def get_mission_dbc(mission_id: str) -> MissionDBC:
     
     return MissionDBC(**data)
 
-@app.post("/api/missions/{mission_id}/dbc/import")
-async def import_dbc_file_endpoint(mission_id: str, file: UploadFile = File(...)):
-  """Import an official .dbc file (Vector format) into mission DBC."""
-  try:
-    if not file.filename.endswith('.dbc'):
-      raise HTTPException(status_code=400, detail="File must be a .dbc file")
-
-    content = await file.read()
-    dbc_content = content.decode('utf-8', errors='ignore')
-
-    log_info(f"Importing DBC file: {file.filename} for mission {mission_id}")
-    parsed = parse_dbc_file(dbc_content)
-
-    dbc_file = Path(MISSIONS_DIR) / mission_id / "dbc.json"
-    if dbc_file.exists():
-      with open(dbc_file, 'r') as f:
-        existing_dbc = json.load(f)
-    else:
-      existing_dbc = {
-        "mission_id": mission_id,
-        "messages": [],
-        "created_at": datetime.now().isoformat(),
-        "updated_at": ""
-      }
-
+def _merge_parsed_dbc(doc: dict, parsed: dict) -> int:
+    """Fusionne un DBC parse (parse_dbc_file) dans un document ; retourne le nombre de signaux importes."""
     imported_count = 0
     for msg in parsed['messages']:
-      existing_msg = next((m for m in existing_dbc['messages'] if m['can_id'] == msg['id']), None)
+      existing_msg = next((m for m in doc['messages'] if m['can_id'] == msg['id']), None)
       if not existing_msg:
         existing_msg = {
           "can_id": msg['id'],
@@ -5799,7 +5776,7 @@ async def import_dbc_file_endpoint(mission_id: str, file: UploadFile = File(...)
           "comment": msg.get('comment', ''),
           "signals": []
         }
-        existing_dbc['messages'].append(existing_msg)
+        doc['messages'].append(existing_msg)
 
       for sig in msg['signals']:
         # Map DBC parser fields to DBCSignal model fields
@@ -5831,8 +5808,47 @@ async def import_dbc_file_endpoint(mission_id: str, file: UploadFile = File(...)
         else:
           existing_msg['signals'].append(signal_dict)
         imported_count += 1
+    return imported_count
 
-    existing_dbc['updated_at'] = datetime.now().isoformat()
+
+def _import_dbc_into_doc(doc: dict, content_bytes: bytes, stats: Optional[dict] = None) -> int:
+    """Parse un fichier .dbc (octets) et le fusionne dans `doc` ; retourne le nombre de signaux importes.
+    `stats` (optionnel) recoit `total_messages` (nombre de messages du fichier)."""
+    parsed = parse_dbc_file(content_bytes.decode('utf-8', errors='ignore'))
+    if stats is not None:
+        stats["total_messages"] = len(parsed['messages'])
+    doc.setdefault("messages", [])
+    n = _merge_parsed_dbc(doc, parsed)
+    doc["updated_at"] = datetime.now().isoformat()
+    return n
+
+
+@app.post("/api/missions/{mission_id}/dbc/import")
+async def import_dbc_file_endpoint(mission_id: str, file: UploadFile = File(...)):
+  """Import an official .dbc file (Vector format) into mission DBC."""
+  try:
+    if not file.filename.endswith('.dbc'):
+      raise HTTPException(status_code=400, detail="File must be a .dbc file")
+
+    content = await file.read()
+
+    log_info(f"Importing DBC file: {file.filename} for mission {mission_id}")
+
+    dbc_file = Path(MISSIONS_DIR) / mission_id / "dbc.json"
+    if dbc_file.exists():
+      with open(dbc_file, 'r') as f:
+        existing_dbc = json.load(f)
+    else:
+      existing_dbc = {
+        "mission_id": mission_id,
+        "messages": [],
+        "created_at": datetime.now().isoformat(),
+        "updated_at": ""
+      }
+
+    stats: dict = {}
+    imported_count = _import_dbc_into_doc(existing_dbc, content, stats)
+
     dbc_file.parent.mkdir(parents=True, exist_ok=True)
     with open(dbc_file, 'w') as f:
       json.dump(existing_dbc, f, indent=2)
@@ -5841,7 +5857,7 @@ async def import_dbc_file_endpoint(mission_id: str, file: UploadFile = File(...)
     return {
       "status": "success",
       "imported_signals": imported_count,
-      "total_messages": len(parsed['messages']),
+      "total_messages": stats["total_messages"],
       "filename": file.filename
     }
   except HTTPException:
@@ -5985,6 +6001,194 @@ async def export_dbc(mission_id: str):
             "Content-Disposition": f'attachment; filename="mission_{mission_id}.dbc"'
         }
     )
+
+
+# ---------------------------------------------------------------------------
+# Bibliotheque DBC autonome ({DATA_DIR}/dbc/<dbc_id>.json) + ponts mission
+# ---------------------------------------------------------------------------
+def _dbc_lib_dir() -> Path:
+    d = Path(os.environ.get("AURIGE_DATA_DIR", "/opt/aurige/data")) / "dbc"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _dbc_lib_path(dbc_id: str) -> Path:
+    """Chemin sur d'une bibliotheque DBC (id valide + confinement dans le dossier dbc)."""
+    if not valid_dbc_id(dbc_id):
+        raise HTTPException(status_code=400, detail="Identifiant DBC invalide")
+    base = _dbc_lib_dir().resolve()
+    p = (base / f"{dbc_id}.json").resolve()
+    if base not in p.parents:
+        raise HTTPException(status_code=400, detail="Chemin DBC invalide")
+    return p
+
+
+def _lib_doc_or_404(dbc_id: str):
+    p = _dbc_lib_path(dbc_id)
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="DBC introuvable")
+    return p, dbc_store.load_doc(p)
+
+
+def _mission_dbc_path(mission_id: str) -> Path:
+    """Chemin dbc.json d'une mission ; refuse les identifiants avec separateurs/traversal."""
+    if not isinstance(mission_id, str) or not mission_id or ".." in mission_id or "/" in mission_id or "\\" in mission_id:
+        raise HTTPException(status_code=400, detail="Identifiant de mission invalide")
+    return Path(MISSIONS_DIR) / mission_id / "dbc.json"
+
+
+class DBCLibCreate(BaseModel):
+    name: str
+
+
+def _slug(name: str) -> str:
+    s = re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).strip("-")
+    return s[:40] or "dbc"
+
+
+@app.get("/api/dbc")
+async def list_dbc_libraries():
+    out = []
+    for p in _dbc_lib_dir().glob("*.json"):
+        try:
+            doc = dbc_store.load_doc(p)
+        except Exception:
+            continue
+        msgs = doc.get("messages", [])
+        out.append({
+            "id": doc.get("id", p.stem),
+            "name": doc.get("name", p.stem),
+            "message_count": len(msgs),
+            "signal_count": sum(len(m.get("signals", [])) for m in msgs),
+            "updated_at": doc.get("updated_at", ""),
+        })
+    out.sort(key=lambda x: x["updated_at"], reverse=True)
+    return {"libraries": out}
+
+
+@app.post("/api/dbc")
+async def create_dbc_library(body: DBCLibCreate):
+    name = (body.name or "").strip() or "DBC"
+    base = _slug(name)
+    dbc_id = base
+    i = 1
+    while (_dbc_lib_dir() / f"{dbc_id}.json").exists():
+        i += 1
+        dbc_id = f"{base}-{i}"
+    if not valid_dbc_id(dbc_id):
+        dbc_id = f"dbc-{int(time.time())}"
+    doc = dbc_store.new_doc()
+    doc["id"] = dbc_id
+    doc["name"] = name
+    dbc_store.save_doc(_dbc_lib_path(dbc_id), doc)
+    return {"id": dbc_id, "name": name}
+
+
+@app.get("/api/dbc/{dbc_id}")
+async def get_dbc_library(dbc_id: str):
+    _, doc = _lib_doc_or_404(dbc_id)
+    return doc
+
+
+@app.patch("/api/dbc/{dbc_id}")
+async def rename_dbc_library(dbc_id: str, body: DBCLibCreate):
+    p, doc = _lib_doc_or_404(dbc_id)
+    doc["name"] = (body.name or "").strip() or doc.get("name", dbc_id)
+    dbc_store.save_doc(p, doc)
+    return {"id": dbc_id, "name": doc["name"]}
+
+
+@app.delete("/api/dbc/{dbc_id}")
+async def delete_dbc_library(dbc_id: str):
+    p = _dbc_lib_path(dbc_id)
+    if p.exists():
+        p.unlink()
+    return {"status": "ok"}
+
+
+@app.post("/api/dbc/{dbc_id}/message")
+async def lib_add_message(dbc_id: str, meta: DBCMessageMeta):
+    if not _valid_can_id(meta.can_id):
+        raise HTTPException(status_code=400, detail="CAN ID invalide (hex 1-8)")
+    if meta.dlc is not None and not (0 <= meta.dlc <= 64):
+        raise HTTPException(status_code=400, detail="DLC invalide (0-64)")
+    p, doc = _lib_doc_or_404(dbc_id)
+    dbc_store.upsert_message(doc, meta.can_id.strip(), name=meta.name, dlc=meta.dlc, comment=meta.comment)
+    dbc_store.save_doc(p, doc)
+    return {"status": "ok", "can_id": meta.can_id.strip()}
+
+
+@app.post("/api/dbc/{dbc_id}/signal")
+async def lib_add_signal(dbc_id: str, signal: DBCSignal):
+    if not _valid_can_id(signal.can_id):
+        raise HTTPException(status_code=400, detail="CAN ID invalide (hex 1-8)")
+    p, doc = _lib_doc_or_404(dbc_id)
+    sid = dbc_store.upsert_signal(doc, signal.model_dump())
+    dbc_store.save_doc(p, doc)
+    return {"status": "ok", "signal_id": sid}
+
+
+@app.delete("/api/dbc/{dbc_id}/signal/{signal_id}")
+async def lib_delete_signal(dbc_id: str, signal_id: str):
+    p, doc = _lib_doc_or_404(dbc_id)
+    n = dbc_store.delete_signal(doc, signal_id)
+    dbc_store.save_doc(p, doc)
+    return {"status": "ok", "removed": n}
+
+
+@app.delete("/api/dbc/{dbc_id}/message/{can_id}")
+async def lib_delete_message(dbc_id: str, can_id: str):
+    p, doc = _lib_doc_or_404(dbc_id)
+    n = dbc_store.delete_message(doc, can_id)
+    dbc_store.save_doc(p, doc)
+    return {"status": "ok", "removed": n}
+
+
+@app.get("/api/dbc/{dbc_id}/export")
+async def lib_export(dbc_id: str):
+    _, doc = _lib_doc_or_404(dbc_id)
+    return Response(content=dbc_store.dbc_to_text(doc), media_type="application/octet-stream",
+                    headers={"Content-Disposition": f'attachment; filename="{dbc_id}.dbc"'})
+
+
+@app.post("/api/dbc/{dbc_id}/import")
+async def lib_import(dbc_id: str, file: UploadFile = File(...)):
+    p, doc = _lib_doc_or_404(dbc_id)
+    content = await file.read()
+    try:
+        n = _import_dbc_into_doc(doc, content)
+    except Exception as e:
+        log_error(f"DBC library import failed: {str(e)}", e)
+        raise HTTPException(status_code=500, detail=f"Failed to import DBC: {str(e)}")
+    dbc_store.save_doc(p, doc)
+    return {"status": "success", "imported_signals": n}
+
+
+@app.post("/api/dbc/{dbc_id}/from-mission/{mission_id}")
+async def lib_from_mission(dbc_id: str, mission_id: str):
+    """Copie le DBC d'une mission dans la bibliotheque (remplace les messages)."""
+    p, doc = _lib_doc_or_404(dbc_id)
+    mdbc = _mission_dbc_path(mission_id)
+    if not mdbc.exists():
+        raise HTTPException(status_code=404, detail="DBC mission introuvable")
+    src = dbc_store.load_doc(mdbc)
+    doc["messages"] = src.get("messages", [])
+    dbc_store.save_doc(p, doc)
+    return {"status": "ok", "message_count": len(doc["messages"])}
+
+
+@app.post("/api/missions/{mission_id}/dbc/from-library/{dbc_id}")
+async def mission_from_library(mission_id: str, dbc_id: str):
+    """Copie une bibliotheque DBC dans le DBC d'une mission (remplace les messages)."""
+    mdbc = _mission_dbc_path(mission_id)
+    if not mdbc.parent.exists():
+        raise HTTPException(status_code=404, detail="Mission non trouvee")
+    _, src = _lib_doc_or_404(dbc_id)
+    doc = dbc_store.load_doc(mdbc) if mdbc.exists() else dbc_store.new_doc()
+    doc["mission_id"] = mission_id
+    doc["messages"] = src.get("messages", [])
+    dbc_store.save_doc(mdbc, doc)
+    return {"status": "ok", "message_count": len(doc["messages"])}
 
 
 @app.get("/api/missions/{mission_id}/dbc/active")
