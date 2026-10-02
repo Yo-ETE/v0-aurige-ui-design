@@ -157,3 +157,22 @@ def test_replay_requires_can_inject_permission():
     assert permissions.required_permissions("POST", "/api/known-frames/abc/replay") == ["can_inject"]
     assert permissions.required_permissions("PATCH", "/api/known-frames/abc") == ["can_inject"]
     assert permissions.required_permissions("DELETE", "/api/known-frames/abc") == ["can_inject"]
+
+
+def test_replay_stored_invalid_400(ctx):
+    c, main, kf, mp, _ = ctx
+    # Entrees corrompues ecrites en contournant la validation
+    kf.save_frames([
+        {"id": "bad1", "can_id": "4C8;rm", "crash_data": "00", "reset_data": "", "label": "x", "severity": "danger"},
+        {"id": "bad2", "can_id": "4C8", "crash_data": "0G", "reset_data": "", "label": "y", "severity": "danger"},
+    ])
+    send = MagicMock(return_value=(True, ""))
+    run = AsyncMock(return_value=_fake())
+    mp.setattr(main, "can_send_frame", send)
+    mp.setattr(main, "run_command_async", run)
+    for fid in ("bad1", "bad2"):
+        for loop in (False, True):
+            r = c.post(f"/api/known-frames/{fid}/replay", json={"interface": "can0", "kind": "crash", "loop": loop})
+            assert r.status_code == 400
+    send.assert_not_called()
+    run.assert_not_called()

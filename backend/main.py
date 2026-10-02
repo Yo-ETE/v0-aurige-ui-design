@@ -1746,6 +1746,12 @@ async def replay_known_frame(fid: str, req: KnownFrameReplayRequest):
     if req.kind == "reset" and not data:
         raise HTTPException(status_code=400, detail="Cette trame n'a pas de reset_data")
 
+    # Defense en profondeur : revalide la trame STOCKEE (fichier edite a la main/corrompu)
+    # avant tout envoi, pour les modes one-shot et boucle.
+    if not isinstance(can_id, str) or not _HEX_ID.fullmatch(can_id) \
+            or not isinstance(data, str) or not _HEX_DATA.fullmatch(data):
+        raise HTTPException(status_code=400, detail="Trame stockee invalide")
+
     iface = (req.interface or "").strip()
     if not _IFACE_RE.fullmatch(iface):
         raise HTTPException(status_code=400, detail="Interface invalide")

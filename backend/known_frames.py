@@ -19,8 +19,9 @@ from uuid import uuid4
 DATA_DIR = Path(os.getenv("AURIGE_DATA_DIR", "/opt/aurige/data"))
 KNOWN_FRAMES_PATH = DATA_DIR / "known_frames.json"
 
-# Toujours fullmatch via re.match + ancre $ ici : pas de retour a la ligne possible
-# dans un champ JSON hex valide, donc $ est suffisant (contrairement aux trames shell).
+# Regex ancrees ^...$ appliquees avec re.match sur une valeur deja .strip() ; or `$`
+# accepte un saut de ligne final, d'ou le .strip() prealable. main.py revalide de plus
+# la trame stockee avec fullmatch avant tout rejeu.
 _HEX_ID_RE = re.compile(r"^[0-9A-Fa-f]{1,8}$")
 _HEX_DATA_RE = re.compile(r"^([0-9A-Fa-f]{2}){0,8}$")
 
