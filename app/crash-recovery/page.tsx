@@ -273,6 +273,8 @@ function CrashRecoveryContent() {
     const [idPart, dataPart] = frameStr.split("#")
     if (!idPart) return
     setFormCanId(idPart)
+    setFormCrashData("")
+    setFormSeverity("warning")
     setFormResetData(dataPart || "")
     setFormLabel("reinit " + idPart)
     scrollToLibrary()
@@ -883,7 +885,7 @@ function CrashRecoveryContent() {
                         </Badge>
                         <span className="font-mono font-bold text-primary">{culprit.anomaly.id}</span>
                         <span className="text-muted-foreground flex-1">{culprit.anomaly.description}</span>
-                        <span className="text-muted-foreground">delta: {culprit.timing_delta}ms</span>
+                        <span className="text-muted-foreground">delta: {Math.round(culprit.timing_delta * 1000)} ms</span>
                       </div>
                       <div className="space-y-1">
                         {culprit.suspect_frames.map((frame, j) => (
@@ -891,7 +893,7 @@ function CrashRecoveryContent() {
                             <span className="font-mono">
                               {frame.id}#{frame.data}
                             </span>
-                            <span className="text-muted-foreground">+{culprit.timing_delta}ms</span>
+                            <span className="text-muted-foreground">+{Math.round(culprit.timing_delta * 1000)} ms</span>
                             <Button
                               size="sm"
                               variant="outline"
