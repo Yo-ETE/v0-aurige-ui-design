@@ -595,7 +595,7 @@ export default function AnalyseCANPage() {
                 <div className="flex flex-col gap-1.5">
                   <Label className="text-xs text-muted-foreground">Mission</Label>
                   <Select value={selectedMissionId} onValueChange={setSelectedMissionId}>
-                    <SelectTrigger className="h-8 text-xs">
+                    <SelectTrigger className="h-8 text-xs w-full min-w-0">
                       <SelectValue placeholder="Selectionnez une mission" />
                     </SelectTrigger>
                     <SelectContent>
@@ -681,7 +681,7 @@ export default function AnalyseCANPage() {
                   <div className="flex flex-col gap-1.5">
                     <Label className="text-xs text-muted-foreground">Mode couleur</Label>
                     <Select value={heatmapMode} onValueChange={(v) => setHeatmapMode(v as "change_rate" | "entropy")}>
-                      <SelectTrigger className="h-8 text-xs">
+                      <SelectTrigger className="h-8 text-xs w-full min-w-0">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -701,7 +701,7 @@ export default function AnalyseCANPage() {
                   <div className="flex flex-col gap-1.5">
                     <Label className="text-xs text-muted-foreground">Tri</Label>
                     <Select value={sortBy} onValueChange={(v) => setSortBy(v as "frequency" | "activity")}>
-                      <SelectTrigger className="h-8 text-xs">
+                      <SelectTrigger className="h-8 text-xs w-full min-w-0">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>

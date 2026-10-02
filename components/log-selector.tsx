@@ -78,7 +78,7 @@ export function LogSelector({
 
   return (
     <Select value={value} onValueChange={onValueChange} disabled={disabled}>
-      <SelectTrigger className={triggerClassName || "h-8 text-xs"}>
+      <SelectTrigger className={triggerClassName || "h-8 text-xs w-full min-w-0"}>
         <SelectValue placeholder={placeholder}>
           {displayValue}
         </SelectValue>
