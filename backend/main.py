@@ -1654,6 +1654,90 @@ async def inject_status():
 
 
 # =============================================================================
+# AUD-06 : liste critique d'IDs (bloque le fuzzing/balayage aveugle uniquement)
+# =============================================================================
+
+# Chemin module-level (monkeypatchable dans les tests)
+BLOCKLIST_PATH = DATA_DIR / "aud06_blocklist.json"
+FUZZ_SCRIPT_PATH = Path("/tmp/aurige_fuzz.py")
+
+
+def _norm_id(s: str) -> str:
+    """Normalise un ID CAN : trim, majuscules, retire le prefixe 0X."""
+    n = str(s).strip().upper()
+    if n.startswith("0X"):
+        n = n[2:]
+    return n
+
+
+def _id_int(s: str) -> Optional[int]:
+    try:
+        return int(_norm_id(s), 16)
+    except ValueError:
+        return None
+
+
+def _load_blocklist() -> list:
+    """Charge la liste critique (defaut : vide)."""
+    try:
+        with open(BLOCKLIST_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        ids = data.get("ids", []) if isinstance(data, dict) else []
+        return [_norm_id(i) for i in ids if isinstance(i, str)]
+    except (FileNotFoundError, ValueError, OSError):
+        return []
+
+
+def _save_blocklist(ids: list) -> None:
+    """Sauvegarde atomique (fichier temporaire + os.replace)."""
+    path = Path(BLOCKLIST_PATH)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"ids": ids}, f)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+
+
+def is_id_blocked(can_id: str) -> bool:
+    """True si l'ID est dans la liste critique. Les IDs OBD ne sont JAMAIS bloques."""
+    n = _norm_id(can_id)
+    v = _id_int(n)
+    if n in OBD_FILTER_IDS or (v is not None and any(v == int(o, 16) for o in OBD_FILTER_IDS)):
+        return False
+    bl = _load_blocklist()
+    if n in bl:
+        return True
+    return v is not None and any(_id_int(b) == v for b in bl)
+
+
+class BlocklistRequest(BaseModel):
+    ids: list
+
+
+@app.get("/api/aud06/blocklist")
+async def get_aud06_blocklist():
+    return {"ids": _load_blocklist()}
+
+
+@app.put("/api/aud06/blocklist")
+async def put_aud06_blocklist(request: BlocklistRequest):
+    ids = []
+    for raw in request.ids:
+        if not isinstance(raw, str) or not re.match(r'^[0-9A-Fa-f]{1,8}$', raw.strip()):
+            raise HTTPException(status_code=400, detail=f"ID invalide: {raw}")
+        n = _norm_id(raw)
+        v = int(n, 16)
+        if n in OBD_FILTER_IDS or any(v == int(o, 16) for o in OBD_FILTER_IDS):
+            raise HTTPException(status_code=400, detail=f"ID OBD non bloquable: {n}")
+        if n not in ids:
+            ids.append(n)
+    _save_blocklist(ids)
+    return {"ids": ids}
+
+
+# =============================================================================
 # Generator / Fuzzing Endpoints
 # =============================================================================
 
@@ -1673,6 +1757,16 @@ async def start_generator(request: GeneratorRequest):
         "-L", str(request.data_length),
     ]
     
+    # AUD-06 : garde sur la liste critique
+    if request.can_id:
+        if is_id_blocked(request.can_id):
+            raise HTTPException(status_code=403, detail=f"ID {_norm_id(request.can_id)} bloque (AUD-06)")
+    elif _load_blocklist():
+        raise HTTPException(
+            status_code=403,
+            detail="cangen ne peut pas exclure d'ID ; precisez un can_id ou videz la liste critique",
+        )
+
     if request.can_id:
         # Fixed ID mode
         cmd.extend(["-I", request.can_id])
@@ -1738,6 +1832,40 @@ async def start_fuzzing(request: FuzzingRequest):
     
     dlc = max(1, min(request.dlc, 8))
     mode = request.data_mode
+
+    # AUD-06 : liste effective d'IDs cibles, sans les IDs critiques
+    blocked_skipped = 0
+    filtered_targets = None  # None = balayage de plage inchange
+    if request.target_ids:
+        norm_targets = [_norm_id(t) for t in request.target_ids]
+        filtered_targets = [t for t in norm_targets if not is_id_blocked(t)]
+        blocked_skipped = len(norm_targets) - len(filtered_targets)
+        if not filtered_targets:
+            raise HTTPException(status_code=403, detail="Tous les IDs cibles sont bloques (AUD-06)")
+    else:
+        r_start = int(request.id_start, 16)
+        r_end = int(request.id_end, 16)
+        if r_end < r_start:
+            r_start, r_end = r_end, r_start
+        size = r_end - r_start + 1
+        # Les IDs bloques de la plage (pilote par la liste, pas par la plage)
+        blocked_in_range = sorted({
+            v for v in (_id_int(b) for b in _load_blocklist())
+            if v is not None and r_start <= v <= r_end and is_id_blocked("{:03X}".format(v))
+        })
+        if blocked_in_range:
+            blocked_skipped = len(blocked_in_range)
+            if blocked_skipped >= size:
+                raise HTTPException(status_code=403, detail="Tous les IDs cibles sont bloques (AUD-06)")
+            # Expansion bornee par le nombre d'iterations (le script cycle dessus)
+            blocked_set = set(blocked_in_range)
+            want = min(request.iterations, size - blocked_skipped)
+            filtered_targets = []
+            cur = r_start
+            while len(filtered_targets) < want and cur <= r_end:
+                if cur not in blocked_set:
+                    filtered_targets.append("{:03X}".format(cur))
+                cur += 1
     
     # PRE-FUZZ CAPTURE: Record baseline traffic before fuzzing
     pre_fuzz_log_path = None
@@ -1825,7 +1953,7 @@ async def start_fuzzing(request: FuzzingRequest):
         byte_ranges_code = f"BYTE_RANGES = {json.dumps(request.byte_ranges)}\n"
     
     # For "target_ids" mode with specific IDs
-    target_ids = request.target_ids or []
+    target_ids = filtered_targets or []
     
     # Prepare mission log paths for during-fuzz capture and history
     during_fuzz_log_path = None
@@ -2007,7 +2135,7 @@ finally:
 '''
     
     # Write script to file
-    script_path = Path("/tmp/aurige_fuzz.py")
+    script_path = FUZZ_SCRIPT_PATH
     with open(script_path, "w") as f:
         f.write(script_content)
     script_path.chmod(0o755)
@@ -2020,7 +2148,7 @@ finally:
         text=True
     )
     
-    return {"status": "started", "iterations": request.iterations}
+    return {"status": "started", "iterations": request.iterations, "blocked_skipped": blocked_skipped}
 
 
 @app.post("/api/fuzzing/stop")
@@ -8856,6 +8984,10 @@ async def validate_causality_endpoint(request: CausalityRequest):
 
     src = request.source_id.upper().replace("0X", "")
     tgt = request.target_id.upper().replace("0X", "")
+
+    # AUD-06 : on n'injecte pas depuis un ID critique
+    if is_id_blocked(src):
+        raise HTTPException(status_code=403, detail=f"ID source {src} bloque (AUD-06)")
 
     # Find last known payload for source_id from log
     source_payload = None

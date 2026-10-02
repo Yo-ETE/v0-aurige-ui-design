@@ -9,7 +9,7 @@ ACTION_FLAGS = [
     "can_inject", "fuzzing_run", "crash_recovery_run", "causality_validate",
     "capture_run", "replay_run", "missions_create", "missions_edit",
     "missions_delete", "dbc_manage", "obd_write", "system_update",
-    "system_reboot", "system_network", "system_backup",
+    "system_reboot", "system_network", "system_backup", "safety_config",
 ]
 ALL_FLAGS = AREA_FLAGS + ACTION_FLAGS
 
@@ -63,6 +63,8 @@ _ROUTE_RULES = [
     ("POST", r"^/api/fuzzing/(start|run|stop|force-cleanup)", ["fuzzing_run"]),
     ("POST", r"^/api/fuzzing/crash-recovery", ["crash_recovery_run"]),
     ("POST", r"^/api/analysis/validate-causality", ["causality_validate"]),
+    # --- Configuration securite AUD-06 (liste critique) ---
+    ("PUT", r"^/api/aud06/", ["safety_config"]),
     ("POST", r"^/api/capture/", ["capture_run"]),
     ("POST", r"^/api/replay/", ["replay_run"]),
     # --- OBD (ecriture : effacement DTC, reset ECU) ---

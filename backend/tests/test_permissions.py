@@ -6,18 +6,18 @@ import permissions as perms
 # ============================================================================
 
 def test_all_flags_count_and_uniqueness():
-    """Verify flag list integrity: 22 total, no duplicates, proper union."""
-    assert len(perms.ALL_FLAGS) == 22
-    assert len(set(perms.ALL_FLAGS)) == 22  # no duplicates
+    """Verify flag list integrity: 23 total, no duplicates, proper union."""
+    assert len(perms.ALL_FLAGS) == 23
+    assert len(set(perms.ALL_FLAGS)) == 23  # no duplicates
     assert set(perms.ALL_FLAGS) == set(perms.AREA_FLAGS) | set(perms.ACTION_FLAGS)
     assert len(perms.AREA_FLAGS) == 7
-    assert len(perms.ACTION_FLAGS) == 15  # 7 + 15 = 22
+    assert len(perms.ACTION_FLAGS) == 16  # 7 + 16 = 23
 
 
 def test_admin_has_everything():
-    """Admin role has all 22 flags True."""
+    """Admin role has all 23 flags True."""
     eff = perms.effective_permissions("admin", None)
-    assert len(eff) == 22
+    assert len(eff) == 23
     assert all(eff[f] for f in perms.ALL_FLAGS)
 
 
