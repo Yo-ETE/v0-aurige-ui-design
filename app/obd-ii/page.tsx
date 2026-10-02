@@ -11,12 +11,16 @@ import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Activity, Car, AlertTriangle, Trash2, RotateCcw, Info, Loader2, Search,
-  Download, Save, FileJson, FileSpreadsheet, Copy, CheckCircle2
+  Download, Save, FileJson, FileSpreadsheet, Copy, CheckCircle2, ShieldCheck, Snowflake
 } from "lucide-react"
 import {
   requestVIN, readDTCs, clearDTCs, resetECU, fullOBDScan, getLastOBDReport,
-  type OBDResponse, type FullScanResponse, type OBDReport
+  readDTCsPending, readDTCsPermanent, getOBDStatus, getFreezeFrame,
+  type OBDResponse, type FullScanResponse, type OBDReport,
+  type OBDDtc, type OBDStatusInfo, type OBDPidValue
 } from "@/lib/api"
+import { DtcList } from "@/components/obd/dtc-list"
+import { LiveDashboard, PID_OPTIONS } from "@/components/obd/live-dashboard"
 import { SentFramesHistory, useSentFramesHistory } from "@/components/sent-frames-history"
 import { useMissionStore } from "@/lib/mission-store"
 
@@ -297,6 +301,12 @@ export default function OBDII() {
   const [scanResult, setScanResult] = useState<FullScanResponse | null>(null)
   const [vinSaved, setVinSaved] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [dtcDetails, setDtcDetails] = useState<OBDDtc[] | null>(null)
+  const [pending, setPending] = useState<{ codes: string[]; details: OBDDtc[] } | null>(null)
+  const [permanent, setPermanent] = useState<{ codes: string[]; details: OBDDtc[] } | null>(null)
+  const [statusInfo, setStatusInfo] = useState<OBDStatusInfo | null>(null)
+  const [freezePid, setFreezePid] = useState("0C")
+  const [freezeResult, setFreezeResult] = useState<OBDPidValue | null>(null)
 
   const { frames, trackFrame, clearHistory } = useSentFramesHistory()
   const { getCurrentMission, updateMissionVehicle } = useMissionStore()
@@ -353,8 +363,10 @@ export default function OBDII() {
           if (response.data) {
             const codes = response.data.split(",").map((c) => c.trim()).filter(Boolean)
             setDtcCodes(codes)
+            setDtcDetails(response.dtc_details ?? null)
           } else {
             setDtcCodes([])
+            setDtcDetails(null)
           }
         }
       )
@@ -376,6 +388,7 @@ export default function OBDII() {
           setLastResponse(response)
           if (response.status === "error") throw new Error(response.message || "Erreur d'envoi")
           setDtcCodes([])
+          setDtcDetails(null)
         }
       )
     } catch (err) {
@@ -397,6 +410,7 @@ export default function OBDII() {
           if (response.status === "error") throw new Error(response.message || "Erreur d'envoi")
           setVin(null)
           setDtcCodes(null)
+          setDtcDetails(null)
           setScanResult(null)
           setVinSaved(false)
         }
@@ -425,11 +439,68 @@ export default function OBDII() {
           }
           if (result.results?.dtcs) {
             setDtcCodes(result.results.dtcs)
+            setDtcDetails(null)
           }
         }
       )
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur lors du scan complet")
+    } finally {
+      setIsLoading(null)
+    }
+  }
+
+  const handleReadPending = async () => {
+    setIsLoading("pending")
+    setError(null)
+    try {
+      const r = await readDTCsPending(canInterface)
+      if (r.status === "error") throw new Error(r.message || "Erreur de lecture")
+      setPending({ codes: r.dtcs ?? [], details: r.dtc_details ?? [] })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur lors de la lecture des DTC en attente")
+    } finally {
+      setIsLoading(null)
+    }
+  }
+
+  const handleReadPermanent = async () => {
+    setIsLoading("permanent")
+    setError(null)
+    try {
+      const r = await readDTCsPermanent(canInterface)
+      if (r.status === "error") throw new Error(r.message || "Erreur de lecture")
+      setPermanent({ codes: r.dtcs ?? [], details: r.dtc_details ?? [] })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur lors de la lecture des DTC permanents")
+    } finally {
+      setIsLoading(null)
+    }
+  }
+
+  const handleReadStatus = async () => {
+    setIsLoading("status")
+    setError(null)
+    try {
+      const r = await getOBDStatus(canInterface)
+      if (r.status === "error") throw new Error("Erreur de lecture du statut")
+      setStatusInfo(r)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur lors de la lecture du statut")
+    } finally {
+      setIsLoading(null)
+    }
+  }
+
+  const handleFreezeFrame = async () => {
+    setIsLoading("freeze")
+    setError(null)
+    try {
+      const r = await getFreezeFrame(canInterface, freezePid)
+      if (r.status === "error") throw new Error("Aucune donnee freeze frame pour ce PID")
+      setFreezeResult(r)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur lors de la lecture du freeze frame")
     } finally {
       setIsLoading(null)
     }
@@ -646,12 +717,12 @@ export default function OBDII() {
             <CardDescription>Lecture et effacement des codes defaut</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Button
                 onClick={handleReadDTC}
                 disabled={isLoading !== null}
                 variant="secondary"
-                className="flex-1"
+                className="flex-1 min-w-32"
               >
                 {isLoading === "dtc" ? (
                   <>
@@ -684,27 +755,7 @@ export default function OBDII() {
                     <Label className="text-xs text-muted-foreground">
                       {dtcCodes.length} code(s) detecte(s)
                     </Label>
-                    <div className="space-y-2">
-                      {dtcCodes.map((code) => {
-                        const desc = getDTCDescription(code)
-                        const cat = getDTCCategory(code)
-                        return (
-                          <div key={code} className="flex items-center gap-3 rounded-lg border border-border/50 bg-background/30 p-2.5">
-                            <Badge className={`font-mono text-sm px-2 py-1 ${getDTCColor(code)}`}>
-                              {code}
-                            </Badge>
-                            <div className="flex-1 min-w-0">
-                              {desc ? (
-                                <p className="text-sm text-foreground truncate">{desc}</p>
-                              ) : (
-                                <p className="text-sm text-muted-foreground italic">Description non disponible</p>
-                              )}
-                              <p className="text-[10px] text-muted-foreground/60">{cat}</p>
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
+                    <DtcList codes={dtcCodes} details={dtcDetails} fallbackDescribe={getDTCDescription} />
                   </div>
                 )}
               </div>
@@ -717,6 +768,144 @@ export default function OBDII() {
                 A utiliser avec precaution.
               </AlertDescription>
             </Alert>
+          </CardContent>
+        </Card>
+
+        {/* DTC en attente */}
+        <Card className="bg-card border-border">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-foreground">
+              <AlertTriangle className="h-5 w-5 text-warning" />
+              DTC en attente
+            </CardTitle>
+            <CardDescription>Codes detectes mais non confirmes (Mode 07)</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button onClick={handleReadPending} disabled={isLoading !== null} variant="secondary" className="flex-1 min-w-32">
+                {isLoading === "pending" ? (<><Loader2 className="h-4 w-4 mr-2 animate-spin" />Lecture...</>) : "Lire les DTC en attente"}
+              </Button>
+            </div>
+            {pending && (
+              <div className="rounded-lg border border-border bg-muted/30 p-4">
+                {pending.codes.length === 0 && pending.details.length === 0 ? (
+                  <p className="text-sm text-success">Aucun DTC en attente</p>
+                ) : (
+                  <DtcList codes={pending.codes} details={pending.details} fallbackDescribe={getDTCDescription} />
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* DTC permanents */}
+        <Card className="bg-card border-border">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-foreground">
+              <AlertTriangle className="h-5 w-5 text-destructive" />
+              DTC permanents
+            </CardTitle>
+            <CardDescription>Codes non effacables manuellement (Mode 0A)</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button onClick={handleReadPermanent} disabled={isLoading !== null} variant="secondary" className="flex-1 min-w-32">
+                {isLoading === "permanent" ? (<><Loader2 className="h-4 w-4 mr-2 animate-spin" />Lecture...</>) : "Lire les DTC permanents"}
+              </Button>
+            </div>
+            {permanent && (
+              <div className="rounded-lg border border-border bg-muted/30 p-4">
+                {permanent.codes.length === 0 && permanent.details.length === 0 ? (
+                  <p className="text-sm text-success">Aucun DTC permanent</p>
+                ) : (
+                  <DtcList codes={permanent.codes} details={permanent.details} fallbackDescribe={getDTCDescription} />
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Dashboard live */}
+        <LiveDashboard iface={canInterface} />
+
+        {/* Statut emissions */}
+        <Card className="bg-card border-border">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-foreground">
+              <ShieldCheck className="h-5 w-5 text-primary" />
+              Statut emissions
+            </CardTitle>
+            <CardDescription>Voyant MIL, nombre de DTC et moniteurs</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button onClick={handleReadStatus} disabled={isLoading !== null} variant="secondary" className="flex-1 min-w-32">
+                {isLoading === "status" ? (<><Loader2 className="h-4 w-4 mr-2 animate-spin" />Lecture...</>) : "Lire le statut"}
+              </Button>
+            </div>
+            {statusInfo && (
+              <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge className={statusInfo.mil_on ? "bg-destructive text-destructive-foreground" : "bg-success text-success-foreground"}>
+                    MIL {statusInfo.mil_on ? "allume" : "eteint"}
+                  </Badge>
+                  <span className="font-mono text-sm break-all">{statusInfo.dtc_count} DTC</span>
+                </div>
+                {statusInfo.monitors && statusInfo.monitors.length > 0 && (
+                  <div className="space-y-1">
+                    {statusInfo.monitors.map((m) => (
+                      <div key={m.name} className="flex flex-wrap items-center justify-between gap-2 rounded border border-border/50 bg-background/30 px-2.5 py-1 text-xs">
+                        <span className="break-all">{m.name}</span>
+                        <span className="text-muted-foreground">
+                          {!m.available ? "non supporte" : m.complete ? "complet" : "incomplet"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Freeze frame */}
+        <Card className="bg-card border-border">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-foreground">
+              <Snowflake className="h-5 w-5 text-primary" />
+              Freeze frame
+            </CardTitle>
+            <CardDescription>Valeur d{"'"}un PID figee au moment du defaut</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <Select value={freezePid} onValueChange={setFreezePid}>
+                <SelectTrigger className="min-w-0 flex-1 bg-input border-border">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PID_OPTIONS.map((p) => (
+                    <SelectItem key={p.value} value={p.value}>{p.value} - {p.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button onClick={handleFreezeFrame} disabled={isLoading !== null} variant="secondary">
+                {isLoading === "freeze" ? (<><Loader2 className="h-4 w-4 mr-2 animate-spin" />Lecture...</>) : "Lire"}
+              </Button>
+            </div>
+            {freezeResult && (
+              <div className="rounded-lg border border-border bg-muted/30 p-4">
+                <p className="text-xs text-muted-foreground">
+                  {freezeResult.label ?? PID_OPTIONS.find((p) => p.value === freezeResult.pid)?.label ?? freezeResult.pid}
+                </p>
+                <p className="font-mono text-xl font-bold break-all">
+                  {freezeResult.value === null ? "--" : freezeResult.value}
+                  <span className="ml-1 text-xs font-normal text-muted-foreground">
+                    {freezeResult.unit ?? PID_OPTIONS.find((p) => p.value === freezeResult.pid)?.unit}
+                  </span>
+                </p>
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -773,7 +962,7 @@ export default function OBDII() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Button
                 onClick={handleFullScan}
                 disabled={isLoading !== null}
@@ -820,6 +1009,7 @@ export default function OBDII() {
                       }
                       if (report.dtcs?.length) {
                         setDtcCodes(report.dtcs)
+                        setDtcDetails(null)
                       }
                     } else {
                       setError("Aucun rapport OBD disponible. Lancez un scan complet d'abord.")
@@ -914,26 +1104,8 @@ export default function OBDII() {
                     <Label className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">
                       Codes defaut ({scanResult.results.dtcs.length})
                     </Label>
-                    <div className="space-y-2 mt-2">
-                      {scanResult.results.dtcs.map((dtc) => {
-                        const desc = getDTCDescription(dtc)
-                        const cat = getDTCCategory(dtc)
-                        return (
-                          <div key={dtc} className="flex items-center gap-3 rounded border border-border/50 bg-background/30 p-2">
-                            <Badge className={`font-mono text-sm px-2 py-1 ${getDTCColor(dtc)}`}>
-                              {dtc}
-                            </Badge>
-                            <div className="flex-1 min-w-0">
-                              {desc ? (
-                                <p className="text-sm text-foreground truncate">{desc}</p>
-                              ) : (
-                                <p className="text-sm text-muted-foreground italic">Description non disponible</p>
-                              )}
-                              <p className="text-[10px] text-muted-foreground/60">{cat}</p>
-                            </div>
-                          </div>
-                        )
-                      })}
+                    <div className="mt-2">
+                      <DtcList codes={scanResult.results.dtcs} fallbackDescribe={getDTCDescription} />
                     </div>
                   </div>
                 )}
