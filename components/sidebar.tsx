@@ -105,8 +105,8 @@ const baseNavigation: NavSection[] = [
   {
     title: "Administration",
     items: [
-      { name: "Comptes", href: "/administration", icon: Users, area: "area_administration" },
-      { name: "Configuration Pi", href: "/configuration", icon: Cog, area: "area_configuration" },
+      { name: "Comptes", href: "/administration?tab=comptes", icon: Users, area: "area_administration" },
+      { name: "Configuration Pi", href: "/administration?tab=systeme", icon: Cog, area: "area_configuration" },
     ],
   },
 ]

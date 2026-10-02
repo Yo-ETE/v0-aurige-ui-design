@@ -1,20 +1,78 @@
 "use client"
-import { useEffect } from "react"
-import { useRouter } from "next/navigation"
+import { Suspense, useEffect, useMemo, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
+import { AppShell } from "@/components/app-shell"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useAuth } from "@/lib/auth-context"
 import { UserManagement } from "@/components/admin/user-management"
+import { SystemPanel } from "@/components/admin/system-panel"
+import { NetworkPanel } from "@/components/admin/network-panel"
+
+function AdministrationConsole() {
+  const { isAdmin, hasArea, isLoading, user } = useAuth()
+  const router = useRouter()
+  const params = useSearchParams()
+
+  const tabs = useMemo(() => {
+    const t: { id: string; label: string }[] = []
+    if (isAdmin) t.push({ id: "comptes", label: "Comptes" })
+    if (isAdmin || hasArea("area_configuration")) {
+      t.push({ id: "systeme", label: "Système" })
+      t.push({ id: "reseau", label: "Réseau" })
+    }
+    return t
+  }, [isAdmin, hasArea])
+
+  const requested = params.get("tab")
+  const [active, setActive] = useState<string>("")
+  useEffect(() => {
+    if (!tabs.length) return
+    const want = tabs.find((t) => t.id === requested)?.id ?? tabs[0].id
+    setActive(want)
+  }, [tabs, requested])
+
+  useEffect(() => {
+    if (!isLoading && (!user || tabs.length === 0)) router.replace("/")
+  }, [isLoading, user, tabs.length, router])
+
+  if (isLoading || !user || tabs.length === 0 || !active) return null
+
+  return (
+    <AppShell title="Administration">
+      <Tabs value={active} onValueChange={setActive} className="w-full">
+        <TabsList>
+          {tabs.map((t) => (
+            <TabsTrigger key={t.id} value={t.id}>
+              {t.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+        {tabs.some((t) => t.id === "comptes") && (
+          <TabsContent value="comptes" forceMount className="data-[state=inactive]:hidden">
+            <div className="mx-auto max-w-3xl pt-4">
+              <UserManagement />
+            </div>
+          </TabsContent>
+        )}
+        {tabs.some((t) => t.id === "systeme") && (
+          <TabsContent value="systeme" forceMount className="data-[state=inactive]:hidden pt-4">
+            <SystemPanel />
+          </TabsContent>
+        )}
+        {tabs.some((t) => t.id === "reseau") && (
+          <TabsContent value="reseau" forceMount className="data-[state=inactive]:hidden pt-4">
+            <NetworkPanel />
+          </TabsContent>
+        )}
+      </Tabs>
+    </AppShell>
+  )
+}
 
 export default function AdministrationPage() {
-  const { isAdmin, isLoading, user } = useAuth()
-  const router = useRouter()
-  useEffect(() => {
-    if (!isLoading && (!user || !isAdmin)) router.replace("/")
-  }, [isLoading, user, isAdmin, router])
-  if (isLoading || !isAdmin) return null
   return (
-    <div className="mx-auto max-w-3xl p-6">
-      <h1 className="mb-6 text-xl font-semibold">Administration — Comptes</h1>
-      <UserManagement />
-    </div>
+    <Suspense fallback={null}>
+      <AdministrationConsole />
+    </Suspense>
   )
 }
