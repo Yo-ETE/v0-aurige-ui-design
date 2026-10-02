@@ -3613,6 +3613,88 @@ async def read_dtc_permanent(request: OBDRequest):
     }
 
 
+def _mode_value_bytes(responses: list, service_hex: str, pid: str):
+    """Trouve la réponse single-frame <service><pid> d'un ECU et renvoie (A, B) ou None.
+
+    Mode 01 : [len][41][pid][A][B]...   Mode 02 : [len][42][pid][frame][A][B]...
+    """
+    skip = 1 if service_hex.upper() == "42" else 0  # octet "frame" du freeze frame
+    for line in responses:
+        parsed = parse_candump_line(line) if isinstance(line, str) else line
+        if not parsed or parsed["id"] not in ("7E8", "7E9", "7EA", "7EB"):
+            continue
+        data = parsed["data"]
+        bl = [data[i:i + 2] for i in range(0, len(data), 2)]
+        if len(bl) >= 4 + skip and bl[1].upper() == service_hex.upper() and bl[2].upper() == pid.upper():
+            try:
+                a = int(bl[3 + skip], 16)
+                b = int(bl[4 + skip], 16) if len(bl) > 4 + skip else 0
+            except ValueError:
+                continue
+            return a, b
+    return None
+
+
+async def _obd_body(request: Request) -> tuple:
+    """Lit interface/pid depuis le corps JSON ; valide le PID (2 hex)."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    interface = str(body.get("interface") or "can0")
+    pid = str(body.get("pid") or "0C").upper()
+    if not re.fullmatch(r"[0-9A-F]{2}", pid):
+        raise HTTPException(status_code=400, detail="PID invalide (2 caracteres hexadecimaux attendus)")
+    return interface, pid
+
+
+async def _read_pid_value(interface: str, pid: str, service_hex: str, request_frame: str) -> dict:
+    # can_send_frame refuse plus de 16 caracteres hex
+    assert len(request_frame) <= 16
+    result = await obd_send_with_flow_control(interface, "7DF", request_frame, "7E8")
+    if not result["success"]:
+        return {"status": "error", "message": result.get("error"), "pid": pid, "value": None}
+    ab = _mode_value_bytes(result["responses"], service_hex, pid)
+    dec = OBD_PID_DECODERS.get(pid)
+    if ab is None or dec is None:
+        return {"status": "no_data", "pid": pid, "label": dec[0] if dec else pid,
+                "unit": dec[1] if dec else "", "value": None, "raw": result["responses"]}
+    label, unit, fn = dec
+    return {"status": "success", "pid": pid, "label": label, "unit": unit,
+            "value": fn(ab[0], ab[1]), "raw": result["responses"]}
+
+
+@app.post("/api/obd/pid-read")
+async def obd_pid_read(request: Request):
+    """Lecture synchrone d'un PID (Mode 01), lecture seule."""
+    interface, pid = await _obd_body(request)
+    return await _read_pid_value(interface, pid, "41", f"0201{pid}0000000000"[:16])
+
+
+@app.post("/api/obd/status")
+async def obd_status(request: OBDRequest):
+    """Etat MIL + nombre de DTC (PID 01). Les moniteurs detailles ne sont pas decodes."""
+    req = "0201010000000000"
+    assert len(req) <= 16
+    result = await obd_send_with_flow_control(request.interface, "7DF", req, "7E8")
+    if not result["success"]:
+        return {"status": "error", "message": result.get("error"), "mil_on": False, "dtc_count": 0, "monitors": []}
+    ab = _mode_value_bytes(result["responses"], "41", "01")
+    if ab is None:
+        return {"status": "no_data", "mil_on": False, "dtc_count": 0, "monitors": [], "raw": result["responses"]}
+    return {"status": "success", "mil_on": bool(ab[0] & 0x80), "dtc_count": ab[0] & 0x7F,
+            "monitors": [], "raw": result["responses"]}
+
+
+@app.post("/api/obd/freeze-frame")
+async def obd_freeze_frame(request: Request):
+    """Lecture d'un PID du freeze frame (Mode 02, frame 00), lecture seule."""
+    interface, pid = await _obd_body(request)
+    return await _read_pid_value(interface, pid, "42", f"0302{pid}000000000000"[:16])
+
+
 @app.post("/api/obd/dtc/clear")
 async def clear_dtc(request: OBDRequest):
     """

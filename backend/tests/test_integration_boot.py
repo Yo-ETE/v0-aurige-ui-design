@@ -123,7 +123,7 @@ READ_ONLY_ALLOWLIST = [
     r"^/api/fuzzing/analyze-crash$", r"^/api/fuzzing/compare-logs$",
     r"^/api/sniffer/(start|stop)$",
     # OBD : payloads fixes en lecture seule
-    r"^/api/obd/(vin|dtc/(read|pending|permanent)|scan-pids|full-scan)$",
+    r"^/api/obd/(vin|dtc/(read|pending|permanent)|scan-pids|full-scan|pid-read|status|freeze-frame)$",
     # OBD : service valide dans le handler (04/11... => obd_write)
     r"^/api/obd/pid$", r"^/api/signal-finder/(read-pid|extract-obd-from-log)$",
 ]
