@@ -474,7 +474,7 @@ export default function Fuzzing() {
                       onValueChange={(v) => setCanInterface(v as CANInterface)}
                       disabled={status.running}
                     >
-                      <SelectTrigger>
+                      <SelectTrigger className="w-full">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -491,7 +491,7 @@ export default function Fuzzing() {
                       onValueChange={setDlc}
                       disabled={status.running}
                     >
-                      <SelectTrigger>
+                      <SelectTrigger className="w-full">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
