@@ -1958,3 +1958,80 @@ export async function stopInject(): Promise<{ status: string }> {
 export async function getInjectStatus(): Promise<InjectStatus> {
   return fetchApi("/inject/status")
 }
+
+// =============================================================================
+// AUD-06 : liste de blocage d'IDs + bibliotheque de trames connues
+// =============================================================================
+
+export interface KnownFrame {
+  id: string
+  can_id: string
+  crash_data: string
+  reset_data?: string
+  label: string
+  severity: "info" | "warning" | "danger"
+  notes?: string
+  created_at: string
+}
+
+export interface AUD06Blocklist {
+  ids: string[]
+}
+
+export interface KnownFrameInput {
+  can_id: string
+  crash_data: string
+  reset_data?: string
+  label: string
+  severity?: string
+  notes?: string
+}
+
+export async function getBlocklist(): Promise<AUD06Blocklist> {
+  return fetchApi<AUD06Blocklist>("/aud06/blocklist")
+}
+
+export async function setBlocklist(ids: string[]): Promise<AUD06Blocklist> {
+  return fetchApi<AUD06Blocklist>("/aud06/blocklist", {
+    method: "PUT",
+    body: JSON.stringify({ ids }),
+  })
+}
+
+export async function listKnownFrames(): Promise<{ frames: KnownFrame[] }> {
+  return fetchApi<{ frames: KnownFrame[] }>("/known-frames")
+}
+
+export async function createKnownFrame(p: KnownFrameInput): Promise<KnownFrame> {
+  return fetchApi<KnownFrame>("/known-frames", {
+    method: "POST",
+    body: JSON.stringify(p),
+  })
+}
+
+export async function updateKnownFrame(fid: string, p: Partial<KnownFrameInput>): Promise<KnownFrame> {
+  return fetchApi<KnownFrame>(`/known-frames/${fid}`, {
+    method: "PATCH",
+    body: JSON.stringify(p),
+  })
+}
+
+export async function deleteKnownFrame(fid: string): Promise<{ status: string }> {
+  return fetchApi<{ status: string }>(`/known-frames/${fid}`, { method: "DELETE" })
+}
+
+// Rejeu one-shot ou en boucle d'une trame crash/reinit (garde AUD-06 cote backend)
+export async function replayKnownFrame(
+  fid: string,
+  opts: { interface: CANInterface; kind: "crash" | "reset"; loop?: boolean; intervalMs?: number }
+): Promise<{ status: string }> {
+  return fetchApi<{ status: string }>(`/known-frames/${fid}/replay`, {
+    method: "POST",
+    body: JSON.stringify({
+      interface: opts.interface,
+      kind: opts.kind,
+      loop: opts.loop,
+      intervalMs: opts.intervalMs,
+    }),
+  })
+}
