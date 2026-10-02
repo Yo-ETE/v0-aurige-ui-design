@@ -232,7 +232,6 @@ export function FloatingTerminal() {
   // Drag state
   const [position, setPosition] = useState<{ x: number; y: number } | null>(null)
   const [size, setSize] = useState<{ w: number; h: number }>({ w: 600, h: 384 })
-  const [isMounted, setIsMounted] = useState(false)
   const dragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null)
   const resizeRef = useRef<{ startX: number; startY: number; origW: number; origH: number } | null>(null)
 
@@ -242,7 +241,6 @@ export function FloatingTerminal() {
       if (window.innerWidth < 640) {
         setSize({ w: Math.max(280, window.innerWidth - 16), h: 320 })
       }
-      setIsMounted(true)
     }
   }, [])
 

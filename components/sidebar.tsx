@@ -110,7 +110,7 @@ const baseNavigation: NavSection[] = [
         name: "Administration",
         href: "/administration",
         icon: Users,
-        anyArea: ["area_administration", "area_configuration"],
+        anyArea: ["area_configuration"],
       },
     ],
   },
