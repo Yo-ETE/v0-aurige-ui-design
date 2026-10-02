@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback, useRef, useMemo } from "react"
+import { useRouter } from "next/navigation"
 import { AppShell } from "@/components/app-shell"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -13,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   Search, Play, Square, Loader2, AlertCircle, CheckCircle2, Activity,
   Trash2, Plus, Upload, Copy, Save, Radio, FileSearch, Database, Info, Crosshair, Zap,
+  Download, ArrowUpDown, ArrowDown, ArrowUp, ExternalLink,
 } from "lucide-react"
 import {
   correlateOBDWithCAN,
@@ -271,21 +273,55 @@ function OBDSamplesEditor({
 // Candidates Table
 // =============================================================================
 
+type CandidateSortKey = "confidence" | "pearson" | "spearman"
+type CandidateSort = { key: CandidateSortKey; dir: "asc" | "desc" } | null
+
+function SortHeader({
+  label, sortKey, sort, onSort, className,
+}: {
+  label: string
+  sortKey: CandidateSortKey
+  sort: CandidateSort
+  onSort: (k: CandidateSortKey) => void
+  className?: string
+}) {
+  const active = sort?.key === sortKey
+  const Icon = !active ? ArrowUpDown : sort?.dir === "asc" ? ArrowUp : ArrowDown
+  return (
+    <th className={cn("py-2 px-2 font-medium", className)}>
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        className={cn("inline-flex items-center gap-1 hover:text-foreground", active && "text-foreground")}
+      >
+        {label}
+        <Icon className="h-3 w-3" />
+      </button>
+    </th>
+  )
+}
+
 function CandidatesTable({
   candidates,
   selected,
   onSelect,
+  sort,
+  onSort,
+  emptyLabel,
 }: {
   candidates: CorrelationCandidate[]
   selected: CorrelationCandidate | null
   onSelect: (c: CorrelationCandidate) => void
+  sort: CandidateSort
+  onSort: (k: CandidateSortKey) => void
+  emptyLabel?: string
 }) {
   if (candidates.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
         <Search className="h-10 w-10 mb-3 opacity-40" />
-        <p className="text-sm">Aucun candidat trouve</p>
-        <p className="text-xs mt-1">Lancez une correlation pour voir les resultats</p>
+        <p className="text-sm">{emptyLabel ?? "Aucun candidat trouve"}</p>
+        {!emptyLabel && <p className="text-xs mt-1">Lancez une correlation pour voir les resultats</p>}
       </div>
     )
   }
@@ -299,9 +335,9 @@ function CandidatesTable({
               <th className="py-2 px-2 text-left font-medium">#</th>
               <th className="py-2 px-2 text-left font-medium">ID CAN</th>
               <th className="py-2 px-2 text-left font-medium">Modele</th>
-              <th className="py-2 px-2 text-right font-medium">Pearson</th>
-              <th className="py-2 px-2 text-right font-medium">Spearman</th>
-              <th className="py-2 px-2 text-center font-medium">Confiance</th>
+              <SortHeader label="Pearson" sortKey="pearson" sort={sort} onSort={onSort} className="text-right" />
+              <SortHeader label="Spearman" sortKey="spearman" sort={sort} onSort={onSort} className="text-right" />
+              <SortHeader label="Confiance" sortKey="confidence" sort={sort} onSort={onSort} className="text-center" />
               <th className="py-2 px-2 text-right font-medium">N</th>
             </tr>
           </thead>
@@ -349,6 +385,7 @@ function SignalDetail({
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [copied, setCopied] = useState(false)
+  const router = useRouter()
 
   const formula = candidate.scale !== 0
     ? `Y = ${candidate.scale} * CAN[${candidate.byte_index}${candidate.byte_end !== candidate.byte_index ? `:${candidate.byte_end}` : ""}] + ${candidate.offset}`
@@ -430,7 +467,7 @@ function SignalDetail({
           <CorrelationChart candidate={candidate} />
         </div>
         {/* Actions */}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button size="sm" variant="outline" onClick={copyFormula}>
             {copied ? <CheckCircle2 className="mr-1 h-3 w-3 text-success" /> : <Copy className="mr-1 h-3 w-3" />}
             {copied ? "Copie" : "Copier formule"}
@@ -447,6 +484,14 @@ function SignalDetail({
               {saved ? "Sauvegarde" : "Sauvegarder dans DBC"}
             </Button>
           )}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => router.push(`/analyse-can?focusId=${encodeURIComponent(candidate.can_id)}`)}
+          >
+            <ExternalLink className="mr-1 h-3 w-3" />
+            Inspecter dans Analyse CAN
+          </Button>
         </div>
       </CardContent>
     </Card>
@@ -503,12 +548,64 @@ export default function SignalFinderPage() {
   const [liveValue, setLiveValue] = useState<number | null>(null)
   const [liveSampleCount, setLiveSampleCount] = useState(0)
   const [liveCanIds, setLiveCanIds] = useState(0)
+  const [liveHistory, setLiveHistory] = useState<{ t: number; value: number }[]>([])
   const wsRef = useRef<WebSocket | null>(null)
 
   // Results (shared)
   const [candidates, setCandidates] = useState<CorrelationCandidate[]>([])
   const [selectedCandidate, setSelectedCandidate] = useState<CorrelationCandidate | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  // Candidates table: search + sort
+  const [candSearch, setCandSearch] = useState("")
+  const [candSort, setCandSort] = useState<CandidateSort>(null)
+
+  const visibleCandidates = useMemo(() => {
+    const q = candSearch.trim().toLowerCase()
+    let list = q ? candidates.filter((c) => c.can_id.toLowerCase().includes(q)) : candidates
+    if (candSort) {
+      const val = (c: CorrelationCandidate) =>
+        candSort.key === "confidence" ? c.confidence : Math.abs(c[candSort.key])
+      const dir = candSort.dir === "asc" ? 1 : -1
+      list = [...list].sort((a, b) => (val(a) - val(b)) * dir)
+    }
+    return list
+  }, [candidates, candSearch, candSort])
+
+  const toggleCandSort = useCallback((key: CandidateSortKey) => {
+    setCandSort((prev) => {
+      if (!prev || prev.key !== key) return { key, dir: "desc" }
+      if (prev.dir === "desc") return { key, dir: "asc" }
+      return null
+    })
+  }, [])
+
+  // Export candidates (CSV / JSON), client-side download
+  const downloadFile = (filename: string, text: string, mime: string) => {
+    const blob = new Blob([text], { type: mime })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+  const csvCell = (v: unknown) => {
+    const s = String(v ?? "")
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+  }
+  const exportCandidatesCsv = () => {
+    if (candidates.length === 0) return
+    const header = ["can_id", "byte_index", "byte_end", "model", "pearson", "spearman", "scale", "offset", "confidence", "n_samples"]
+    const rows = candidates.map((c) => [
+      c.can_id, c.byte_index, c.byte_end, c.model, c.pearson, c.spearman, c.scale, c.offset, c.confidence, c.n_samples,
+    ].map(csvCell).join(","))
+    downloadFile(`candidats_signal_${selectedPid}.csv`, [header.join(","), ...rows].join("\n"), "text/csv")
+  }
+  const exportCandidatesJson = () => {
+    if (candidates.length === 0) return
+    downloadFile(`candidats_signal_${selectedPid}.json`, JSON.stringify(candidates, null, 2), "application/json")
+  }
 
   const pidInfo = PID_OPTIONS.find((p) => p.value === selectedPid)
 
@@ -616,6 +713,7 @@ export default function SignalFinderPage() {
     setCandidates([])
     setSelectedCandidate(null)
     setLiveValue(null)
+    setLiveHistory([])
     setLiveSampleCount(0)
     setLiveCanIds(0)
     setLiveRunning(true)
@@ -640,6 +738,10 @@ export default function SignalFinderPage() {
         const data = JSON.parse(event.data)
         if (data.type === "obd_sample") {
           setLiveValue(data.value)
+          if (typeof data.value === "number") {
+            const point = { t: Date.now(), value: data.value as number }
+            setLiveHistory((h) => [...h, point].slice(-120))
+          }
           setLiveSampleCount(data.sampleCount || 0)
         } else if (data.type === "correlation_update") {
           setCandidates(data.candidates || [])
@@ -674,6 +776,7 @@ export default function SignalFinderPage() {
       wsRef.current.send(JSON.stringify({ action: "stop" }))
     }
     setLiveRunning(false)
+    setLiveHistory([])
   }, [])
 
   // Cleanup WebSocket on unmount
@@ -926,6 +1029,35 @@ export default function SignalFinderPage() {
                       sampleCount={liveSampleCount}
                     />
 
+                    {liveHistory.length > 1 && (
+                      <div className="rounded-md border border-border bg-card p-2">
+                        <ResponsiveContainer width="100%" height={80}>
+                          <LineChart data={liveHistory} margin={{ top: 4, right: 4, left: 4, bottom: 4 }}>
+                            <YAxis hide domain={["auto", "auto"]} />
+                            <RechartsTooltip
+                              contentStyle={{
+                                backgroundColor: "oklch(0.18 0.01 260)",
+                                border: "1px solid oklch(0.28 0.02 260)",
+                                borderRadius: 6,
+                                color: "oklch(0.95 0.01 260)",
+                                fontSize: 12,
+                              }}
+                              formatter={(value: number) => [`${value.toFixed(1)} ${pidInfo?.unit || ""}`, "Valeur OBD"]}
+                              labelFormatter={() => ""}
+                            />
+                            <Line
+                              type="monotone"
+                              dataKey="value"
+                              stroke="oklch(0.65 0.18 250)"
+                              strokeWidth={2}
+                              dot={false}
+                              isAnimationActive={false}
+                            />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    )}
+
                     {liveRunning && (
                       <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
                         <Badge variant="secondary" className="gap-1">
@@ -978,11 +1110,36 @@ export default function SignalFinderPage() {
                     Cliquez sur un candidat pour voir le detail et le graphique de correlation
                   </CardDescription>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="flex flex-col gap-3">
+                  {candidates.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="relative min-w-[140px] flex-1">
+                        <Search className="absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                          value={candSearch}
+                          onChange={(e) => setCandSearch(e.target.value)}
+                          placeholder="Filtrer par ID CAN..."
+                          className="h-8 pl-7 text-xs font-mono"
+                        />
+                      </div>
+                      <Badge variant="secondary" className="text-xs font-mono">
+                        {visibleCandidates.length} / {candidates.length}
+                      </Badge>
+                      <Button size="sm" variant="outline" className="h-8 gap-1 bg-transparent" onClick={exportCandidatesCsv}>
+                        <Download className="h-3 w-3" /> CSV
+                      </Button>
+                      <Button size="sm" variant="outline" className="h-8 gap-1 bg-transparent" onClick={exportCandidatesJson}>
+                        <Download className="h-3 w-3" /> JSON
+                      </Button>
+                    </div>
+                  )}
                   <CandidatesTable
-                    candidates={candidates}
+                    candidates={visibleCandidates}
                     selected={selectedCandidate}
                     onSelect={setSelectedCandidate}
+                    sort={candSort}
+                    onSort={toggleCandSort}
+                    emptyLabel={candidates.length > 0 ? "Aucun candidat ne correspond au filtre" : undefined}
                   />
                 </CardContent>
               </Card>

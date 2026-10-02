@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, useMemo } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef, Suspense } from "react"
 import { AppShell } from "@/components/app-shell"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -20,7 +20,7 @@ import {
   Zap, ChevronDown, ChevronRight, Info, GitBranch, ArrowRight,
   FlaskConical, AlertTriangle, Check, X, Send, ArrowUp, ArrowDown,
 } from "lucide-react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { useExportStore } from "@/lib/export-store"
 import {
   getByteHeatmap,
@@ -287,7 +287,17 @@ function SignalByteMap({ signal, excludedBytes }: { signal: DetectedSignal; excl
 // =============================================================================
 
 export default function AnalyseCANPage() {
+  // useSearchParams() exige une frontiere Suspense en app-router (prerendu statique)
+  return (
+    <Suspense fallback={null}>
+      <AnalyseCANPageInner />
+    </Suspense>
+  )
+}
+
+function AnalyseCANPageInner() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { addFrames } = useExportStore()
   // Mission & log selection
   const { missions, currentMissionId, fetchMissions } = useMissionStore()
@@ -620,6 +630,24 @@ export default function AnalyseCANPage() {
       runAutoDetect()
     }
   }, [detectResult, detectLoading, selectedLogId, runAutoDetect])
+
+  // Deep-link depuis Signal Finder : /analyse-can?focusId=<can_id>
+  // Applique l'onglet + filtre une seule fois ; lance la detection des que le log est selectionne.
+  const focusAppliedRef = useRef(false)
+  const focusDetectRef = useRef(false)
+  useEffect(() => {
+    const focusId = searchParams.get("focusId")
+    if (!focusId) return
+    if (!focusAppliedRef.current) {
+      focusAppliedRef.current = true
+      setSignalSearch(focusId)
+      setTab("autodetect")
+    }
+    if (!focusDetectRef.current && !detectResult && !detectLoading && selectedLogId) {
+      focusDetectRef.current = true
+      runAutoDetect()
+    }
+  }, [searchParams, selectedLogId, detectResult, detectLoading, runAutoDetect])
 
   // Save selected signals to DBC
   const saveSignalsToDBC = useCallback(async () => {
