@@ -498,16 +498,16 @@ export default function ComparaisonPage() {
     return (
       <Card className="border-border bg-card">
         <CardHeader className="pb-4">
-          <div className="flex items-center justify-between">
-            <div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
               <CardTitle className="flex items-center gap-2 text-lg">
                 {currentComparisonName || "Resultats de la comparaison"}
               </CardTitle>
-              <CardDescription>
+              <CardDescription className="break-all">
                 {comparisonResult.log_a_name} vs {comparisonResult.log_b_name}
               </CardDescription>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex shrink-0 items-center gap-2">
               {!currentComparisonId && (
                 <Button
                   size="sm"
@@ -573,10 +573,10 @@ export default function ComparaisonPage() {
                 <option value="vcan0">vcan0 (test)</option>
               </select>
             </div>
-            <div className="h-4 w-px bg-border" />
+            <div className="hidden h-4 w-px bg-border sm:block" />
             <ArrowUpDown className="h-4 w-4 text-muted-foreground" />
             <span className="text-muted-foreground">Trier par:</span>
-            <div className="flex gap-1">
+            <div className="flex flex-wrap gap-1">
               <Button
                 size="sm"
                 variant={sortMode === "stability" ? "default" : "outline"}
@@ -614,7 +614,7 @@ export default function ComparaisonPage() {
                 Commande probable
               </Button>
             </div>
-            <div className="h-4 w-px bg-border" />
+            <div className="hidden h-4 w-px bg-border sm:block" />
             <div className="flex items-center gap-2">
               <Button
                 size="sm"
@@ -908,9 +908,9 @@ export default function ComparaisonPage() {
         {/* ============== LIST VIEW ============== */}
         {viewMode === "list" && (
           <>
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <h2 className="text-lg font-semibold">Comparaisons</h2>
-              <Button onClick={handleStartNew} className="gap-2">
+              <Button onClick={handleStartNew} className="w-full gap-2 sm:w-auto">
                 <Plus className="h-4 w-4" />
                 Nouvelle comparaison
               </Button>
