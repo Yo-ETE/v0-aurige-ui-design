@@ -29,3 +29,19 @@ def test_dtc_description_known_and_fallback():
     assert main.dtc_description("P0100")  # known generic
     fb = main.dtc_description("P2FFF")
     assert isinstance(fb, str) and fb  # non-empty fallback, no crash
+
+
+def test_dtc_single_frame_ignores_nonzero_padding():
+    r = main.decode_dtcs_from_frames(["(0) can0 7E8#0443010355555555"])
+    assert [d["code"] for d in r] == ["P0103"]
+
+
+def test_dtc_low_byte_formatting():
+    r = main.decode_dtcs_from_frames(["(0) can0 7E8#044301AB00000000"])
+    assert r[0]["code"] == "P01AB"
+
+
+def test_dtc_multiframe_first_frame():
+    # 10 05 43 | 0103 0204 | pad
+    r = main.decode_dtcs_from_frames(["(0) can0 7E8#1005430103020400"])
+    assert [d["code"] for d in r] == ["P0103", "P0204"]

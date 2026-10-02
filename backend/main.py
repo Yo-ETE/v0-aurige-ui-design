@@ -3492,7 +3492,7 @@ def decode_dtcs_from_frames(responses: list, response_service: int = 0x43) -> li
             continue
         first = int(bl[0], 16)
         if first <= 7 and bl[1].upper() == svc:
-            dtc_data = bl[2:]
+            dtc_data = bl[2:1 + first]  # borne PCI : ignore le padding
         elif first == 0x10 and len(bl) > 2 and bl[2].upper() == svc:
             dtc_data = bl[3:]
         else:
