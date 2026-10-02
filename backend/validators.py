@@ -11,4 +11,4 @@ def valid_git_ref(ref) -> bool:
         return False
     if ".." in ref or "//" in ref:
         return False
-    return bool(_GIT_REF.match(ref))
+    return bool(_GIT_REF.fullmatch(ref))

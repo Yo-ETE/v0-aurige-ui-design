@@ -53,7 +53,8 @@ def no_side_effects(monkeypatch):
 def test_update_rejects_bad_branch(client, no_side_effects):
     c, main = client
     spawned, writes = no_side_effects
-    for bad in ["-rm", "a;b", "a b", "x" * 201, "a..b"]:
+    for bad in ["-rm", "a;b", "a b", "x" * 201, "a..b", "main
+", 123]:
         r = c.post("/api/system/update", json={"branch": bad})
         assert r.status_code == 400, bad
     # rien n'a ete planifie ni ecrit
@@ -67,6 +68,12 @@ def test_update_accepts_good_branch(client, no_side_effects):
     c, main = client
     r = c.post("/api/system/update", json={"branch": "main"})
     assert r.status_code != 400
+    assert r.status_code == 200
+
+
+def test_update_empty_branch_uses_default_path(client, no_side_effects):
+    c, main = client
+    r = c.post("/api/system/update", json={"branch": ""})
     assert r.status_code == 200
 
 

@@ -5022,9 +5022,9 @@ async def start_update(request: Request):
         _guard_body = await request.json()
     except Exception:
         _guard_body = None
-    if isinstance(_guard_body, dict) and _guard_body.get("branch") is not None:
-        if not valid_git_ref(str(_guard_body["branch"])):
-            raise HTTPException(status_code=400, detail="Branche invalide")
+    _branch = _guard_body.get("branch") if isinstance(_guard_body, dict) else None
+    if _branch and not valid_git_ref(_branch):
+        raise HTTPException(status_code=400, detail="Branche invalide")
     if update_output_store["running"]:
         return {"status": "error", "message": "Une mise à jour est déjà en cours"}
     
