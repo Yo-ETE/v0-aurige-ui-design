@@ -246,19 +246,28 @@ export function FloatingTerminal() {
     }
   }, [])
 
-  // Adjust expanded left position on mobile
-  useEffect(() => {
-    if (isMounted && isExpanded && typeof window !== "undefined") {
-      const sniffer = document.querySelector('[data-sniffer-window]') as HTMLElement
-      if (sniffer) {
-        if (window.innerWidth < 1024) {
-          sniffer.style.left = "8px"
-        } else {
-          sniffer.style.left = "288px"
-        }
+  // Keep the dragged position inside the viewport (also on resize/rotate).
+  const clampPosition = useCallback(
+    (p: { x: number; y: number }, w: number, h: number) => {
+      const vw = window.innerWidth
+      const vh = window.innerHeight
+      const effW = Math.min(w, vw - 16)
+      const effH = Math.min(h, vh - 16)
+      return {
+        x: Math.max(8, Math.min(p.x, vw - effW - 8)),
+        y: Math.max(8, Math.min(p.y, vh - Math.min(effH, 48) - 8)),
       }
+    },
+    []
+  )
+
+  useEffect(() => {
+    const onResize = () => {
+      setPosition((p) => (p ? clampPosition(p, size.w, size.h) : p))
     }
-  }, [isExpanded, isMounted])
+    window.addEventListener("resize", onResize)
+    return () => window.removeEventListener("resize", onResize)
+  }, [size.w, size.h, clampPosition])
 
   const handleDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -271,7 +280,7 @@ export function FloatingTerminal() {
       if (!dragRef.current) return
       const dx = ev.clientX - dragRef.current.startX
       const dy = ev.clientY - dragRef.current.startY
-      setPosition({ x: dragRef.current.origX + dx, y: dragRef.current.origY + dy })
+      setPosition(clampPosition({ x: dragRef.current.origX + dx, y: dragRef.current.origY + dy }, size.w, size.h))
     }
     const handleUp = () => {
       dragRef.current = null
@@ -280,7 +289,7 @@ export function FloatingTerminal() {
     }
     window.addEventListener("mousemove", handleMove)
     window.addEventListener("mouseup", handleUp)
-  }, [position])
+  }, [position, size.w, size.h, clampPosition])
 
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -368,14 +377,14 @@ export function FloatingTerminal() {
       suppressHydrationWarning
       className={cn(
         "fixed z-50 flex flex-col rounded-lg border border-border bg-terminal shadow-2xl",
-        isExpanded && "transition-all"
+        isExpanded && "transition-all left-2 lg:left-72"
       )}
       style={
         isExpanded
-          ? { bottom: "8px", right: "8px", left: "288px", top: "60px" }
+          ? { bottom: "8px", right: "8px", top: "60px" }
           : position
-            ? { left: `${position.x}px`, top: `${position.y}px`, width: `${size.w}px`, height: `${size.h}px` }
-            : { bottom: "8px", right: "8px", width: `${size.w}px`, height: `${size.h}px` }
+            ? { left: `${position.x}px`, top: `${position.y}px`, width: `min(${size.w}px, calc(100vw - 16px))`, height: `min(${size.h}px, calc(100vh - 16px))` }
+            : { bottom: "8px", right: "8px", width: `min(${size.w}px, calc(100vw - 16px))`, height: `min(${size.h}px, calc(100vh - 16px))` }
       }
     >
       {/* Header - draggable */}
