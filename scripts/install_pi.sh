@@ -467,23 +467,31 @@ copy_project_files() {
 # Install frontend dependencies and build
 setup_frontend() {
     log_info "Setting up frontend..."
-    
-    cd "$AURIGE_DIR/frontend"
-    
+
+    # Le service aurige-web tourne depuis /opt/aurige/repo (WorkingDirectory),
+    # donc on build DIRECTEMENT dans le repo, pas dans la copie frontend/.
+    cd "$AURIGE_DIR/repo"
+
     # Create .env file (empty API_URL = same origin via nginx proxy)
     cat > .env.local << EOF
 # AURIGE Configuration
 # Leave empty for same-origin (nginx proxies /api/* and /ws/* to backend)
 NEXT_PUBLIC_API_URL=
 EOF
-    
+
     log_info "Installing npm dependencies (this may take a few minutes)..."
     npm install --legacy-peer-deps
-    
+
     log_info "Building Next.js application..."
     npm run build
-    
-    log_success "Frontend built successfully"
+
+    # Vérifier que le build a réellement produit .next/BUILD_ID : sans lui,
+    # un redémarrage de aurige-web servirait une page blanche.
+    if [ ! -f "$AURIGE_DIR/repo/.next/BUILD_ID" ]; then
+        log_error "Build frontend échoué : .next/BUILD_ID manquant"
+    fi
+
+    log_success "Frontend built successfully (repo/.next)"
 }
 
 # Setup Python virtual environment and install backend

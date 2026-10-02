@@ -5064,39 +5064,52 @@ async def start_update(request: Request):
         try:
             # Note: We do NOT stop services here - install_pi.sh handles that
             # Stopping here would cause 502 errors for the frontend
-            
-            # Step 1: Remove old /tmp/aurige if exists
-            update_output_store["lines"].append(">>> Nettoyage du dossier temporaire...")
-            rm_proc = await asyncio.create_subprocess_exec(
-                "sudo", "rm", "-rf", GIT_REPO_PATH,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-            )
-            await rm_proc.wait()
-            update_output_store["lines"].append("[OK] Dossier nettoye")
-            
-            # Step 2: Fresh clone from GitHub
-            update_output_store["lines"].append(f">>> Clonage depuis GitHub...")
-            clone_proc = await asyncio.create_subprocess_exec(
-                "sudo", "git", "clone", GITHUB_REPO, GIT_REPO_PATH,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-            )
-            while True:
-                line = await clone_proc.stdout.readline()
-                if not line:
-                    break
-                text = line.decode().strip()
-                if text:
-                    update_output_store["lines"].append(text)
-            await clone_proc.wait()
-            
-            if clone_proc.returncode != 0:
-                update_output_store["lines"].append(f"[ERROR] Erreur de clonage (code: {clone_proc.returncode})")
-                update_output_store["running"] = False
-                return
-            
-            update_output_store["lines"].append("[OK] Depot clone")
+
+            # Step 1+2: Mise a jour EN PLACE du depot.
+            # IMPORTANT: aurige-web tourne depuis /opt/aurige/repo. Un `rm -rf`
+            # du dossier casserait le frontend servi pendant toute la MAJ (et
+            # definitivement si le build echoue). On fait donc `git fetch` en
+            # place quand le depot existe, et on ne clone QUE s'il est absent.
+            if os.path.isdir(os.path.join(GIT_REPO_PATH, ".git")):
+                update_output_store["lines"].append(">>> Depot existant : git fetch origin...")
+                fetch_proc = await asyncio.create_subprocess_exec(
+                    "sudo", "git", "-C", GIT_REPO_PATH, "fetch", "origin",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
+                )
+                while True:
+                    line = await fetch_proc.stdout.readline()
+                    if not line:
+                        break
+                    text = line.decode().strip()
+                    if text:
+                        update_output_store["lines"].append(text)
+                await fetch_proc.wait()
+                if fetch_proc.returncode != 0:
+                    update_output_store["lines"].append(f"[ERROR] git fetch a echoue (code: {fetch_proc.returncode})")
+                    update_output_store["running"] = False
+                    return
+                update_output_store["lines"].append("[OK] Fetch termine")
+            else:
+                update_output_store["lines"].append(">>> Depot absent : clonage depuis GitHub...")
+                clone_proc = await asyncio.create_subprocess_exec(
+                    "sudo", "git", "clone", GITHUB_REPO, GIT_REPO_PATH,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
+                )
+                while True:
+                    line = await clone_proc.stdout.readline()
+                    if not line:
+                        break
+                    text = line.decode().strip()
+                    if text:
+                        update_output_store["lines"].append(text)
+                await clone_proc.wait()
+                if clone_proc.returncode != 0:
+                    update_output_store["lines"].append(f"[ERROR] Erreur de clonage (code: {clone_proc.returncode})")
+                    update_output_store["running"] = False
+                    return
+                update_output_store["lines"].append("[OK] Depot clone")
             
             # Step 3: Checkout the target branch
             # After a fresh clone, remote branches are origin/<name>
@@ -5168,44 +5181,56 @@ async def start_update(request: Request):
             
             if process.returncode != 0:
                 update_output_store["lines"].append(f"[ERROR] Erreur install_pi.sh (code: {process.returncode})")
+
+            # GARDE-FOU anti-page-blanche : ne redemarrer aurige-web QUE si le
+            # build frontend a reellement produit .next/BUILD_ID. Sinon on garde
+            # l'ancienne version en ligne (pas de page blanche).
+            build_id_path = os.path.join(GIT_REPO_PATH, ".next", "BUILD_ID")
+            if not os.path.isfile(build_id_path):
+                update_output_store["lines"].append(
+                    "[ERROR] Build frontend absent (.next/BUILD_ID manquant). "
+                    "Redemarrage ANNULE pour eviter une page blanche : l'ancienne version reste en ligne."
+                )
+                return
+
+            update_output_store["lines"].append("[OK] Build frontend verifie (.next/BUILD_ID present)")
+            update_output_store["lines"].append("[OK] Mise a jour terminee!")
+            update_output_store["lines"].append(">>> Redemarrage automatique des services dans 3 secondes...")
+
+            # Use systemd-run to create a completely independent transient service
+            # This survives when aurige-api is killed
+            import subprocess
+
+            # Create restart script
+            restart_script = "/tmp/aurige_restart_services.sh"
+            with open(restart_script, "w") as f:
+                f.write("#!/bin/bash\n")
+                f.write("sleep 3\n")
+                f.write("systemctl restart aurige-web.service\n")
+                f.write("sleep 2\n")
+                f.write("systemctl restart aurige-api.service\n")
+            os.chmod(restart_script, 0o755)
+
+            # Use systemd-run to execute the script as a transient service
+            result = subprocess.run(
+                ["systemd-run", "--no-block", "--collect", "--unit=aurige-restart-temp", "/bin/bash", restart_script],
+                capture_output=True,
+                text=True
+            )
+
+            if result.returncode == 0:
+                update_output_store["lines"].append("[OK] Services vont redemarrer automatiquement. Rechargez la page dans 5-10 secondes.")
             else:
-                update_output_store["lines"].append("[OK] Mise a jour terminee!")
-                update_output_store["lines"].append(">>> Redemarrage automatique des services dans 3 secondes...")
-                
-                # Use systemd-run to create a completely independent transient service
-                # This survives when aurige-api is killed
-                import subprocess
-                
-                # Create restart script
-                restart_script = "/tmp/aurige_restart_services.sh"
-                with open(restart_script, "w") as f:
-                    f.write("#!/bin/bash\n")
-                    f.write("sleep 3\n")
-                    f.write("systemctl restart aurige-web.service\n")
-                    f.write("sleep 2\n")
-                    f.write("systemctl restart aurige-api.service\n")
-                os.chmod(restart_script, 0o755)
-                
-                # Use systemd-run to execute the script as a transient service
-                result = subprocess.run(
-                    ["systemd-run", "--no-block", "--unit=aurige-restart-temp", "/bin/bash", restart_script],
+                # Fallback: try with at command
+                at_result = subprocess.run(
+                    ["bash", "-c", f"echo '{restart_script}' | at now + 1 minute 2>/dev/null || echo 'at failed'"],
                     capture_output=True,
                     text=True
                 )
-                
-                if result.returncode == 0:
-                    update_output_store["lines"].append("[OK] Services vont redemarrer automatiquement. Rechargez la page dans 5-10 secondes.")
+                if "at failed" not in at_result.stdout:
+                    update_output_store["lines"].append("[OK] Services vont redemarrer dans 1 minute. Rechargez la page.")
                 else:
-                    # Fallback: try with at command
-                    at_result = subprocess.run(
-                        ["bash", "-c", f"echo '{restart_script}' | at now + 1 minute 2>/dev/null || echo 'at failed'"],
-                        capture_output=True,
-                        text=True
-                    )
-                    if "at failed" not in at_result.stdout:
-                        update_output_store["lines"].append("[OK] Services vont redemarrer dans 1 minute. Rechargez la page.")
-                    else:
-                        update_output_store["lines"].append("[WARNING] Redemarrage auto echoue. Utilisez le bouton 'Redemarrer services'.")
+                    update_output_store["lines"].append("[WARNING] Redemarrage auto echoue. Utilisez le bouton 'Redemarrer services'.")
             
         except Exception as e:
             update_output_store["lines"].append(f"[ERROR] {str(e)}")
