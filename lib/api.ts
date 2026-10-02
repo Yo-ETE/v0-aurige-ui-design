@@ -814,6 +814,7 @@ export interface OBDResponse {
   message: string
   data?: string
   warning?: string
+  dtc_details?: OBDDtc[]
 }
 
 export async function requestVIN(iface: CANInterface = "can0"): Promise<OBDResponse> {
@@ -846,6 +847,28 @@ export async function resetECU(iface: CANInterface = "can0"): Promise<OBDRespons
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ interface: iface }),
   })
+}
+
+// --- Valise OBD : DTC en attente/permanents, valeur PID, statut, freeze frame ---
+
+export interface OBDDtc { code: string; description: string; category: string }
+export interface OBDPidValue { status: string; pid: string; label?: string; value: number | null; unit?: string }
+export interface OBDStatusInfo { status: string; mil_on: boolean; dtc_count: number; monitors: { name: string; available: boolean; complete: boolean }[] }
+
+export async function readDTCsPending(iface: CANInterface): Promise<{ status: string; message: string; dtcs: string[]; dtc_details: OBDDtc[] }> {
+  return fetchApi("/obd/dtc/pending", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ interface: iface }) })
+}
+export async function readDTCsPermanent(iface: CANInterface): Promise<{ status: string; message: string; dtcs: string[]; dtc_details: OBDDtc[] }> {
+  return fetchApi("/obd/dtc/permanent", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ interface: iface }) })
+}
+export async function readOBDPidValue(iface: CANInterface, pid: string): Promise<OBDPidValue> {
+  return fetchApi("/obd/pid-read", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ interface: iface, pid }) })
+}
+export async function getOBDStatus(iface: CANInterface): Promise<OBDStatusInfo> {
+  return fetchApi("/obd/status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ interface: iface }) })
+}
+export async function getFreezeFrame(iface: CANInterface, pid: string): Promise<OBDPidValue> {
+  return fetchApi("/obd/freeze-frame", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ interface: iface, pid }) })
 }
 
 export interface PIDScanResponse {
