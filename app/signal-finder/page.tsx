@@ -756,7 +756,7 @@ export default function SignalFinderPage() {
                   <div className="flex flex-col gap-1.5">
                     <Label className="text-xs text-muted-foreground">Interface CAN</Label>
                     <Select value={iface} onValueChange={(v) => setIface(v as CANInterface)} disabled={liveRunning || correlating}>
-                      <SelectTrigger className="h-8 text-xs">
+                      <SelectTrigger className="h-8 text-xs w-full min-w-0">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -771,7 +771,7 @@ export default function SignalFinderPage() {
                   <div className="flex flex-col gap-1.5">
                     <Label className="text-xs text-muted-foreground">PID OBD-II cible</Label>
                     <Select value={selectedPid} onValueChange={setSelectedPid} disabled={liveRunning || correlating}>
-                      <SelectTrigger className="h-8 text-xs">
+                      <SelectTrigger className="h-8 text-xs w-full min-w-0">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -826,7 +826,7 @@ export default function SignalFinderPage() {
                         value={selectedMissionId || "none"}
                         onValueChange={(v) => setSelectedMissionId(v === "none" ? null : v)}
                       >
-                        <SelectTrigger className="h-8 text-xs">
+                        <SelectTrigger className="h-8 text-xs w-full min-w-0">
                           <SelectValue placeholder="Aucune mission" />
                         </SelectTrigger>
                         <SelectContent>
