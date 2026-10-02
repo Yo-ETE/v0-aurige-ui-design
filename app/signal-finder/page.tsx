@@ -291,7 +291,7 @@ function CandidatesTable({
   }
 
   return (
-    <ScrollArea className="max-h-[400px]">
+    <div className="max-h-[400px] overflow-auto">
       <div className="table-responsive">
         <table className="w-full text-xs">
           <thead>
@@ -329,7 +329,7 @@ function CandidatesTable({
           </tbody>
         </table>
       </div>
-    </ScrollArea>
+    </div>
   )
 }
 
