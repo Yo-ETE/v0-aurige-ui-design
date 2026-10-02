@@ -11,19 +11,20 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { 
   Video, FolderOpen, Play, Trash2, Download, Circle, Square, FileText, 
   AlertCircle, Loader2, CheckCircle2, ArrowLeft, FlaskConical, Pencil,
-  ChevronRight, FolderTree
+  ChevronRight, FolderTree, Repeat
 } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { 
   startCapture, stopCapture, getCaptureStatus, type CANInterface, 
   listMissionLogs, deleteLog, renameLog, getLogDownloadUrl, getLogFamilyDownloadUrl,
-  startReplay, stopReplay, getReplayStatus,
+  startReplay, stopReplay, getReplayStatus, startInjectLog,
   type LogEntry, type CaptureStatus, type ProcessStatus
 } from "@/lib/api"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useMissionStore } from "@/lib/mission-store"
 import { useIsolationStore } from "@/lib/isolation-store"
 import { LogImportButton } from "@/components/log-import-button"
+import { InjectStatusBar } from "@/components/inject-status"
 
 export default function CaptureReplay() {
   const router = useRouter()
@@ -176,6 +177,21 @@ export default function CaptureReplay() {
     }
   }
 
+  // Rejeu de fond (keep-alive) : boucle le log en arriere-plan via le sous-systeme d'injection
+  const handleKeepAlive = async (logId: string) => {
+    if (!missionId) return
+
+    setError(null)
+    setSuccess(null)
+
+    try {
+      await startInjectLog(canInterface, missionId, logId)
+      setSuccess("Rejeu de fond (keep-alive) demarre. Utilisez le bandeau d'injection pour l'arreter.")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur lors du demarrage du rejeu de fond")
+    }
+  }
+
   const handleStopReplay = async () => {
     setError(null)
     
@@ -267,6 +283,7 @@ const handleDeleteLog = async (logId: string) => {
       title="Capture & Replay"
       description={currentMission ? `Mission: ${currentMission.name}` : "Capturer et rejouer des logs CAN"}
     >
+      <InjectStatusBar className="mb-4" />
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Alerts */}
         {(error || success) && (
@@ -549,7 +566,7 @@ const handleDeleteLog = async (logId: string) => {
                             {log.durationSeconds && ` • ${formatTime(log.durationSeconds)}`}
                           </p>
                         </div>
-                        <div className="flex items-center gap-1 flex-wrap">
+                        <div className="flex flex-wrap gap-2">
                           {replayStatus.running && replayingLogId === log.id ? (
                             <Button 
                               size="icon" 
@@ -571,6 +588,16 @@ const handleDeleteLog = async (logId: string) => {
                               <Play className="h-3 w-3" />
                             </Button>
                           )}
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7"
+                            title="Rejeu de fond (keep-alive)"
+                            onClick={() => handleKeepAlive(log.id)}
+                            disabled={captureStatus.running}
+                          >
+                            <Repeat className="h-3 w-3" />
+                          </Button>
                           <Button
                             size="icon"
                             variant="ghost"
@@ -662,7 +689,7 @@ const handleDeleteLog = async (logId: string) => {
                               </div>
                             </div>
                             {/* Buttons row - always visible */}
-                            <div className="flex items-center gap-1 flex-wrap">
+                            <div className="flex flex-wrap gap-2">
                               {replayStatus.running && replayingLogId === originLog.id ? (
                                 <Button size="sm" variant="ghost" className="h-7 px-2 text-destructive gap-1" onClick={handleStopReplay}>
                                   <Square className="h-3 w-3" />
@@ -674,6 +701,10 @@ const handleDeleteLog = async (logId: string) => {
                                   <span className="text-xs hidden sm:inline">Rejouer</span>
                                 </Button>
                               )}
+                              <Button size="sm" variant="ghost" className="h-7 px-2 gap-1" title="Rejeu de fond (keep-alive)" onClick={() => handleKeepAlive(originLog.id)} disabled={captureStatus.running}>
+                                <Repeat className="h-3 w-3" />
+                                <span className="text-xs hidden sm:inline">Rejeu de fond (keep-alive)</span>
+                              </Button>
                               <Button size="sm" variant="ghost" className="h-7 px-2 gap-1" title="Renommer" onClick={() => startRenaming(originLog)}>
                                 <Pencil className="h-3 w-3" />
                                 <span className="text-xs hidden sm:inline">Renommer</span>
