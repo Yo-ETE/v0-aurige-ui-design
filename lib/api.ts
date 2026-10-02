@@ -121,6 +121,7 @@ export interface CaptureStatus {
   running: boolean
   filename?: string
   durationSeconds: number
+  framesCount?: number
 }
 
 export interface ProcessStatus {
@@ -329,7 +330,7 @@ export async function startCapture(
   })
 }
 
-export async function stopCapture(): Promise<{ status: string; filename?: string; durationSeconds: number }> {
+export async function stopCapture(): Promise<{ status: string; filename?: string; durationSeconds: number; framesCount?: number }> {
   return fetchApi("/capture/stop", {
     method: "POST",
   })
@@ -347,7 +348,8 @@ export async function startReplay(
   missionId: string,
   logId: string,
   iface: CANInterface,
-  speed: number = 1.0
+  speed: number = 1.0,
+  loop: number = 1
 ): Promise<{ status: string }> {
   return fetchApi("/replay/start", {
     method: "POST",
@@ -356,6 +358,7 @@ export async function startReplay(
       logId,
       interface: iface,
       speed,
+      loop,
     }),
   })
 }

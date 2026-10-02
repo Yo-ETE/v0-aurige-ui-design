@@ -211,6 +211,7 @@ class ReplayRequest(BaseModel):
     mission_id: str = Field(alias="missionId")
     log_id: str = Field(alias="logId")
     speed: float = 1.0  # Playback speed multiplier
+    loop: int = 1  # Nombre de passages : 1 = une fois, 0 = infini, N = N fois
 
     class Config:
         populate_by_name = True
@@ -1250,6 +1251,17 @@ async def send_can_frame(frame: CANFrame):
 # Capture Endpoints
 # =============================================================================
 
+def _count_log_frames(path) -> int:
+    """Compte les lignes (= trames candump -L) d'un fichier log, 0 si illisible."""
+    try:
+        r = run_command(["wc", "-l", str(path)], check=False)
+        if r.returncode == 0 and r.stdout.strip():
+            return int(r.stdout.strip().split()[0])
+    except Exception:
+        pass
+    return 0
+
+
 @app.post("/api/capture/start")
 async def start_capture(request: CaptureStartRequest):
     """
@@ -1272,10 +1284,13 @@ async def start_capture(request: CaptureStartRequest):
     logs_dir = get_mission_logs_dir(request.mission_id)
     log_path = logs_dir / filename
     
-    # Start candump with log format
-    # candump -L outputs in standard log format that canplayer can replay
+    # Start candump with log format.
+    # candump -L outputs in standard log format that canplayer can replay.
+    # stdbuf -oL force un buffer ligne par ligne : sans lui, la sortie vers un
+    # fichier est bufferisee par bloc et le compteur de trames "live" (wc -l)
+    # resterait a 0 jusqu'a l'arret.
     state.capture_process = await asyncio.create_subprocess_exec(
-        "candump", "-L", request.interface,
+        "stdbuf", "-oL", "candump", "-L", request.interface,
         stdout=open(log_path, "w"),
         stderr=asyncio.subprocess.PIPE,
     )
@@ -1331,20 +1346,23 @@ async def stop_capture():
         # Update mission stats with new capture flag
         mission_id = state.capture_file.parent.parent.name
         update_mission_stats(mission_id, new_capture=True)
-        
+
         filename = state.capture_file.name
+        frames_count = _count_log_frames(state.capture_file)
     else:
         filename = None
-    
+        frames_count = 0
+
     # Clear state
     state.capture_process = None
     state.capture_file = None
     state.capture_start_time = None
-    
+
     return {
         "status": "stopped",
         "filename": filename,
         "durationSeconds": duration,
+        "framesCount": frames_count,
     }
 
 
@@ -1353,13 +1371,17 @@ async def get_capture_status():
     """Get current capture status"""
     is_running = state.capture_process and state.capture_process.returncode is None
     duration = 0
+    frames_count = 0
     if is_running and state.capture_start_time:
         duration = int((datetime.now() - state.capture_start_time).total_seconds())
-    
+    if is_running and state.capture_file:
+        frames_count = _count_log_frames(state.capture_file)
+
     return {
         "running": is_running,
         "filename": state.capture_file.name if state.capture_file else None,
         "durationSeconds": duration,
+        "framesCount": frames_count,
     }
 
 
@@ -1413,22 +1435,38 @@ async def start_replay(request: ReplayRequest):
     iface = request.interface
     speed = request.speed if request.speed > 0 else 1.0
     
-    lines = [f"#!/bin/bash", f"# Replay {len(frames)} frames on {iface}"]
+    # Boucle : 1 = une fois, 0 = infini, N (clamp 1..1000) = N passages.
+    loop = request.loop
+    if loop < 0:
+        loop = 1
+    if loop > 1000:
+        loop = 1000
+
+    body_lines = []
     prev_ts = frames[0][0]
     for i, (ts, frame) in enumerate(frames):
         if i > 0:
             delay = (ts - prev_ts) / speed
             if 0 < delay < 10:
-                lines.append(f"sleep {delay:.6f}")
-        lines.append(f"cansend {iface} {frame}")
+                body_lines.append(f"sleep {delay:.6f}")
+        body_lines.append(f"cansend {iface} {frame}")
         prev_ts = ts
-    
+
+    lines = ["#!/bin/bash", f"# Replay {len(frames)} frames on {iface} (speed={speed}, loop={loop})"]
+    if loop == 1:
+        lines += body_lines
+    else:
+        lines.append("while true; do" if loop == 0 else f"for _i in $(seq {loop}); do")
+        lines += ["  " + l for l in body_lines]
+        lines.append("  sleep 0.1")  # petite pause entre passages
+        lines.append("done")
+
     script_path = Path("/tmp/aurige_replay.sh")
     with open(script_path, "w") as f:
         f.write("\n".join(lines) + "\n")
     script_path.chmod(0o755)
-    
-    print(f"[REPLAY] {len(frames)} frames on {iface} (speed={speed})")
+
+    print(f"[REPLAY] {len(frames)} frames on {iface} (speed={speed}, loop={loop})")
     state.canplayer_process = await run_command_async(["bash", str(script_path)])
     
     return {
@@ -1437,6 +1475,7 @@ async def start_replay(request: ReplayRequest):
         "logId": request.log_id,
         "interface": request.interface,
         "speed": request.speed,
+        "loop": loop,
     }
 
 

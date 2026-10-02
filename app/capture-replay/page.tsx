@@ -58,13 +58,14 @@ export default function CaptureReplay() {
   const [renamingLogId, setRenamingLogId] = useState<string | null>(null)
   const [newLogName, setNewLogName] = useState("")
   
-  // Timer for capture duration display
-  const [displayDuration, setDisplayDuration] = useState(0)
-  
   // Countdown before capture
   const [countdownSeconds, setCountdownSeconds] = useState(3) // Default 3 seconds
   const [isCountingDown, setIsCountingDown] = useState(false)
   const [currentCountdown, setCurrentCountdown] = useState(0)
+
+  // Options de replay (vitesse + boucle)
+  const [replaySpeed, setReplaySpeed] = useState(1)
+  const [replayLoop, setReplayLoop] = useState(1) // 1 = une fois, 0 = infini
 
   // Fetch statuses
   const fetchStatuses = useCallback(async () => {
@@ -75,9 +76,6 @@ export default function CaptureReplay() {
       ])
       setCaptureStatus(capture)
       setReplayStatus(replay)
-      if (capture.running) {
-        setDisplayDuration(capture.durationSeconds)
-      }
     } catch (err) {
       // API might not be available - use defaults
     }
@@ -102,22 +100,12 @@ export default function CaptureReplay() {
       setIsLoading(false)
     }
     init()
-    
-    // Poll statuses
-    const interval = setInterval(fetchStatuses, 2000)
+
+    // Poll statuses (1s : pilote aussi l'affichage du chrono et du nb de trames,
+    // source unique = backend, pas de compteur local qui derive)
+    const interval = setInterval(fetchStatuses, 1000)
     return () => clearInterval(interval)
   }, [fetchStatuses, fetchLogs])
-
-  // Update duration timer when capturing
-  useEffect(() => {
-    if (!captureStatus.running) return
-    
-    const interval = setInterval(() => {
-      setDisplayDuration(prev => prev + 1)
-    }, 1000)
-    
-    return () => clearInterval(interval)
-  }, [captureStatus.running])
 
   const startCaptureWithCountdown = async () => {
     if (!missionId) {
@@ -146,7 +134,6 @@ export default function CaptureReplay() {
     try {
       const result = await startCapture(missionId, canInterface, captureFilename || undefined, captureDescription || undefined)
       setSuccess(`Capture demarree: ${result.filename}`)
-      setDisplayDuration(0)
       setCaptureDescription("")
       setCaptureFilename("")
       await fetchStatuses()
@@ -161,7 +148,11 @@ export default function CaptureReplay() {
     
     try {
       const result = await stopCapture()
-      setSuccess(`Capture arrêtée: ${result.filename} (${result.durationSeconds}s)`)
+      const frames = result.framesCount ?? 0
+      setSuccess(`Capture arrêtée: ${result.filename} (${result.durationSeconds}s, ${frames} trames)`)
+      if (frames === 0) {
+        setError(`Capture à 0 trame. Vérifiez que l'interface ${canInterface} est UP et que le bus CAN est connecté (candump n'a rien reçu).`)
+      }
       await Promise.all([fetchStatuses(), fetchLogs()])
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur lors de l'arrêt de la capture")
@@ -175,9 +166,10 @@ export default function CaptureReplay() {
     setSuccess(null)
     
     try {
-      await startReplay(missionId, logId, canInterface)
+      await startReplay(missionId, logId, canInterface, replaySpeed, replayLoop)
       setReplayingLogId(logId)
-      setSuccess("Replay démarré")
+      const loopLabel = replayLoop === 0 ? "en boucle infinie" : replayLoop > 1 ? `x${replayLoop}` : ""
+      setSuccess(`Replay démarré (${replaySpeed}x ${loopLabel})`.trim())
       await fetchStatuses()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur lors du replay")
@@ -328,6 +320,28 @@ const handleDeleteLog = async (logId: string) => {
               <span className="text-xs text-muted-foreground">
                 Capture et replay sur cette interface
               </span>
+
+              <div className="flex flex-wrap items-center gap-2 lg:ml-auto">
+                <Label htmlFor="replay-speed" className="whitespace-nowrap text-sm text-muted-foreground">Replay:</Label>
+                <Select value={String(replaySpeed)} onValueChange={(v) => setReplaySpeed(Number(v))} disabled={replayStatus.running}>
+                  <SelectTrigger id="replay-speed" className="w-24"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="0.5">0.5x</SelectItem>
+                    <SelectItem value="1">1x</SelectItem>
+                    <SelectItem value="2">2x</SelectItem>
+                    <SelectItem value="5">5x</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={String(replayLoop)} onValueChange={(v) => setReplayLoop(Number(v))} disabled={replayStatus.running}>
+                  <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1">1 passage</SelectItem>
+                    <SelectItem value="3">3 passages</SelectItem>
+                    <SelectItem value="10">10 passages</SelectItem>
+                    <SelectItem value="0">Boucle infinie</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -349,12 +363,15 @@ const handleDeleteLog = async (logId: string) => {
           </CardHeader>
           <CardContent className="space-y-6">
             {captureStatus.running ? (
-              <div className="flex items-center justify-center gap-4 rounded-lg bg-destructive/10 py-6">
-                <div className="relative">
+              <div className="flex flex-col items-center justify-center gap-1 rounded-lg bg-destructive/10 py-6">
+                <div className="flex items-center gap-3">
                   <Circle className="h-4 w-4 animate-pulse fill-destructive text-destructive" />
+                  <span className="text-2xl font-mono font-semibold text-destructive">
+                    {formatTime(captureStatus.durationSeconds)}
+                  </span>
                 </div>
-                <span className="text-2xl font-mono font-semibold text-destructive">
-                  {formatTime(displayDuration)}
+                <span className="text-sm text-muted-foreground">
+                  {(captureStatus.framesCount ?? 0).toLocaleString()} trames capturées
                 </span>
               </div>
             ) : isCountingDown ? (
