@@ -93,6 +93,17 @@ interface SnifferState {
   lastDecodedSignalsById: Map<string, Record<string, number>>
   changeCountById: Map<string, { count: number; lastResetTs: number }>
   
+  // Notch (freeze reference) workflow
+  notchActive: boolean
+  /** Reference bytes per ID captured when the notch was set */
+  notchBaseline: Map<string, string[]>
+  /** Byte indices absorbed as background noise, per ID */
+  noiseMask: Map<string, Set<number>>
+  /** Persistent: byte indices that differed from baseline since notch (excluding noise) */
+  changedSinceNotchById: Map<string, Set<number>>
+  /** Per-byte number of change events vs baseline since notch */
+  changeCountSinceNotchById: Map<string, number[]>
+  
   // Terminal state
   isPaused: boolean
   isMinimized: boolean
@@ -120,6 +131,9 @@ interface SnifferState {
   setChangedWindow: (ms: number) => void
   setHighlightMode: (mode: "payload" | "signal" | "both") => void
   toggleIgnoreNoisy: () => void
+  setNotch: () => void
+  clearNotch: () => void
+  absorbNoise: () => void
 }
 
 export const useSnifferStore = create<SnifferState>((set, get) => ({
@@ -143,6 +157,11 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
   lastPayloadById: new Map(),
   lastDecodedSignalsById: new Map(),
   changeCountById: new Map(),
+  notchActive: false,
+  notchBaseline: new Map(),
+  noiseMask: new Map(),
+  changedSinceNotchById: new Map(),
+  changeCountSinceNotchById: new Map(),
   isPaused: false,
   isMinimized: false,
   isExpanded: false,
@@ -204,6 +223,11 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
             highlightMode,
             dbcEnabled,
             dbcLookup,
+            notchActive,
+            notchBaseline,
+            noiseMask,
+            changedSinceNotchById,
+            changeCountSinceNotchById,
           } = get()
           if (isPaused) return
           
@@ -338,6 +362,33 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
             signalChanged,
           }
           
+          // Notch tracking: O(dlc) per frame, maps mutated in place (keyed by id)
+          if (notchActive) {
+            const base = notchBaseline.get(id)
+            if (!base) {
+              // ID appeared after the notch: its first frame is the reference
+              notchBaseline.set(id, newBytes)
+            } else {
+              const noise = noiseMask.get(id)
+              let changedSet = changedSinceNotchById.get(id)
+              let counts = changeCountSinceNotchById.get(id)
+              for (let i = 0; i < newBytes.length; i++) {
+                if (newBytes[i] === base[i]) continue
+                if (noise && noise.has(i)) continue
+                if (!changedSet) {
+                  changedSet = new Set<number>()
+                  changedSinceNotchById.set(id, changedSet)
+                }
+                if (!counts) {
+                  counts = []
+                  changeCountSinceNotchById.set(id, counts)
+                }
+                changedSet.add(i)
+                counts[i] = (counts[i] || 0) + 1
+              }
+            }
+          }
+          
           const newMap = new Map(frameMap)
           newMap.set(id, newFrame)
           
@@ -414,7 +465,17 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
   
   toggleExpand: () => set((state) => ({ isExpanded: !state.isExpanded })),
   
-  clearFrames: () => set({ frameMap: new Map(), sortedIds: [], totalMessages: 0 }),
+  clearFrames: () => set({
+    frameMap: new Map(),
+    sortedIds: [],
+    totalMessages: 0,
+    // Baseline refers to cleared frames: drop the notch with them
+    notchActive: false,
+    notchBaseline: new Map(),
+    noiseMask: new Map(),
+    changedSinceNotchById: new Map(),
+    changeCountSinceNotchById: new Map(),
+  }),
   
   toggleDbcOverlay: () => set((state) => ({ dbcEnabled: !state.dbcEnabled })),
   
@@ -505,4 +566,53 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
   setHighlightMode: (mode) => set({ highlightMode: mode }),
   
   toggleIgnoreNoisy: () => set((state) => ({ ignoreNoisy: !state.ignoreNoisy })),
+
+  setNotch: () => {
+    const { frameMap } = get()
+    const baseline = new Map<string, string[]>()
+    for (const [id, frame] of frameMap) {
+      baseline.set(id, frame.bytes.slice())
+    }
+    set({
+      notchActive: true,
+      notchBaseline: baseline,
+      noiseMask: new Map(),
+      changedSinceNotchById: new Map(),
+      changeCountSinceNotchById: new Map(),
+    })
+  },
+  
+  clearNotch: () => set({
+    notchActive: false,
+    notchBaseline: new Map(),
+    noiseMask: new Map(),
+    changedSinceNotchById: new Map(),
+    changeCountSinceNotchById: new Map(),
+  }),
+  
+  absorbNoise: () => {
+    const { notchActive, noiseMask, changedSinceNotchById, changeCountSinceNotchById } = get()
+    if (!notchActive) return
+    const newMask = new Map<string, Set<number>>()
+    for (const [id, set_] of noiseMask) newMask.set(id, new Set(set_))
+    const newCounts = new Map<string, number[]>()
+    for (const [id, arr] of changeCountSinceNotchById) newCounts.set(id, arr.slice())
+    for (const [id, changed] of changedSinceNotchById) {
+      let mask = newMask.get(id)
+      if (!mask) {
+        mask = new Set<number>()
+        newMask.set(id, mask)
+      }
+      const counts = newCounts.get(id)
+      for (const i of changed) {
+        mask.add(i)
+        if (counts) counts[i] = 0
+      }
+    }
+    set({
+      noiseMask: newMask,
+      changedSinceNotchById: new Map(),
+      changeCountSinceNotchById: newCounts,
+    })
+  },
 }))

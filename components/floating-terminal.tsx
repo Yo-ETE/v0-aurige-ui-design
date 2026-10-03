@@ -20,6 +20,9 @@ import {
   ChevronRight,
   Zap,
   TrendingUp,
+  Snowflake,
+  Waves,
+  RotateCcw,
 } from "lucide-react"
 import { useSnifferStore, type SnifferFrame, type DecodedSignal } from "@/lib/sniffer-store"
 import { useMissionStore } from "@/lib/mission-store"
@@ -28,19 +31,90 @@ import { useMissionStore } from "@/lib/mission-store"
  * Renders a single byte with color based on change state.
  * Red = byte just changed, green = stable, dim = never changed.
  */
-function ColoredByte({ value, changed }: { value: string; changed: boolean }) {
+function ColoredByte({
+  value,
+  changed,
+  notchActive = false,
+  lit = false,
+  noise = false,
+  count = 0,
+}: {
+  value: string
+  changed: boolean
+  notchActive?: boolean
+  /** Notch: byte differs from frozen reference (persistent) */
+  lit?: boolean
+  /** Notch: byte absorbed as background noise */
+  noise?: boolean
+  /** Notch: number of changes vs reference since freeze */
+  count?: number
+}) {
+  if (!notchActive) {
+    return (
+      <span
+        className={cn(
+          "inline-block w-[2ch] text-center font-mono transition-colors duration-300",
+          changed
+            ? "text-red-400 font-bold"
+            : "text-emerald-400"
+        )}
+      >
+        {value}
+      </span>
+    )
+  }
   return (
-    <span
-      className={cn(
-        "inline-block w-[2ch] text-center font-mono transition-colors duration-300",
-        changed
-          ? "text-red-400 font-bold"
-          : "text-emerald-400"
+    <span className="relative inline-flex flex-col items-center">
+      <span
+        className={cn(
+          "inline-block w-[2ch] text-center font-mono transition-colors duration-300",
+          lit
+            ? "rounded-sm bg-amber-500/25 text-amber-300 font-bold ring-1 ring-amber-400/70"
+            : noise
+              ? "text-muted-foreground/40 line-through"
+              : "text-emerald-400/70"
+        )}
+        title={noise ? "Bruit absorbe" : lit ? `Change ${count > 0 ? count : 1}x depuis la reference` : undefined}
+      >
+        {value}
+      </span>
+      {lit && count > 1 && (
+        <span className="absolute -bottom-2 left-1/2 -translate-x-1/2 text-[8px] leading-none text-amber-400/90">
+          {count}
+        </span>
       )}
-    >
-      {value}
     </span>
   )
+}
+
+/** Bit-level view of one byte: 8 bits in two nibbles, differing bits highlighted. */
+function BitByte({ value, reference, notchActive }: { value: string; reference?: string; notchActive: boolean }) {
+  const cur = parseInt(value, 16) || 0
+  const prev = reference !== undefined ? parseInt(reference, 16) || 0 : cur
+  const bits: React.ReactNode[] = []
+  for (let b = 7; b >= 0; b--) {
+    const on = (cur >> b) & 1
+    const diff = ((cur ^ prev) >> b) & 1
+    bits.push(
+      <span
+        key={b}
+        className={cn(
+          "inline-block w-[1ch] text-center",
+          diff
+            ? notchActive
+              ? "rounded-sm bg-amber-500/30 text-amber-300 font-bold"
+              : "rounded-sm bg-red-500/30 text-red-400 font-bold"
+            : on
+              ? "text-emerald-400"
+              : "text-muted-foreground/40",
+          b === 3 && "mr-[0.5ch]"
+        )}
+      >
+        {on}
+      </span>
+    )
+  }
+  return <span className="inline-flex font-mono text-[10px]">{bits}</span>
 }
 
 function SnifferRow({ 
@@ -50,19 +124,31 @@ function SnifferRow({
   decodeSignals,
   highlightChangesEnabled,
   ignoreNoisy,
-}: { 
+  notchActive,
+  notchBase,
+  notchChanged,
+  notchNoise,
+  notchCounts,
+}: {
   frame: SnifferFrame
   dbcEntry?: { messageName: string } | null
   dbcEnabled: boolean
   decodeSignals: (canId: string, bytes: string[]) => DecodedSignal[]
   highlightChangesEnabled: boolean
   ignoreNoisy: boolean
+  notchActive: boolean
+  notchBase?: string[]
+  notchChanged?: Set<number>
+  notchNoise?: Set<number>
+  notchCounts?: number[]
 }) {
   const [expanded, setExpanded] = useState(false)
+  const [showBits, setShowBits] = useState(false)
   const [flashKey, setFlashKey] = useState(0)
   const isKnown = !!dbcEntry
   const decoded = expanded && dbcEnabled && isKnown ? decodeSignals(frame.canId, frame.bytes) : []
   
+  const rowIdle = notchActive && !(notchChanged && notchChanged.size > 0)
   const shouldFlash = highlightChangesEnabled && frame.payloadChanged && !(ignoreNoisy && frame.isNoisy)
 
   // Trigger flash animation when payload changes
@@ -82,6 +168,7 @@ function SnifferRow({
           dbcEnabled && !isKnown && "bg-warning/5 hover:bg-warning/10",
           !dbcEnabled && "hover:bg-accent/20",
           highlightChangesEnabled && frame.payloadChanged && !frame.isNoisy && "sniffer-row-flash",
+          rowIdle && "opacity-40",
         )}
         onClick={dbcEnabled && isKnown ? () => setExpanded(!expanded) : undefined}
         style={dbcEnabled && isKnown ? { cursor: "pointer" } : undefined}
@@ -131,9 +218,25 @@ function SnifferRow({
               key={i}
               value={byte.toUpperCase()}
               changed={frame.changedIndices.has(i)}
+              notchActive={notchActive}
+              lit={!!notchChanged && notchChanged.has(i)}
+              noise={!!notchNoise && notchNoise.has(i)}
+              count={notchCounts?.[i] || 0}
             />
           ))}
         </span>
+        {/* Bit view toggle */}
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); setShowBits((v) => !v) }}
+          className={cn(
+            "flex-shrink-0 rounded px-1 py-px text-[9px] font-medium leading-tight transition-colors",
+            showBits ? "bg-primary/20 text-primary" : "text-muted-foreground/60 hover:text-foreground"
+          )}
+          title={showBits ? "Masquer la vue bits" : "Afficher la vue bits"}
+        >
+          bits
+        </button>
         {/* Cycle time */}
         <span className="hidden sm:block w-16 flex-shrink-0 text-right text-muted-foreground/70">
           {frame.cycleMs > 0 ? `${frame.cycleMs}ms` : ""}
@@ -162,6 +265,21 @@ function SnifferRow({
           </span>
         )}
       </div>
+      {/* Bit-level view */}
+      {showBits && (
+        <div className="ml-8 mr-2 mb-1 flex flex-wrap gap-x-3 gap-y-1 rounded bg-card/50 border border-border/50 px-3 py-1.5">
+          {frame.bytes.map((byte, i) => (
+            <span key={i} className="inline-flex items-center gap-1">
+              <span className="text-[9px] text-muted-foreground/50">{i}</span>
+              <BitByte
+                value={byte}
+                reference={notchActive ? notchBase?.[i] : frame.prevBytes[i]}
+                notchActive={notchActive}
+              />
+            </span>
+          ))}
+        </div>
+      )}
       {/* Expanded signal decode view */}
       {expanded && decoded.length > 0 && (
         <div className="ml-8 mr-2 mb-1 rounded bg-card/50 border border-border/50 px-3 py-1.5">
@@ -201,6 +319,14 @@ export function FloatingTerminal() {
     changedWindowMs,
     highlightMode,
     ignoreNoisy,
+    notchActive,
+    notchBaseline,
+    noiseMask,
+    changedSinceNotchById,
+    changeCountSinceNotchById,
+    setNotch,
+    clearNotch,
+    absorbNoise,
     setInterface,
     setIdFilter,
     start,
@@ -348,8 +474,20 @@ export function FloatingTerminal() {
       ids = ids.filter(id => filters.some(f => id.includes(f)))
     }
     
+    // Notch: pin IDs that changed since the reference on top (stable order otherwise)
+    if (notchActive) {
+      const active: string[] = []
+      const rest: string[] = []
+      for (const id of ids) {
+        const c = changedSinceNotchById.get(id)
+        if (c && c.size > 0) active.push(id)
+        else rest.push(id)
+      }
+      ids = active.concat(rest)
+    }
+
     return ids
-  }, [sortedIds, idFilter, dbcEnabled, dbcFilter, dbcLookup, changedOnlyMode, changedWindowMs, frameMap])
+  }, [sortedIds, idFilter, dbcEnabled, dbcFilter, dbcLookup, changedOnlyMode, changedWindowMs, frameMap, notchActive, changedSinceNotchById])
 
   if (isMinimized) {
     return (
@@ -503,6 +641,49 @@ export function FloatingTerminal() {
           >
             <FileCode className="h-3.5 w-3.5" />
           </Button>
+          <span className="mx-0.5 h-4 w-px shrink-0 bg-border" />
+          {!notchActive ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 shrink-0 gap-1 px-1.5 text-[10px] text-muted-foreground hover:text-foreground"
+              onClick={setNotch}
+              onMouseDown={(e) => e.stopPropagation()}
+              title="Figer la reference (notch) : memorise l'etat actuel de chaque ID. Declenchez ensuite une action (ex. essuie-glaces) : les octets qui different de la reference restent allumes en orange, meme apres un changement bref. Utilisez Noyer le bruit pour masquer ce qui bouge deja tout seul."
+            >
+              <Snowflake className="h-3.5 w-3.5" />
+              Figer
+            </Button>
+          ) : (
+            <>
+              <span className="inline-flex shrink-0 items-center gap-1 rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-medium text-amber-300">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
+                Référence figée
+              </span>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-6 shrink-0 gap-1 px-1.5 text-[10px] text-amber-300 hover:text-amber-200"
+                onClick={absorbNoise}
+                onMouseDown={(e) => e.stopPropagation()}
+                title="Noyer le bruit : tout ce qui a bougé jusqu'ici devient du fond (barré) ; seuls les NOUVEAUX changements s'allument ensuite."
+              >
+                <Waves className="h-3.5 w-3.5" />
+                Noyer le bruit
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-6 shrink-0 gap-1 px-1.5 text-[10px] text-muted-foreground hover:text-foreground"
+                onClick={clearNotch}
+                onMouseDown={(e) => e.stopPropagation()}
+                title="Reset : supprimer la référence et revenir à l'affichage normal."
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                Reset
+              </Button>
+            </>
+          )}
           {/* Mobile: show interface selector inline */}
           <select
             value={selectedInterface}
@@ -617,6 +798,11 @@ export function FloatingTerminal() {
                   decodeSignals={decodeSignals}
                   highlightChangesEnabled={highlightChangesEnabled}
                   ignoreNoisy={ignoreNoisy}
+                  notchActive={notchActive}
+                  notchBase={notchActive ? notchBaseline.get(id) : undefined}
+                  notchChanged={notchActive ? changedSinceNotchById.get(id) : undefined}
+                  notchNoise={notchActive ? noiseMask.get(id) : undefined}
+                  notchCounts={notchActive ? changeCountSinceNotchById.get(id) : undefined}
                 />
               )
             })}
