@@ -4,7 +4,7 @@
 # This script installs and configures AURIGE on a fresh Raspberry Pi OS (ARM64)
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/YOUR_REPO/aurige/main/scripts/install_pi.sh | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/Yo-ETE/v0-aurige-ui-design/main/scripts/install_pi.sh | sudo bash
 #
 # Or locally:
 #   sudo bash scripts/install_pi.sh
@@ -21,7 +21,7 @@ NC='\033[0m' # No Color
 
 # Configuration
 AURIGE_DIR="/opt/aurige"
-REPO_URL="${AURIGE_REPO_URL:-https://github.com/YOUR_REPO/aurige.git}"
+REPO_URL="${AURIGE_REPO_URL:-https://github.com/Yo-ETE/v0-aurige-ui-design.git}"
 BRANCH="${AURIGE_BRANCH:-main}"
 
 # IMPORTANT: Calculate source directory ONCE at the start, before any cd/rm operations

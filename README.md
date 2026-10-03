@@ -192,7 +192,7 @@ Fenetre flottante accessible depuis toutes les pages :
 ### Installation en une commande
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Yo-ETE/aurige/main/scripts/install_pi.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/Yo-ETE/v0-aurige-ui-design/main/scripts/install_pi.sh | sudo bash
 ```
 
 ### Installation manuelle
@@ -209,7 +209,7 @@ sudo apt-get install -y nodejs
 # 3. Clone du depot
 sudo mkdir -p /opt/aurige
 cd /opt/aurige
-sudo git clone https://github.com/Yo-ETE/aurige.git .
+sudo git clone https://github.com/Yo-ETE/v0-aurige-ui-design.git .
 
 # 4. Configuration
 sudo cp .env.example .env.local

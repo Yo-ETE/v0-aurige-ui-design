@@ -1428,7 +1428,11 @@ async def start_replay(request: ReplayRequest):
     """
     if state.canplayer_process and state.canplayer_process.returncode is None:
         raise HTTPException(status_code=409, detail="Replay already running")
-    
+
+    # Valide l'interface (cohérent avec can/send, fuzzing, etc.)
+    if request.interface not in ["can0", "can1", "vcan0"]:
+        raise HTTPException(status_code=400, detail="Invalid interface. Use can0, can1, or vcan0.")
+
     # Get log file
     logs_dir = get_mission_logs_dir(request.mission_id)
     log_file = logs_dir / f"{request.log_id}.log"
@@ -1896,7 +1900,11 @@ async def start_generator(request: GeneratorRequest):
     """
     if state.cangen_process and state.cangen_process.returncode is None:
         raise HTTPException(status_code=409, detail="Generator already running")
-    
+
+    # Valide l'interface (cohérent avec can/send, fuzzing, etc.)
+    if request.interface not in ["can0", "can1", "vcan0"]:
+        raise HTTPException(status_code=400, detail="Invalid interface. Use can0, can1, or vcan0.")
+
     id_mode = request.id_mode or ("fixed" if request.can_id else "random")
     if id_mode not in ("random", "fixed", "increment"):
         raise HTTPException(status_code=400, detail="id_mode invalide (random|fixed|increment)")
@@ -2388,8 +2396,11 @@ async def attempt_crash_recovery(request: CrashRecoveryRequest):
     If suspect_ids provided, only reset those. Otherwise, try common crash IDs.
     """
     iface = request.interface
+    # Valide l'interface (cohérent avec can/send, fuzzing, etc.)
+    if iface not in ["can0", "can1", "vcan0"]:
+        raise HTTPException(status_code=400, detail="Invalid interface. Use can0, can1, or vcan0.")
     suspect_ids = request.suspect_ids or []
-    
+
     # Common crash-related IDs (airbag, powertrain, BSI status)
     common_crash_ids = ["4C8", "5E8", "3B7", "360", "1A0", "0F6"]
     
