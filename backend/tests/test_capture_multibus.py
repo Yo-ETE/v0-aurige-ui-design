@@ -130,3 +130,43 @@ def test_meta_has_interface_bitrate_and_logs_list(ctx):
     entries = c.get("/api/missions/m1/logs").json()
     e = next(x for x in entries if x["filename"] == fn)
     assert e["interface"] == "can1" and e["bitrate"] == 250000
+
+
+def test_stop_finalizes_dead_slot(ctx):
+    c, main, logs, stats = ctx
+    fn = _start(c, "can0").json()["filename"]
+    main.state.captures["can0"]["process"].returncode = 1  # candump mort (bus tombe)
+    assert c.get("/api/capture/status").json()["captures"] == []
+    r = c.post("/api/capture/stop", params={"interface": "can0"})
+    assert r.status_code == 200 and r.json()["status"] == "stopped"
+    assert main.state.captures == {}
+    assert main.state.captures.get("can0") is None
+    meta = json.loads((logs / fn).with_suffix(".meta.json").read_text())
+    assert "durationSeconds" in meta and "endTime" in meta
+    assert stats
+    assert c.post("/api/capture/stop", params={"interface": "can0"}).status_code == 404
+
+
+def test_stop_cleans_slot_if_stats_raise(ctx):
+    c, main, *_ = ctx
+    _start(c, "can0")
+
+    def boom(*a, **k):
+        raise RuntimeError("x")
+
+    main.update_mission_stats = boom
+    with pytest.raises(RuntimeError):
+        c.post("/api/capture/stop", params={"interface": "can0"})
+    assert main.state.captures == {}
+
+
+def test_start_failure_releases_reservation(ctx):
+    c, main, *_ = ctx
+
+    async def bad(*a, **k):
+        raise OSError("no candump")
+
+    main.asyncio.create_subprocess_exec = bad
+    with pytest.raises(OSError):
+        _start(c, "can0")
+    assert main.state.captures == {}

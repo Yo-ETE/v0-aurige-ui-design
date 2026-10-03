@@ -105,6 +105,7 @@ async def lifespan(app: FastAPI):
         await asyncio.wait_for(proc.wait(), timeout=2.0)
       except Exception:
         proc.kill()
+        await proc.wait()
     try:
       slot["fh"].close()
     except Exception:
