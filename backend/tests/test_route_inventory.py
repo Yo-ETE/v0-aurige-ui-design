@@ -1,6 +1,11 @@
 """Inventaire fige des routes FastAPI (filet anti-regression du decoupage en routers).
 
-Pour regenerer EXPECTED apres un changement de routes volontaire :
+Couvre AUSSI les routers inclus via app.include_router (auth, users, et les routers
+extraits du decoupage). FastAPI 0.141 enveloppe un router inclus dans un objet
+`_IncludedRouter` sans aplatir ses routes dans app.routes ; `collect()` recurse donc
+dans `original_router.routes` pour les voir.
+
+Pour regenerer EXPECTED apres un changement de routes VOLONTAIRE :
     cd backend && python -c "from tests.test_route_inventory import collect; \
 import pprint; pprint.pprint(collect())"
 puis coller la liste obtenue dans EXPECTED.
@@ -13,9 +18,20 @@ _HTTP_METHODS = {"GET", "POST", "PUT", "DELETE", "PATCH"}
 _INTERNAL_PATHS = {"/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"}
 
 
+def _iter_routes(routes):
+    """Aplatit les routers inclus (_IncludedRouter) pour voir leurs routes reelles."""
+    for route in routes:
+        if type(route).__name__ == "_IncludedRouter":
+            # FastAPI 0.141 : le wrapper porte le router d'origine dans original_router,
+            # dont les routes ont deja leur chemin absolu final.
+            yield from _iter_routes(route.original_router.routes)
+            continue
+        yield route
+
+
 def collect() -> list[tuple[str, str]]:
     pairs = set()
-    for route in main.fastapi_app.routes:
+    for route in _iter_routes(main.fastapi_app.routes):
         path = getattr(route, "path", None)
         if path is None or path in _INTERNAL_PATHS:
             continue
@@ -29,6 +45,7 @@ def collect() -> list[tuple[str, str]]:
 
 
 EXPECTED: list[tuple[str, str]] = [
+    ('DELETE', '/api/auth/users/{user_id}'),
     ('DELETE', '/api/dbc/{dbc_id}'),
     ('DELETE', '/api/dbc/{dbc_id}/message/{can_id}'),
     ('DELETE', '/api/dbc/{dbc_id}/signal/{signal_id}'),
@@ -41,6 +58,8 @@ EXPECTED: list[tuple[str, str]] = [
     ('DELETE', '/api/missions/{mission_id}/logs/{log_id}'),
     ('DELETE', '/api/system/backups/{filename}'),
     ('GET', '/api/aud06/blocklist'),
+    ('GET', '/api/auth/me'),
+    ('GET', '/api/auth/users'),
     ('GET', '/api/can/{interface}/status'),
     ('GET', '/api/capture/status'),
     ('GET', '/api/dbc'),
@@ -85,6 +104,7 @@ EXPECTED: list[tuple[str, str]] = [
     ('GET', '/api/tailscale/status'),
     ('GET', '/missions/{mission_id}/logs/{log_id}/download'),
     ('GET', '/status'),
+    ('PATCH', '/api/auth/users/{user_id}'),
     ('PATCH', '/api/dbc/{dbc_id}'),
     ('PATCH', '/api/known-frames/{fid}'),
     ('PATCH', '/api/missions/{mission_id}'),
@@ -94,6 +114,9 @@ EXPECTED: list[tuple[str, str]] = [
     ('POST', '/api/analysis/family-diff'),
     ('POST', '/api/analysis/inter-id-dependencies'),
     ('POST', '/api/analysis/validate-causality'),
+    ('POST', '/api/auth/login'),
+    ('POST', '/api/auth/logout'),
+    ('POST', '/api/auth/users'),
     ('POST', '/api/can/init'),
     ('POST', '/api/can/scan-bitrate'),
     ('POST', '/api/can/send'),
