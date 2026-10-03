@@ -133,7 +133,14 @@ def test_every_mutating_route_is_guarded_or_allowlisted(booted):
     main = booted[0]
     allow = [re.compile(p) for p in READ_ONLY_ALLOWLIST]
     unguarded = []
-    for route in main.fastapi_app.routes:
+    def _flat(routes):
+        for r in routes:
+            if type(r).__name__ == "_IncludedRouter":
+                yield from _flat(r.original_router.routes)
+            else:
+                yield r
+
+    for route in _flat(main.fastapi_app.routes):
         methods = getattr(route, "methods", None) or set()
         path = getattr(route, "path", "")
         if not path.startswith("/api/"):

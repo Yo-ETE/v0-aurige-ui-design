@@ -79,5 +79,12 @@ def test_update_empty_branch_uses_default_path(client, no_side_effects):
 def test_single_restart_services_route():
     import main
 
-    paths = [r.path for r in main.fastapi_app.routes if getattr(r, "path", "") == "/api/system/restart-services"]
+    def _flat(routes):
+        for r in routes:
+            if type(r).__name__ == "_IncludedRouter":
+                yield from _flat(r.original_router.routes)
+            else:
+                yield r
+
+    paths = [r.path for r in _flat(main.fastapi_app.routes) if getattr(r, "path", "") == "/api/system/restart-services"]
     assert len(paths) == 1
