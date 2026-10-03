@@ -126,6 +126,8 @@ READ_ONLY_ALLOWLIST = [
     r"^/api/obd/(vin|dtc/(read|pending|permanent)|scan-pids|full-scan|pid-read|status|freeze-frame)$",
     # OBD : service valide dans le handler (04/11... => obd_write)
     r"^/api/obd/pid$", r"^/api/signal-finder/(read-pid|extract-obd-from-log)$",
+    # IA : config (GET) + analyse (sortie HTTP vers le fournisseur, aucune mutation Pi/bus)
+    r"^/api/ai/config$", r"^/api/ai/analyze$",
 ]
 
 

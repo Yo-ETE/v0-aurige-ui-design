@@ -69,6 +69,7 @@ _ROUTE_RULES = [
     ("POST", r"^/api/analysis/validate-causality", ["causality_validate"]),
     # --- Configuration securite AUD-06 (liste critique) ---
     ("PUT", r"^/api/aud06/", ["safety_config"]),
+    ("PUT", r"^/api/ai/config", ["safety_config"]),
     ("POST", r"^/api/capture/", ["capture_run"]),
     ("POST", r"^/api/replay/", ["replay_run"]),
     # --- OBD (ecriture : effacement DTC, reset ECU) ---

@@ -2295,6 +2295,8 @@ from routers.analysis import router as analysis_router  # noqa: E402
 app.include_router(analysis_router)
 from routers.ws import router as ws_router  # noqa: E402
 app.include_router(ws_router)
+from routers.ai import router as ai_router  # noqa: E402
+app.include_router(ai_router)
 fastapi_app = app
 app = CORSMiddleware(
     SessionAuthMiddleware(fastapi_app),
