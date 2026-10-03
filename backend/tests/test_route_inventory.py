@@ -197,9 +197,33 @@ EXPECTED: list[tuple[str, str]] = [
 ]
 
 
+def _collect_list() -> list[tuple[str, str]]:
+    """Comme collect() mais SANS dedup, pour detecter une double-registration."""
+    pairs: list[tuple[str, str]] = []
+    for route in _iter_routes(main.fastapi_app.routes):
+        path = getattr(route, "path", None)
+        if path is None or path in _INTERNAL_PATHS:
+            continue
+        if isinstance(route, WebSocketRoute):
+            pairs.append(("WS", path))
+            continue
+        for method in getattr(route, "methods", None) or ():
+            if method in _HTTP_METHODS:
+                pairs.append((method, path))
+    return pairs
+
+
 def test_route_inventory_unchanged():
     current = set(collect())
     expected = set(EXPECTED)
     missing = expected - current
     added = current - expected
     assert current == expected, f"missing={sorted(missing)} added={sorted(added)}"
+
+
+def test_no_duplicate_route_registration():
+    """Aucune (method, path) ne doit etre enregistree deux fois (route fantome qui en masque une autre)."""
+    from collections import Counter
+    counts = Counter(_collect_list())
+    dups = sorted(mp for mp, n in counts.items() if n > 1)
+    assert not dups, f"routes enregistrees en double: {dups}"
