@@ -374,6 +374,12 @@ class CANInterfaceStatus(BaseModel):
     tx_packets: int = Field(alias="txPackets", default=0)
     rx_packets: int = Field(alias="rxPackets", default=0)
     errors: int = 0
+    # Etat du controleur CAN (None pour vcan / si absent) : ERROR-ACTIVE, ERROR-WARNING,
+    # ERROR-PASSIVE, BUS-OFF (=> probleme de cablage / terminaison 120 ohm), STOPPED, SLEEPING
+    can_state: Optional[str] = None
+    berr_tx: Optional[int] = None
+    berr_rx: Optional[int] = None
+    restarts: Optional[int] = None
 
     class Config:
         populate_by_name = True
@@ -550,6 +556,14 @@ def get_can_interface_status(interface: str) -> CANInterfaceStatus:
         info_data = linkinfo.get("info_data", {})
         bitrate = info_data.get("bittiming", {}).get("bitrate")
         
+        # Etat du controleur + compteurs d'erreurs bus (absents pour vcan)
+        raw_state = info_data.get("state")
+        can_state = str(raw_state).upper() if raw_state else None
+        bc = info_data.get("berr_counter") or {}
+        berr_tx = bc.get("tx")
+        berr_rx = bc.get("rx")
+        restarts = info_data.get("restart_cnt")
+        
         # Get stats
         stats = iface_data.get("stats64", iface_data.get("stats", {}))
         
@@ -557,6 +571,10 @@ def get_can_interface_status(interface: str) -> CANInterfaceStatus:
             interface=interface,
             up=up,
             bitrate=bitrate,
+            can_state=can_state,
+            berr_tx=berr_tx,
+            berr_rx=berr_rx,
+            restarts=restarts,
             txPackets=stats.get("tx", {}).get("packets", 0),
             rxPackets=stats.get("rx", {}).get("packets", 0),
             errors=stats.get("rx", {}).get("errors", 0) + stats.get("tx", {}).get("errors", 0),

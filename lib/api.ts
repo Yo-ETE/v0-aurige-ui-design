@@ -107,6 +107,11 @@ export interface CANInterfaceStatus {
   txPackets: number
   rxPackets: number
   errors: number
+  // Etat du controleur CAN (absent pour vcan)
+  can_state?: string
+  berr_tx?: number
+  berr_rx?: number
+  restarts?: number
   // Alias for compatibility
   isUp?: boolean
 }
