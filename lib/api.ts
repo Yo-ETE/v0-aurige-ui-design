@@ -2188,3 +2188,41 @@ export async function aiAnalyze(context: string, question: string): Promise<{ an
     body: JSON.stringify({ context, question }),
   })
 }
+
+// =============================================================================
+// UDS (ISO 14229)
+// =============================================================================
+
+export interface UDSResponse {
+  raw: string
+  positive: boolean
+  nrc?: { code: number; label: string }
+  data_hex?: string
+  service_echo?: number
+}
+
+export interface UDSResult {
+  status: string
+  request?: any
+  response?: UDSResponse
+  error?: string
+}
+
+export async function udsRequest(p: {
+  interface: CANInterface
+  requestId: string
+  responseId: string
+  service: string
+  data: string
+}): Promise<UDSResult> {
+  return fetchApi<UDSResult>("/uds/request", {
+    method: "POST",
+    body: JSON.stringify({
+      interface: p.interface,
+      request_id: p.requestId,
+      response_id: p.responseId,
+      service: p.service,
+      data: p.data,
+    }),
+  })
+}
