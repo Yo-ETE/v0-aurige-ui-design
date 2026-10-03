@@ -18,7 +18,7 @@ import {
   BarChart3, Loader2, AlertCircle, Database, Cpu, Search,
   Download, Save, Eye, EyeOff, Filter, ArrowUpDown, CheckCircle2,
   Zap, ChevronDown, ChevronRight, Info, GitBranch, ArrowRight,
-  FlaskConical, AlertTriangle, Check, X, Send, ArrowUp, ArrowDown,
+  FlaskConical, AlertTriangle, Check, X, Send, ArrowUp, ArrowDown, ClipboardCopy,
 } from "lucide-react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useExportStore } from "@/lib/export-store"
@@ -43,6 +43,8 @@ import {
   type LogEntry,
 } from "@/lib/api"
 import { useMissionStore } from "@/lib/mission-store"
+import { copyToClipboard } from "@/lib/export-utils"
+import { useToast } from "@/hooks/use-toast"
 import { cn } from "@/lib/utils"
 
 // =============================================================================
@@ -298,6 +300,7 @@ export default function AnalyseCANPage() {
 function AnalyseCANPageInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
+  const { toast } = useToast()
   const { addFrames } = useExportStore()
   // Mission & log selection
   const { missions, currentMissionId, fetchMissions } = useMissionStore()
@@ -455,6 +458,48 @@ function AnalyseCANPageInner() {
   }
   const exportSignalsJson = () => {
     if (detectResult) _download(`signaux_${_logTag()}.json`, JSON.stringify(detectResult, null, 2), "application/json")
+  }
+
+  // --- Résumé Markdown des résultats courants, à coller dans une IA ---
+  const hasAnyResult = !!(heatmapResult || detectResult || depResult)
+  const copyAiSummary = async () => {
+    const hex = (n: number) => n.toString(16).toUpperCase().padStart(2, "0")
+    const lines: string[] = [
+      "Voici des données CAN d'un véhicule (reverse engineering). Aide-moi à identifier le rôle des IDs et des signaux :",
+      "",
+      `Mission : ${missions.find((m) => m.id === selectedMissionId)?.name ?? selectedMissionId ?? "?"}`,
+      `Log : ${selectedLogId || "?"}`,
+    ]
+    if (heatmapResult) {
+      const top = [...heatmapResult.ids]
+        .sort((a, b) => b.frame_count - a.frame_count)
+        .slice(0, 20)
+      lines.push("", `## Heatmap (top ${top.length} IDs par trames, sur ${heatmapResult.total_ids} IDs, ${heatmapResult.total_frames} trames)`)
+      for (const e of top) {
+        const active = e.bytes
+          .filter((b) => !b.is_constant)
+          .map((b) => `B${b.index}(${(b.change_rate * 100).toFixed(0)}%, 0x${hex(b.min)}-0x${hex(b.max)})`)
+        lines.push(`- ${e.can_id} : ${e.frequency_hz} Hz, ${e.frame_count} trames, octets actifs : ${active.length ? active.join(" ") : "aucun (constant)"}`)
+      }
+    }
+    if (detectResult && detectResult.detected_signals.length > 0) {
+      const sigs = [...detectResult.detected_signals].sort((a, b) => b.confidence - a.confidence).slice(0, 20)
+      lines.push("", `## Signaux auto-détectés (top ${sigs.length} sur ${detectResult.detected_signals.length})`)
+      for (const s of sigs) {
+        lines.push(`- ${s.can_id} ${s.name} : bit ${s.start_bit}, ${s.bit_length} bits, ${s.byte_order === "big_endian" ? "BE" : "LE"}${s.is_signed ? ", signé" : ""}, plage ${s.value_range?.[0]}..${s.value_range?.[1]}, confiance ${(s.confidence * 100).toFixed(0)}%`)
+      }
+    }
+    if (depResult && depResult.edges.length > 0) {
+      const edges = [...depResult.edges].sort((a, b) => b.score - a.score).slice(0, 20)
+      lines.push("", `## Dépendances inter-ID (top ${edges.length} sur ${depResult.edges.length})`)
+      for (const e of edges) {
+        lines.push(`- ${e.source} -> ${e.target} : score ${(e.score * 100).toFixed(0)}%, p_react ${(e.p_react * 100).toFixed(0)}%, lift ${e.lift.toFixed(1)}, ${e.co_occurrences} co-occurrences`)
+      }
+    }
+    const ok = await copyToClipboard(lines.join("\n"))
+    toast(ok
+      ? { title: "Résumé copié", description: "Colle-le dans ton assistant IA." }
+      : { title: "Erreur", description: "Impossible de copier dans le presse-papiers", variant: "destructive" })
   }
 
   // Auto-detect: run analysis
@@ -790,6 +835,12 @@ function AnalyseCANPageInner() {
                 <GitBranch className="h-3.5 w-3.5" /> Dependances
               </button>
             </div>
+
+            {hasAnyResult && (
+              <Button size="sm" variant="outline" className="h-8 gap-1.5 bg-transparent" onClick={copyAiSummary}>
+                <ClipboardCopy className="h-3.5 w-3.5" /> Copier résumé pour IA
+              </Button>
+            )}
 
             {/* Heatmap config */}
             {tab === "heatmap" && (

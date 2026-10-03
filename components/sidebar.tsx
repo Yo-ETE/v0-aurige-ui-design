@@ -31,6 +31,7 @@ import {
   BarChart3,
   LogOut,
   Users,
+  Network,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
@@ -85,6 +86,7 @@ const baseNavigation: NavSection[] = [
       { name: "Isolation", href: "/isolation", icon: GitBranch, area: "area_analysis" },
       { name: "Comparaison", href: "/comparaison", icon: GitCompare, area: "area_analysis" },
       { name: "Analyse CAN", href: "/analyse-can", icon: BarChart3, area: "area_analysis" },
+      { name: "Gateway", href: "/gateway", icon: Network, area: "area_analysis" },
       { name: "DBC", href: "/dbc", icon: FileCode, area: "area_analysis" },
     ],
   },
