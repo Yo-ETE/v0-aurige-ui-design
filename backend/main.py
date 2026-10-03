@@ -686,117 +686,6 @@ async def broadcast_to_websockets(message: str):
         state.websocket_clients.remove(ws)
 
 
-# =============================================================================
-# CAN dump WebSocket Manager
-# =============================================================================
-
-class CandumpManager:
-    def __init__(self):
-        self.process: Optional[asyncio.subprocess.Process] = None
-        self.task: Optional[asyncio.Task] = None
-        self.interface: Optional[str] = None
-        self.clients: List[WebSocket] = []
-        self.lock = asyncio.Lock()
-
-    async def _stop_process(self):
-        if self.task and not self.task.done():
-            self.task.cancel()
-        self.task = None
-
-        if self.process and self.process.returncode is None:
-            self.process.terminate()
-            try:
-                await asyncio.wait_for(self.process.wait(), timeout=2.0)
-            except asyncio.TimeoutError:
-                self.process.kill()
-        self.process = None
-        self.interface = None
-
-    async def ensure_running(self, interface: str):
-        async with self.lock:
-            if (
-                self.process
-                and self.process.returncode is None
-                and self.interface == interface
-                and self.task
-                and not self.task.done()
-            ):
-                return
-
-            await self._stop_process()
-
-            self.process = await asyncio.create_subprocess_exec(
-                "candump", "-ta", interface,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            self.interface = interface
-
-            async def reader_loop():
-                try:
-                    assert self.process and self.process.stdout
-                    while True:
-                        line = await self.process.stdout.readline()
-                        if not line:
-                            break
-
-                        decoded = line.decode(errors="ignore").strip()
-                        if not decoded:
-                            continue
-
-                        parts = decoded.split()
-                        if len(parts) < 3:
-                            continue
-
-                        timestamp = parts[0].strip("()")
-                        iface = parts[1]
-                        frame_parts = parts[2].split("#")
-                        if len(frame_parts) != 2:
-                            continue
-
-                        can_id, data = frame_parts
-                        data_formatted = " ".join(data[i:i+2] for i in range(0, len(data), 2))
-
-                        payload = json.dumps({
-                            "timestamp": timestamp,
-                            "interface": iface,
-                            "canId": can_id,
-                            "data": data_formatted,
-                        })
-
-                        await self.broadcast(payload)
-
-                except asyncio.CancelledError:
-                    pass
-                except Exception:
-                    pass
-
-            self.task = asyncio.create_task(reader_loop())
-
-    async def broadcast(self, message: str):
-        dead: List[WebSocket] = []
-        for ws in self.clients:
-            try:
-                await ws.send_text(message)
-            except Exception:
-                dead.append(ws)
-        for ws in dead:
-            if ws in self.clients:
-                self.clients.remove(ws)
-
-    async def add_client(self, ws: WebSocket):
-        self.clients.append(ws)
-
-    async def remove_client(self, ws: WebSocket):
-        if ws in self.clients:
-            self.clients.remove(ws)
-        if not self.clients:
-            async with self.lock:
-                await self._stop_process()
-
-
-candump_mgr = CandumpManager()
-
 
 # =============================================================================
 # System Status
@@ -4907,7 +4796,6 @@ async def get_saved_networks():
 @app.post("/api/network/wifi/connect")
 async def connect_to_wifi(request: WifiConnectRequest):
     """Connect to a Wi-Fi network, handling hotspot->client transition safely"""
-    import time
     try:
         # Step 1: Pause the network watchdog to prevent it from interfering
         run_command(["systemctl", "stop", "aurige-net-watchdog.timer"], check=False, timeout=5)
@@ -5936,7 +5824,6 @@ async def start_update(request: Request):
 
             # Use systemd-run to create a completely independent transient service
             # This survives when aurige-api is killed
-            import subprocess
 
             # Create restart script
             restart_script = "/tmp/aurige_restart_services.sh"
@@ -7595,7 +7482,6 @@ async def delete_comparison(mission_id: str, comparison_id: str):
 @app.get("/api/system/check-update")
 async def check_update():
     """Check if there's a new version available via git"""
-    import subprocess
     try:
         repo_dir = Path("/opt/aurige/repo")
         if not repo_dir.exists():
@@ -8274,13 +8160,6 @@ async def signal_finder_read_pid(
 # =============================================================================
 # Signal Finder WebSocket - Live correlation
 # =============================================================================
-
-class SignalFinderState:
-    """Tracks active Signal Finder live sessions."""
-    active: bool = False
-    process: Optional[asyncio.subprocess.Process] = None
-
-signal_finder_state = SignalFinderState()
 
 
 @app.websocket("/ws/signal-finder")
