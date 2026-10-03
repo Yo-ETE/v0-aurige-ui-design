@@ -67,15 +67,18 @@ CORS_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000"] + [
 class ProcessState:
     candump_process: Optional[asyncio.subprocess.Process] = None
     candump_interface: Optional[str] = None
-    capture_process: Optional[asyncio.subprocess.Process] = None
-    capture_file: Optional[Path] = None
-    capture_start_time: Optional[datetime] = None
+    # Captures simultanees (multi-bus) : cle = interface, valeur =
+    # {"process", "file": Path, "start_time": datetime, "fh": fichier ouvert}
+    captures: dict
     cangen_process: Optional[asyncio.subprocess.Process] = None
     canplayer_process: Optional[asyncio.subprocess.Process] = None
     inject_process: Optional[asyncio.subprocess.Process] = None
     inject_desc: str = ""
     fuzzing_process: Optional[asyncio.subprocess.Process] = None
     websocket_clients: list[WebSocket] = []
+
+    def __init__(self):
+        self.captures = {}
 
 state = ProcessState()
 
@@ -94,7 +97,20 @@ async def lifespan(app: FastAPI):
     await db.close_db()
   
   # Stop all processes on shutdown
-  for proc in [state.candump_process, state.capture_process,
+  for slot in list(state.captures.values()):
+    proc = slot.get("process")
+    if proc and proc.returncode is None:
+      proc.terminate()
+      try:
+        await asyncio.wait_for(proc.wait(), timeout=2.0)
+      except Exception:
+        proc.kill()
+    try:
+      slot["fh"].close()
+    except Exception:
+      pass
+  state.captures.clear()
+  for proc in [state.candump_process,
                state.cangen_process, state.canplayer_process, state.fuzzing_process,
                state.inject_process]:
     if proc and proc.returncode is None:
@@ -196,6 +212,8 @@ class LogEntry(BaseModel):
     parent_id: Optional[str] = Field(default=None, alias="parentId")  # ID of parent log if this is a split
     is_origin: bool = Field(default=False, alias="isOrigin")  # True if this is an origin log (has children)
     tags: list[str] = []
+    interface: Optional[str] = None  # Interface CAN de capture (can0, can1...)
+    bitrate: Optional[int] = None  # Bitrate au moment de la capture
     
     class Config:
         populate_by_name = True

@@ -69,6 +69,8 @@ export interface LogEntry {
   parentId?: string  // ID of parent log if this is a split
   isOrigin?: boolean  // True if this is an origin log (has children)
   tags?: string[]  // Tags: success, failed, original, etc.
+  interface?: string  // Interface CAN de capture (can0, can1...)
+  bitrate?: number  // Bitrate au moment de la capture
 }
 
 export interface SystemStatus {
@@ -123,11 +125,16 @@ export interface CANFrame {
   data: string
 }
 
-export interface CaptureStatus {
+export interface CaptureSlotStatus {
+  interface: string
   running: boolean
   filename?: string
   durationSeconds: number
   framesCount?: number
+}
+
+export interface CaptureStatus {
+  captures: CaptureSlotStatus[]
 }
 
 export interface ProcessStatus {
@@ -336,14 +343,16 @@ export async function startCapture(
   })
 }
 
-export async function stopCapture(): Promise<{ status: string; filename?: string; durationSeconds: number; framesCount?: number }> {
-  return fetchApi("/capture/stop", {
+// Interface en query (?interface=) ; optionnelle si une seule capture tourne
+export async function stopCapture(iface?: CANInterface): Promise<{ status: string; filename?: string; durationSeconds: number; framesCount?: number }> {
+  const qs = iface ? `?interface=${encodeURIComponent(iface)}` : ""
+  return fetchApi(`/capture/stop${qs}`, {
     method: "POST",
   })
 }
 
-export async function getCaptureStatus(): Promise<CaptureStatus> {
-  return fetchApi<CaptureStatus>("/capture/status")
+export async function getCaptureStatus(): Promise<{ captures: CaptureSlotStatus[] }> {
+  return fetchApi<{ captures: CaptureSlotStatus[] }>("/capture/status")
 }
 
 // =============================================================================

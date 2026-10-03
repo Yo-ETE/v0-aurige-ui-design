@@ -18,7 +18,7 @@ import {
   startCapture, stopCapture, getCaptureStatus, type CANInterface, 
   listMissionLogs, deleteLog, renameLog, getLogDownloadUrl, getLogFamilyDownloadUrl,
   startReplay, stopReplay, getReplayStatus, startInjectLog,
-  type LogEntry, type CaptureStatus, type ProcessStatus
+  type LogEntry, type ProcessStatus
 } from "@/lib/api"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useMissionStore } from "@/lib/mission-store"
@@ -47,7 +47,7 @@ export default function CaptureReplay() {
   const currentMission = missions.find((m) => m.id === missionId)
   
   const [canInterface, setCanInterface] = useState<CANInterface>("can0")
-  const [captureStatus, setCaptureStatus] = useState<CaptureStatus>({ running: false, durationSeconds: 0 })
+  const [captureStatus, setCaptureStatus] = useState<{ running: boolean; durationSeconds: number; framesCount?: number; interface?: string }>({ running: false, durationSeconds: 0 })
   const [replayStatus, setReplayStatus] = useState<ProcessStatus>({ running: false })
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -75,12 +75,14 @@ export default function CaptureReplay() {
         getCaptureStatus(),
         getReplayStatus(),
       ])
-      setCaptureStatus(capture)
+      // Vue mono-bus provisoire : capture de l'interface selectionnee, sinon la premiere
+      const slot = capture.captures.find((c) => c.interface === canInterface) ?? capture.captures[0]
+      setCaptureStatus(slot ? { running: true, durationSeconds: slot.durationSeconds, framesCount: slot.framesCount, interface: slot.interface } : { running: false, durationSeconds: 0 })
       setReplayStatus(replay)
     } catch (err) {
       // API might not be available - use defaults
     }
-  }, [])
+  }, [canInterface])
 
   // Fetch logs for mission
   const fetchLogs = useCallback(async () => {
@@ -148,7 +150,7 @@ export default function CaptureReplay() {
     setSuccess(null)
     
     try {
-      const result = await stopCapture()
+      const result = await stopCapture(captureStatus.interface as CANInterface | undefined)
       const frames = result.framesCount ?? 0
       setSuccess(`Capture arrêtée: ${result.filename} (${result.durationSeconds}s, ${frames} trames)`)
       if (frames === 0) {

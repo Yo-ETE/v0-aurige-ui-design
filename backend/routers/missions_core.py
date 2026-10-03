@@ -336,6 +336,8 @@ async def list_mission_logs(mission_id: str):
             parentId=parent_id,
             isOrigin=is_origin,
             tags=meta.get("tags", []),
+            interface=meta.get("interface"),
+            bitrate=meta.get("bitrate"),
         ))
 
     return sorted(logs, key=lambda x: x.created_at, reverse=True)
