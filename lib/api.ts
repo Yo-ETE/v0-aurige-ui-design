@@ -1942,6 +1942,41 @@ export async function validateCausality(params: {
   })
 }
 
+export interface InterBusPair {
+  id_a: string
+  id_b: string
+  co: number
+  avg_delay_ms: number
+  p_forward: number
+  kind: "relay" | "translated"
+}
+
+export interface InterBusResult {
+  status: string
+  pairs: InterBusPair[]
+  blocked_ids: string[]
+  total_a: number
+  total_b: number
+  elapsed_ms: number
+}
+
+export async function interBusCorrelation(
+  missionId: string,
+  logAId: string,
+  logBId: string,
+  windowMs = 20
+): Promise<InterBusResult> {
+  return fetchApi("/analysis/inter-bus-correlation", {
+    method: "POST",
+    body: JSON.stringify({
+      mission_id: missionId,
+      log_a_id: logAId,
+      log_b_id: logBId,
+      window_ms: windowMs,
+    }),
+  })
+}
+
 export async function getInterIdDependencies(params: {
   missionId?: string
   logPath?: string

@@ -119,7 +119,7 @@ def test_cors_headers_on_401(booted):
 READ_ONLY_ALLOWLIST = [
     r"/compare-logs$", r"/co-occurrence$", r"^/api/analysis/family-diff$",
     r"^/api/analysis/byte-heatmap$", r"^/api/analysis/auto-detect-signals$",
-    r"^/api/analysis/inter-id-dependencies$", r"^/api/analysis/correlate-obd$",
+    r"^/api/analysis/inter-id-dependencies$", r"^/api/analysis/inter-bus-correlation$", r"^/api/analysis/correlate-obd$",
     r"^/api/fuzzing/analyze-crash$", r"^/api/fuzzing/compare-logs$",
     r"^/api/sniffer/(start|stop)$",
     # OBD : payloads fixes en lecture seule

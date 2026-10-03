@@ -112,6 +112,7 @@ EXPECTED: list[tuple[str, str]] = [
     ('POST', '/api/analysis/byte-heatmap'),
     ('POST', '/api/analysis/correlate-obd'),
     ('POST', '/api/analysis/family-diff'),
+    ('POST', '/api/analysis/inter-bus-correlation'),
     ('POST', '/api/analysis/inter-id-dependencies'),
     ('POST', '/api/analysis/validate-causality'),
     ('POST', '/api/auth/login'),

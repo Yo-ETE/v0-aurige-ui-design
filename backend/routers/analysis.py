@@ -7,9 +7,11 @@ import asyncio
 import re
 import time
 from pathlib import Path
+from bisect import bisect_left
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
 
 import main
 from main import (
@@ -1028,4 +1030,108 @@ async def validate_causality_endpoint(request: CausalityRequest):
         "max_lag_ms": max_lag,
         "classification": classification,
         "details": results,
+    }
+
+
+
+# =============================================================================
+# Correlation inter-bus (routage gateway) - analyse offline de deux logs
+# =============================================================================
+
+class InterBusRequest(BaseModel):
+    mission_id: str
+    log_a_id: str  # bus A : prise directe
+    log_b_id: str  # bus B : OBD
+    window_ms: float = 20.0
+
+
+_INTERBUS_LINE = re.compile(r"\((\d+\.\d+)\)\s+\w+\s+([0-9A-Fa-f]+)#([0-9A-Fa-f]*)")
+
+
+def _parse_interbus_log(log_file: Path) -> list:
+    """Parse un log candump -L en [(ts, can_id, payload)] trie par temps.
+    Pas de filtre OBD : le trafic 7E8 etc. est justement ce qu'on cherche."""
+    frames = []
+    with open(str(log_file), "r") as f:
+        for line in f:
+            m = _INTERBUS_LINE.match(line.strip())
+            if m:
+                frames.append((float(m.group(1)), m.group(2).upper(), m.group(3).upper()))
+    frames.sort(key=lambda fr: fr[0])
+    return frames
+
+
+@router.post("/api/analysis/inter-bus-correlation")
+async def inter_bus_correlation_endpoint(request: InterBusRequest):
+    """
+    Revele le routage gateway entre deux bus captures simultanement (horloge
+    epoch commune) : pour chaque trame du bus A, quelles trames du bus B
+    apparaissent dans les window_ms suivantes. Complexite O(A + B + matches)
+    apres tri (pointeur glissant sur B), pas de produit A*B.
+    """
+    start_time = time.time()
+    mission_dir = Path(main.MISSIONS_DIR) / main.sanitize_id(request.mission_id)
+    if not mission_dir.exists():
+        raise HTTPException(status_code=404, detail="Mission non trouvee")
+    log_a_file = mission_dir / "logs" / f"{main.sanitize_id(request.log_a_id)}.log"
+    log_b_file = mission_dir / "logs" / f"{main.sanitize_id(request.log_b_id)}.log"
+    if not log_a_file.exists():
+        raise HTTPException(status_code=404, detail=f"Log A non trouve: {request.log_a_id}")
+    if not log_b_file.exists():
+        raise HTTPException(status_code=404, detail=f"Log B non trouve: {request.log_b_id}")
+
+    window_s = max(request.window_ms, 0.0) / 1000.0
+    frames_a = _parse_interbus_log(log_a_file)
+    frames_b = _parse_interbus_log(log_b_file)
+    b_ts = [fr[0] for fr in frames_b]
+
+    count_a = {}       # id_a -> nb de trames A
+    matched_a = set()  # id_a ayant eu au moins un echo en B
+    agg = {}           # (id_a, id_b) -> [co, somme_delai_ms, nb_payload_identique]
+
+    lo = 0
+    for ts_a, id_a, pay_a in frames_a:
+        count_a[id_a] = count_a.get(id_a, 0) + 1
+        # A est trie : le premier B >= ts_a ne recule jamais
+        if lo < len(b_ts) and b_ts[lo] < ts_a:
+            lo = bisect_left(b_ts, ts_a, lo)
+        seen = set()  # une seule co-occurrence par (trame A, id_b)
+        j = lo
+        limit = ts_a + window_s
+        while j < len(b_ts) and b_ts[j] <= limit:
+            ts_b, id_b, pay_b = frames_b[j]
+            j += 1
+            if id_b in seen:
+                continue
+            seen.add(id_b)
+            rec = agg.setdefault((id_a, id_b), [0, 0.0, 0])
+            rec[0] += 1
+            rec[1] += (ts_b - ts_a) * 1000.0
+            if pay_a == pay_b:
+                rec[2] += 1
+        if seen:
+            matched_a.add(id_a)
+
+    pairs = []
+    for (id_a, id_b), (co, sum_delay, same) in agg.items():
+        pairs.append({
+            "id_a": id_a,
+            "id_b": id_b,
+            "co": co,
+            "avg_delay_ms": round(sum_delay / co, 3),
+            "p_forward": round(co / count_a[id_a], 4),
+            "kind": "relay" if same / co >= 0.5 else "translated",
+        })
+    pairs.sort(key=lambda p: p["p_forward"] * p["co"], reverse=True)
+    pairs = pairs[:50]
+
+    blocked_ids = sorted(i for i in count_a if i not in matched_a)[:200]
+
+    return {
+        "status": "success",
+        "pairs": pairs,
+        "blocked_ids": blocked_ids,
+        "total_a": len(frames_a),
+        "total_b": len(frames_b),
+        "elapsed_ms": round((time.time() - start_time) * 1000, 1),
     }
