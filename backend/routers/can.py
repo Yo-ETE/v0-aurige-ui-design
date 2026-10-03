@@ -350,8 +350,18 @@ async def scan_bitrate(interface: str = Query(default="can0"), timeout: float = 
     results.sort(key=lambda r: -r.score)
     
     best = results[0] if results and results[0].score > 0 else None
+    # Laisse l'interface UP au meilleur debit pour qu'elle soit utilisable tout de suite
+    # (sans ca, l'utilisateur devait la reinitialiser a la main apres le scan).
+    # Sans meilleur debit (aucun trafic), on la laisse DOWN.
+    if best:
+        try:
+            main.can_interface_up(interface, best.bitrate)
+        except Exception:
+            # Le scan reste valide meme si la remise en service echoue
+            pass
+
     scan_ms = int((time.time() - start_time) * 1000)
-    
+
     return BitrateScanResponse(
         interface=interface,
         results=results,
