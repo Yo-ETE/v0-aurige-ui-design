@@ -183,7 +183,7 @@ export default function Generateur() {
                   onValueChange={(v) => setCanInterface(v as CANInterface)}
                   disabled={status.running}
                 >
-                  <SelectTrigger id="can-interface">
+                  <SelectTrigger id="can-interface" className="w-full min-w-0">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
