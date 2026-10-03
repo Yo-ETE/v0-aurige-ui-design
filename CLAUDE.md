@@ -26,8 +26,10 @@ depuis tout navigateur (desktop et mobile).
 - `app/` — pages Next.js, une page = un module : `controle-can`, `capture-replay`,
   `isolation`, `comparaison`, `analyse-can`, `obd-ii`, `signal-finder`, `fuzzing`,
   `crash-recovery`, `generateur`, `dbc`, `missions/[id]`, `configuration`.
-- `backend/main.py` — **fichier central : ~8 350 lignes, ~101 endpoints.** C'est le
-  contrôleur système faisant autorité ; le frontend n'exécute jamais de commande shell.
+- `backend/main.py` — **noyau (~2 290 lignes) : helpers partagés, `state`, constantes, modèles
+  Pydantic, `lifespan`, app + `include_router`.** Contrôleur système faisant autorité ; le frontend
+  n'exécute jamais de commande shell. Les endpoints sont dans `backend/routers/<domaine>.py`
+  (voir « Points d'attention » pour l'architecture router).
 - `backend/dbc_parser.py` — parsing des fichiers DBC standard.
 - `backend/error_logger.py` — logging applicatif et erreurs.
 - `lib/` — client API TypeScript (`api.ts`, ~1 700 lignes), stores Zustand
@@ -97,9 +99,19 @@ ethernet) · `system/*` (apt, update, backups, reboot, restart-services) · `tai
 - **Historique récurrent d'erreurs d'hydratation Next.js** (rendu de l'heure, terminal
   flottant, auto-scroll). Attention à tout rendu dépendant du temps / de `Date` / de
   `window` : gérer le `mount` client, `suppressHydrationWarning` si besoin.
-- `backend/main.py` fait 8 000+ lignes dans un seul fichier → candidat évident au
-  découpage en routers FastAPI par domaine (can, capture, missions, obd, analysis…). **Dette
-  ouverte** (refactor risqué, non fait).
+- ~~`backend/main.py` monolithe~~ : **DÉCOUPÉ** (3 oct. 2026). `main.py` passé de 9357 à ~2290
+  lignes = helpers partagés + `state` + constantes + **tous les modèles Pydantic** + `lifespan` +
+  l'app + les `include_router`. Les endpoints vivent dans `backend/routers/<domaine>.py`
+  (tailscale, system, network, can, capture, replay, generator, injection [inject+aud06+known-frames],
+  fuzzing, obd, missions_core, missions_dbc, missions_compare, dbc, analysis, ws) + `auth`/`users`
+  préexistants. **Architecture (à respecter si tu ajoutes/déplaces une route) :** un router fait
+  `import main` et appelle TOUT helper/état/constante patchable comme `main.<x>` à l'exécution
+  (JAMAIS `from main import <helper>` — les tests patchent `main.<x>`) ; `from main import` réservé
+  aux modèles Pydantic (non patchés) ; `app.include_router(...)` TOUJOURS avant `fastapi_app = app`
+  (rebind CORS). Filet : `backend/tests/test_route_inventory.py` fige l'ensemble des routes (149) et
+  détecte doubles ; `test_integration_boot` vérifie que chaque route mutante reste gardée. Les deux
+  aplatissent `_IncludedRouter` (FastAPI 0.141 n'aplatit pas les routers inclus dans `app.routes`).
+  Seules 3 routes restent `@app` dans main : GET `/status`, `/api/status`, `/api/health`.
 - ~~Doublon `/api/system/restart-services`~~ : **résolu** (une seule définition).
 - ~~Incohérences de packaging~~ : **résolues** (URLs repo → `v0-aurige-ui-design` dans README +
   `install_pi.sh` ; `.env.example` créé ; `scripts/update_pi.sh` cible `main`).
