@@ -173,7 +173,14 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
     if (isRunning) {
       stop()
     }
-    set({ selectedInterface: iface })
+    set({
+      selectedInterface: iface,
+      notchActive: false,
+      notchBaseline: new Map(),
+      noiseMask: new Map(),
+      changedSinceNotchById: new Map(),
+      changeCountSinceNotchById: new Map(),
+    })
   },
   
   setIdFilter: (filter) => set({ idFilter: filter }),
@@ -188,7 +195,15 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
       set({ ws: null })
     }
     
-    set({ isConnecting: true, error: null })
+    set({
+      isConnecting: true,
+      error: null,
+      notchActive: false,
+      notchBaseline: new Map(),
+      noiseMask: new Map(),
+      changedSinceNotchById: new Map(),
+      changeCountSinceNotchById: new Map(),
+    })
     
     try {
       const status = await getCANStatus(selectedInterface)
@@ -384,7 +399,12 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
                   changeCountSinceNotchById.set(id, counts)
                 }
                 changedSet.add(i)
-                counts[i] = (counts[i] || 0) + 1
+                // Count real transitions only (not every frame differing from baseline)
+                if (existing && existing.bytes[i] !== newBytes[i]) {
+                  counts[i] = (counts[i] || 0) + 1
+                } else if (counts[i] === undefined) {
+                  counts[i] = 1
+                }
               }
             }
           }
