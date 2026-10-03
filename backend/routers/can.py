@@ -103,6 +103,117 @@ async def initialize_can(request: CANInitRequest):
     }
 
 
+class BusIdentifyRequest(BaseModel):
+    interface: str = "can0"
+    durationSec: float = 2
+
+
+# Seuils de l'heuristique de profil de bus (frames/s, sur la fenêtre observée).
+_IDENTIFY_LOW_HZ = 50          # en dessous : bus peu actif (diag/infotainment)
+_IDENTIFY_HIGH_HZ = 800        # au dessus : charge élevée (powertrain probable)
+_IDENTIFY_LOW_ID_SHARE = 0.6   # part des trames en 0x000-0x3FF pour dire "IDs bas dominants"
+_IDENTIFY_VARIED_MIN_IDS = 8   # nb d'IDs distincts pour parler de trafic "varié"
+
+
+async def _candump_sample(interface: str, duration: float) -> list[str]:
+    """Échantillonne candump -ta pendant `duration` s (LECTURE SEULE, ne touche pas au lien)."""
+    proc = await asyncio.create_subprocess_exec(
+        "candump", "-ta", interface,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    lines: list[str] = []
+    loop = asyncio.get_event_loop()
+    end_time = loop.time() + duration
+    try:
+        while loop.time() < end_time:
+            try:
+                line = await asyncio.wait_for(proc.stdout.readline(), timeout=max(0.05, end_time - loop.time()))
+            except asyncio.TimeoutError:
+                break
+            if not line:
+                break
+            decoded = line.decode("utf-8", errors="ignore").strip()
+            if decoded:
+                lines.append(decoded)
+    finally:
+        try:
+            proc.terminate()
+        except ProcessLookupError:
+            pass
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=1.0)
+        except asyncio.TimeoutError:
+            proc.kill()
+    return lines
+
+
+def _estimate_bus_profile(frame_count: int, load_hz: float, ranges: dict, unique_ids: int) -> str:
+    """Heuristique de profil de bus à partir de la charge et de la répartition des IDs."""
+    if frame_count == 0:
+        return "Aucun trafic — vérifiez câblage / terminaison 120Ω / bitrate"
+    if load_hz < _IDENTIFY_LOW_HZ:
+        return "diag/infotainment ou bus peu actif"
+    low = ranges["0x000-0x0FF"] + ranges["0x100-0x3FF"]
+    if load_hz > _IDENTIFY_HIGH_HZ and low / frame_count >= _IDENTIFY_LOW_ID_SHARE:
+        return "powertrain probable (charge élevée, IDs bas)"
+    populated = sum(1 for k in ("0x000-0x0FF", "0x100-0x3FF", "0x400-0x7FF", "extended") if ranges[k] > 0)
+    if load_hz <= _IDENTIFY_HIGH_HZ and populated >= 2 and unique_ids >= _IDENTIFY_VARIED_MIN_IDS:
+        return "body/confort probable"
+    return "indéterminé"
+
+
+@router.post("/api/can/identify")
+async def identify_bus(request: BusIdentifyRequest):
+    """
+    Aide à identifier un bus inconnu : écoute passive (candump -ta, aucune émission,
+    aucun changement de bitrate / état du lien) puis profil charge / IDs / estimation.
+    """
+    if request.interface not in ["can0", "can1", "vcan0"]:
+        raise HTTPException(status_code=400, detail="Invalid interface. Use can0, can1, or vcan0.")
+    duration = max(0.5, min(10.0, float(request.durationSec)))
+    if not main.get_can_interface_status(request.interface).up:
+        raise HTTPException(status_code=400, detail="Interface down — initialisez-la d'abord (Contrôle CAN)")
+
+    lines = await _candump_sample(request.interface, duration)
+
+    ranges = {"0x000-0x0FF": 0, "0x100-0x3FF": 0, "0x400-0x7FF": 0, "extended": 0}
+    counts: dict[str, int] = {}
+    frame_count = 0
+    for line in lines:
+        m = re.search(r"\s([0-9A-Fa-f]+)#", line)
+        if not m:
+            continue
+        raw = m.group(1)
+        value = int(raw, 16)
+        frame_count += 1
+        # candump affiche 8 chiffres hex pour les IDs étendus (29 bits)
+        if len(raw) > 3 or value > 0x7FF:
+            ranges["extended"] += 1
+        elif value <= 0xFF:
+            ranges["0x000-0x0FF"] += 1
+        elif value <= 0x3FF:
+            ranges["0x100-0x3FF"] += 1
+        else:
+            ranges["0x400-0x7FF"] += 1
+        key = raw.upper()
+        counts[key] = counts.get(key, 0) + 1
+
+    load_hz = round(frame_count / duration)
+    top_ids = [{"id": i, "count": c} for i, c in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:10]]
+    return {
+        "status": "ok",
+        "interface": request.interface,
+        "durationSec": duration,
+        "frameCount": frame_count,
+        "uniqueIds": len(counts),
+        "loadHz": load_hz,
+        "idRanges": ranges,
+        "topIds": top_ids,
+        "estimate": _estimate_bus_profile(frame_count, load_hz, ranges, len(counts)),
+    }
+
+
 @router.post("/api/can/scan-bitrate")
 async def scan_bitrate(interface: str = Query(default="can0"), timeout: float = Query(default=1.5)):
     """

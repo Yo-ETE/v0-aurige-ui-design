@@ -57,6 +57,7 @@ def allows(role, permissions, needed):
 _ROUTE_RULES = [
     # --- Injection de trames / pilotage du bus ---
     ("POST", r"^/api/can/send", ["can_inject"]),
+    ("POST", r"^/api/can/identify", ["capture_run"]),  # lecture passive du bus
     ("POST", r"^/api/can/(init|stop|scan-bitrate)", ["can_inject"]),
     ("POST", r"^/api/generator/", ["can_inject"]),
     ("POST", r"^/api/inject/", ["can_inject"]),

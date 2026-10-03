@@ -118,6 +118,7 @@ EXPECTED: list[tuple[str, str]] = [
     ('POST', '/api/auth/login'),
     ('POST', '/api/auth/logout'),
     ('POST', '/api/auth/users'),
+    ('POST', '/api/can/identify'),
     ('POST', '/api/can/init'),
     ('POST', '/api/can/scan-bitrate'),
     ('POST', '/api/can/send'),

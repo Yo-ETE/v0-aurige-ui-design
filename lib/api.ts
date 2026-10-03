@@ -315,6 +315,38 @@ export async function scanBitrate(iface: "can0" | "can1", timeout?: number): Pro
   })
 }
 
+export interface BusIdRange {
+  "0x000-0x0FF": number
+  "0x100-0x3FF": number
+  "0x400-0x7FF": number
+  extended: number
+}
+
+export interface BusIdTop {
+  id: string
+  count: number
+}
+
+export interface BusIdentifyResult {
+  status: string
+  interface: CANInterface
+  durationSec: number
+  frameCount: number
+  uniqueIds: number
+  loadHz: number
+  idRanges: BusIdRange
+  topIds: BusIdTop[]
+  estimate: string
+}
+
+/** Écoute passive d'un bus inconnu (charge, répartition des IDs, profil estimé). Lecture seule. */
+export async function identifyBus(iface: CANInterface, durationSec = 2): Promise<BusIdentifyResult> {
+  return fetchApi("/can/identify", {
+    method: "POST",
+    body: JSON.stringify({ interface: iface, durationSec }),
+  })
+}
+
 export async function sendCANFrame(frame: CANFrame): Promise<{ status: string }> {
   return fetchApi("/can/send", {
     method: "POST",
