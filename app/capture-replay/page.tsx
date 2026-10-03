@@ -18,7 +18,7 @@ import {
   startCapture, stopCapture, getCaptureStatus, type CANInterface, 
   listMissionLogs, deleteLog, renameLog, getLogDownloadUrl, getLogFamilyDownloadUrl,
   startReplay, stopReplay, getReplayStatus, startInjectLog,
-  type LogEntry, type ProcessStatus
+  type LogEntry, type ProcessStatus, type CaptureSlotStatus
 } from "@/lib/api"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useMissionStore } from "@/lib/mission-store"
@@ -47,7 +47,8 @@ export default function CaptureReplay() {
   const currentMission = missions.find((m) => m.id === missionId)
   
   const [canInterface, setCanInterface] = useState<CANInterface>("can0")
-  const [captureStatus, setCaptureStatus] = useState<{ running: boolean; durationSeconds: number; framesCount?: number; interface?: string }>({ running: false, durationSeconds: 0 })
+  // Captures live, une entree par interface (multi-bus)
+  const [captures, setCaptures] = useState<CaptureSlotStatus[]>([])
   const [replayStatus, setReplayStatus] = useState<ProcessStatus>({ running: false })
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -68,6 +69,10 @@ export default function CaptureReplay() {
   const [replaySpeed, setReplaySpeed] = useState(1)
   const [replayLoop, setReplayLoop] = useState(1) // 1 = une fois, 0 = infini
 
+  // Etat de capture de l'interface selectionnee (derive de la liste des captures live)
+  const selectedSlot = captures.find((c) => c.interface === canInterface)
+  const selectedCapturing = !!selectedSlot
+
   // Fetch statuses
   const fetchStatuses = useCallback(async () => {
     try {
@@ -75,14 +80,12 @@ export default function CaptureReplay() {
         getCaptureStatus(),
         getReplayStatus(),
       ])
-      // Vue mono-bus provisoire : capture de l'interface selectionnee, sinon la premiere
-      const slot = capture.captures.find((c) => c.interface === canInterface) ?? capture.captures[0]
-      setCaptureStatus(slot ? { running: true, durationSeconds: slot.durationSeconds, framesCount: slot.framesCount, interface: slot.interface } : { running: false, durationSeconds: 0 })
+      setCaptures(capture.captures.filter((c) => c.running !== false))
       setReplayStatus(replay)
     } catch (err) {
       // API might not be available - use defaults
     }
-  }, [canInterface])
+  }, [])
 
   // Fetch logs for mission
   const fetchLogs = useCallback(async () => {
@@ -145,16 +148,16 @@ export default function CaptureReplay() {
     }
   }
 
-  const handleStopCapture = async () => {
+  const handleStopCapture = async (iface: string) => {
     setError(null)
     setSuccess(null)
     
     try {
-      const result = await stopCapture(captureStatus.interface as CANInterface | undefined)
+      const result = await stopCapture(iface as CANInterface)
       const frames = result.framesCount ?? 0
-      setSuccess(`Capture arrêtée: ${result.filename} (${result.durationSeconds}s, ${frames} trames)`)
+      setSuccess(`Capture arrêtée sur ${iface}: ${result.filename} (${result.durationSeconds}s, ${frames} trames)`)
       if (frames === 0) {
-        setError(`Capture à 0 trame. Vérifiez que l'interface ${canInterface} est UP et que le bus CAN est connecté (candump n'a rien reçu).`)
+        setError(`Capture à 0 trame. Vérifiez que l'interface ${iface} est UP et que le bus CAN est connecté (candump n'a rien reçu).`)
       }
       await Promise.all([fetchStatuses(), fetchLogs()])
     } catch (err) {
@@ -325,7 +328,7 @@ const handleDeleteLog = async (logId: string) => {
               <Select
                 value={canInterface}
                 onValueChange={(v) => setCanInterface(v as CANInterface)}
-                disabled={captureStatus.running || replayStatus.running}
+                disabled={replayStatus.running}
               >
                 <SelectTrigger id="can-interface" className="w-48">
                   <SelectValue />
@@ -337,7 +340,7 @@ const handleDeleteLog = async (logId: string) => {
                 </SelectContent>
               </Select>
               <span className="text-xs text-muted-foreground">
-                Capture et replay sur cette interface
+                Interface utilisée pour démarrer une capture, un replay ou un rejeu de fond
               </span>
 
               <div className="flex flex-wrap items-center gap-2 lg:ml-auto">
@@ -381,16 +384,17 @@ const handleDeleteLog = async (logId: string) => {
             </div>
           </CardHeader>
           <CardContent className="space-y-6">
-            {captureStatus.running ? (
+            {selectedSlot ? (
               <div className="flex flex-col items-center justify-center gap-1 rounded-lg bg-destructive/10 py-6">
+                <span className="text-xs font-mono text-muted-foreground">{selectedSlot.interface}</span>
                 <div className="flex items-center gap-3">
                   <Circle className="h-4 w-4 animate-pulse fill-destructive text-destructive" />
                   <span className="text-2xl font-mono font-semibold text-destructive">
-                    {formatTime(captureStatus.durationSeconds)}
+                    {formatTime(selectedSlot.durationSeconds)}
                   </span>
                 </div>
                 <span className="text-sm text-muted-foreground">
-                  {(captureStatus.framesCount ?? 0).toLocaleString()} trames capturées
+                  {(selectedSlot.framesCount ?? 0).toLocaleString()} trames capturées
                 </span>
               </div>
             ) : isCountingDown ? (
@@ -440,24 +444,72 @@ const handleDeleteLog = async (logId: string) => {
               </div>
             )}
 
-            <div className="flex gap-3">
+            <div className="flex flex-wrap gap-3">
               <Button
                 onClick={startCaptureWithCountdown}
-                disabled={captureStatus.running || !missionId || isCountingDown}
+                disabled={selectedCapturing || !missionId || isCountingDown}
                 className="flex-1 gap-2"
               >
                 <Circle className="h-4 w-4" />
-                {isCountingDown ? "Preparation..." : "Demarrer capture"}
+                {isCountingDown ? "Preparation..." : `Demarrer capture (${canInterface})`}
               </Button>
               <Button
                 variant="destructive"
-                onClick={handleStopCapture}
-                disabled={!captureStatus.running}
+                onClick={() => handleStopCapture(canInterface)}
+                disabled={!selectedCapturing}
                 className="flex-1 gap-2"
               >
                 <Square className="h-4 w-4" />
-                Arreter
+                Arreter {canInterface}
               </Button>
+            </div>
+
+            {/* Captures actives (une ligne par interface) */}
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-foreground">Captures actives</p>
+              {captures.length === 0 ? (
+                <p className="text-xs text-muted-foreground">Aucune capture en cours</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-left text-muted-foreground">
+                        <th className="pr-3 pb-1 font-normal">Interface</th>
+                        <th className="pr-3 pb-1 font-normal">Fichier</th>
+                        <th className="pr-3 pb-1 font-normal">Durée</th>
+                        <th className="pr-3 pb-1 font-normal">Trames</th>
+                        <th className="pb-1 font-normal"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {captures.map((c) => (
+                        <tr key={c.interface} className="border-t border-border">
+                          <td className="pr-3 py-1.5 font-mono text-foreground">
+                            <span className="inline-flex items-center gap-1.5">
+                              <Circle className="h-2.5 w-2.5 animate-pulse fill-destructive text-destructive" />
+                              {c.interface}
+                            </span>
+                          </td>
+                          <td className="pr-3 py-1.5 font-mono break-all text-muted-foreground">{c.filename ?? "-"}</td>
+                          <td className="pr-3 py-1.5 font-mono">{formatTime(c.durationSeconds)}</td>
+                          <td className="pr-3 py-1.5 font-mono">{(c.framesCount ?? 0).toLocaleString()}</td>
+                          <td className="py-1.5 text-right">
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              className="h-7 gap-1 px-2"
+                              onClick={() => handleStopCapture(c.interface)}
+                            >
+                              <Square className="h-3 w-3" />
+                              Stop
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
 
             <p className="text-xs text-muted-foreground">
@@ -566,6 +618,11 @@ const handleDeleteLog = async (logId: string) => {
                           <p className="text-xs text-muted-foreground">
                             {log.framesCount.toLocaleString()} trames • {formatFileSize(log.size)}
                             {log.durationSeconds && ` • ${formatTime(log.durationSeconds)}`}
+                            {log.interface && (
+                            <span className="ml-1 inline-flex rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground">
+                              {log.interface}{log.bitrate ? ` · ${Math.round(log.bitrate / 1000)}k` : ""}
+                            </span>
+                          )}
                           </p>
                         </div>
                         <div className="flex flex-wrap gap-2">
@@ -584,7 +641,7 @@ const handleDeleteLog = async (logId: string) => {
                               variant="ghost" 
                               className="h-7 w-7"
                               onClick={() => handleReplay(log.id)}
-                              disabled={replayStatus.running || captureStatus.running}
+                              disabled={replayStatus.running || selectedCapturing}
                               title="Rejouer"
                             >
                               <Play className="h-3 w-3" />
@@ -596,7 +653,7 @@ const handleDeleteLog = async (logId: string) => {
                             className="h-7 w-7"
                             title="Rejeu de fond (keep-alive)"
                             onClick={() => handleKeepAlive(log.id)}
-                            disabled={captureStatus.running}
+                            disabled={selectedCapturing}
                           >
                             <Repeat className="h-3 w-3" />
                           </Button>
@@ -687,6 +744,11 @@ const handleDeleteLog = async (logId: string) => {
                                 <p className="text-xs text-muted-foreground">
                                   {new Date(originLog.createdAt).toLocaleString("fr-FR")} - {originLog.framesCount.toLocaleString()} trames
                                   {hasFamily && ` - ${family.length} div.`}
+                                  {originLog.interface && (
+                            <span className="ml-1 inline-flex rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground">
+                              {originLog.interface}{originLog.bitrate ? ` · ${Math.round(originLog.bitrate / 1000)}k` : ""}
+                            </span>
+                          )}
                                 </p>
                               </div>
                             </div>
@@ -698,12 +760,12 @@ const handleDeleteLog = async (logId: string) => {
                                   <span className="text-xs">Stop</span>
                                 </Button>
                               ) : (
-                                <Button size="sm" variant="ghost" className="h-7 px-2 gap-1" onClick={() => handleReplay(originLog.id)} disabled={replayStatus.running || captureStatus.running} title="Rejouer">
+                                <Button size="sm" variant="ghost" className="h-7 px-2 gap-1" onClick={() => handleReplay(originLog.id)} disabled={replayStatus.running || selectedCapturing} title="Rejouer">
                                   <Play className="h-3 w-3" />
                                   <span className="text-xs hidden sm:inline">Rejouer</span>
                                 </Button>
                               )}
-                              <Button size="sm" variant="ghost" className="h-7 px-2 gap-1" title="Rejeu de fond (keep-alive)" onClick={() => handleKeepAlive(originLog.id)} disabled={captureStatus.running}>
+                              <Button size="sm" variant="ghost" className="h-7 px-2 gap-1" title="Rejeu de fond (keep-alive)" onClick={() => handleKeepAlive(originLog.id)} disabled={selectedCapturing}>
                                 <Repeat className="h-3 w-3" />
                                 <span className="text-xs hidden sm:inline">Rejeu de fond (keep-alive)</span>
                               </Button>
