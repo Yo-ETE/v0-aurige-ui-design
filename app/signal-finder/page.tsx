@@ -896,10 +896,12 @@ export default function SignalFinderPage() {
                   <div className="flex flex-col gap-1.5">
                     <Label className="text-xs text-muted-foreground">
                       Fenetre d{"'"}alignement (ms)
-                      <Info
-                        className="inline h-3 w-3 ml-1 text-muted-foreground cursor-help"
+                      <span
+                        className="inline-flex align-middle ml-1 cursor-help"
                         title="Tolerance temporelle pour associer un echantillon OBD a une trame CAN. Augmentez si le bus est lent ou les echantillons espaces."
-                      />
+                      >
+                        <Info className="h-3 w-3 text-muted-foreground" />
+                      </span>
                     </Label>
                     <Input
                       type="number"

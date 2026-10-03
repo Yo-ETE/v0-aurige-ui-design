@@ -97,7 +97,7 @@ function MissionRow({
           </span>
           <span className="flex items-center gap-1">
             <Radio className="h-3 w-3" />
-            {mission.canInterface}
+            {mission.canConfig?.interface}
           </span>
           {mission.framesCount > 0 && (
             <span className="flex items-center gap-1">

@@ -17,6 +17,7 @@ export interface IsolationLog {
   missionId: string
   tags: string[]
   frameCount?: number
+  parentId?: string
   children?: IsolationLog[]
 }
 

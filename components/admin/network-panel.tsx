@@ -379,7 +379,7 @@ export function NetworkPanel() {
                     {wifiStatus.secondaryInterfaces && wifiStatus.secondaryInterfaces.length > 0 && (
                       <div className="space-y-2 pt-2 border-t border-border/50">
                         <p className="text-xs text-muted-foreground font-medium">Interfaces reseau</p>
-                        {wifiStatus.secondaryInterfaces.map((iface: { name: string; type: string; label: string; ssid: string; ip: string; signal: number; connected: boolean; isDefaultRoute?: boolean }) => (
+                        {wifiStatus.secondaryInterfaces.map((iface) => (
                           <div
                             key={iface.name}
                             className={`rounded-md border p-2.5 ${
@@ -436,7 +436,7 @@ export function NetworkPanel() {
                             <CheckCircle2 className="h-3 w-3" />
                             Connecte
                           </span>
-                          {wifiStatus.pingMs > 0 && (
+                          {(wifiStatus.pingMs ?? 0) > 0 && (
                             <span className="text-xs text-muted-foreground">
                               Ping: {wifiStatus.pingMs} ms
                             </span>
@@ -492,7 +492,7 @@ export function NetworkPanel() {
                             <CheckCircle2 className="h-3 w-3" />
                             Connecte
                           </span>
-                          {wifiStatus.pingMs > 0 && (
+                          {(wifiStatus.pingMs ?? 0) > 0 && (
                             <span className="text-xs text-muted-foreground">
                               Ping: {wifiStatus.pingMs} ms
                             </span>
@@ -835,7 +835,7 @@ export function NetworkPanel() {
                       )}
                       <span className="min-w-0 break-all font-medium" title={network.ssid}>{network.ssid}</span>
                       {savedNetworks.includes(network.ssid) && (
-                        <Star className="h-3 w-3 text-warning fill-warning" title="Reseau enregistre" />
+                        <span title="Reseau enregistre" className="inline-flex"><Star className="h-3 w-3 text-warning fill-warning" /></span>
                       )}
                       {wifiStatus?.ssid === network.ssid && (
                         <CheckCircle2 className="h-4 w-4 text-success" />

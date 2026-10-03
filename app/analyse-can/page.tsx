@@ -659,16 +659,16 @@ function AnalyseCANPageInner() {
     for (const sig of signalsToSave) {
       try {
         await addDBCSignal(selectedMissionId, {
-          message_id: sig.can_id,
+          can_id: sig.can_id,
           name: sig.name,
           start_bit: sig.start_bit,
-          bit_length: sig.bit_length,
+          length: sig.bit_length,
           byte_order: sig.byte_order,
           is_signed: sig.is_signed,
-          factor: 1,
+          scale: 1,
           offset: 0,
-          min_value: sig.value_range[0],
-          max_value: sig.value_range[1],
+          min_val: sig.value_range[0],
+          max_val: sig.value_range[1],
           unit: "",
           comment: `Auto-detected (confidence: ${(sig.confidence * 100).toFixed(0)}%, entropy: ${sig.entropy.toFixed(2)})`,
         })
@@ -685,18 +685,11 @@ function AnalyseCANPageInner() {
   const hasLog = !!selectedLogId
 
   return (
-    <AppShell>
+    <AppShell
+      title="Analyse CAN"
+      description="Heatmap de variabilite des bytes et auto-detection de signaux par analyse entropique"
+    >
       <div className="flex flex-col gap-6">
-        {/* Header */}
-        <div>
-          <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-            <BarChart3 className="h-6 w-6 text-primary" />
-            Analyse CAN
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Heatmap de variabilite des bytes et auto-detection de signaux par analyse entropique
-          </p>
-        </div>
 
         {/* Mission banner */}
         {activeMission && (

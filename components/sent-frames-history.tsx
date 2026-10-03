@@ -7,6 +7,8 @@ import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Send, Trash2, CheckCircle2, XCircle, Clock, Download, Play, Skull } from "lucide-react"
 
+import type { CANInterface } from "@/lib/api"
+
 // Generate unique ID without crypto.randomUUID (not available in HTTP context)
 function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`
@@ -17,7 +19,7 @@ export interface SentFrame {
   timestamp: Date
   canId: string
   data: string
-  interface: "can0" | "can1"
+  interface: CANInterface
   status: "pending" | "success" | "error"
   description?: string
 }
@@ -65,7 +67,7 @@ export function useSentFramesHistory(maxItems = 50) {
   const trackFrame = useCallback(
     async (
       frame: Omit<SentFrame, "id" | "timestamp" | "status">,
-      sendFn: () => Promise<void>
+      sendFn: () => Promise<unknown>
     ) => {
       const id = addFrame(frame)
       try {

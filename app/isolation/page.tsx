@@ -410,12 +410,11 @@ export default function Isolation() {
     if (pendingAnalyzeFrame && closeDialog) {
       setTimeout(() => {
         setSelectedFrame({
-          timestamp: 0,
           canId: pendingAnalyzeFrame.canId,
           data: pendingAnalyzeFrame.data,
           interface: "can0",
           raw: pendingAnalyzeFrame.data,
-        } as LogFrame)
+        })
         setOriginLogId(newLog.id.replace(".log", ""))
         setAnalyzingLog(newLog)
         setCoOccStep("select")
@@ -708,7 +707,7 @@ export default function Isolation() {
       const result = await analyzeCoOccurrence(missionId, originLogId, {
         logId: originLogId,
         targetCanId: selectedFrame.canId,
-        targetTimestamp: parseFloat(selectedFrame.timestamp),
+        targetTimestamp: parseFloat(selectedFrame.timestamp ?? "0"),
         windowMs: analysisWindowMs,
         direction: analysisDirection,
       })
@@ -1677,6 +1676,7 @@ export default function Isolation() {
                                   disabled={replayingFrameIdx === index}
                                   onClick={async (e) => {
                                     e.stopPropagation()
+                                    if (!frame.canId) return
                                     setReplayingFrameIdx(index)
                                     setReplayedFrameIdx(null)
                                     try {
@@ -1706,6 +1706,7 @@ export default function Isolation() {
                                   className="h-6 w-6"
                                   onClick={(e) => {
                                     e.stopPropagation()
+                                    if (!frame.canId) return
                                     addFrames([{
                                       canId: frame.canId,
                                       data: frame.data || frame.raw || "",
@@ -1725,7 +1726,7 @@ export default function Isolation() {
                                     e.stopPropagation()
                                     const data = frame.data || frame.raw || ""
                                     const logMission = viewingLog?.missionId || missionId
-                                    if (!logMission) return
+                                    if (!logMission || !frame.canId) return
                                     try {
                                       const ts = frame.timestamp ? String(frame.timestamp) : undefined
                                       const name = `success_${frame.canId}_${Date.now().toString(36)}`
@@ -2033,12 +2034,13 @@ onClick={async () => {
                         <span className="text-sm text-muted-foreground">Trame cible: <Badge className="font-mono">{selectedFrame.canId}</Badge> @ {selectedFrame.timestamp}</span>
                         <Button 
                           onClick={async () => {
+                            if (!selectedFrame.canId) return
                             setIsAnalyzing(true)
                             try {
                               const result = await analyzeCoOccurrence(missionId!, originLogId, {
                                 logId: originLogId,
                                 targetCanId: selectedFrame.canId,
-                                targetTimestamp: parseFloat(selectedFrame.timestamp),
+                                targetTimestamp: parseFloat(selectedFrame.timestamp ?? "0"),
                                 windowMs: analysisWindowMs,
                                 direction: analysisDirection,
                               })
@@ -2247,7 +2249,7 @@ onClick={async () => {
                   <Button 
                     size="sm" 
                     variant={diffViewMode === "bytes" ? "default" : "outline"} 
-                    className={`h-7 px-2 text-xs ${diffViewMode === "outline" ? "bg-transparent" : ""}`}
+                    className={`h-7 px-2 text-xs ${diffViewMode !== "bytes" ? "bg-transparent" : ""}`}
                     onClick={() => setDiffViewMode("bytes")}
                   >
                     Octets
@@ -2255,7 +2257,7 @@ onClick={async () => {
                   <Button 
                     size="sm" 
                     variant={diffViewMode === "bits" ? "default" : "outline"} 
-                    className={`h-7 px-2 text-xs ${diffViewMode === "outline" ? "bg-transparent" : ""}`}
+                    className={`h-7 px-2 text-xs ${diffViewMode !== "bits" ? "bg-transparent" : ""}`}
                     onClick={() => setDiffViewMode("bits")}
                   >
                     Bits

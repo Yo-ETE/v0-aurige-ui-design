@@ -38,6 +38,7 @@ export interface Mission {
   updatedAt: string
   logsCount: number
   framesCount: number
+  lastCaptureDate?: string | null
 }
 
 export interface MissionCreateInput {

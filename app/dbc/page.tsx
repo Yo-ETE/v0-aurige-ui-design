@@ -500,21 +500,13 @@ export default function DBCPage() {
   const totalSignals = dbcData?.messages.reduce((acc, m) => acc + m.signals.length, 0) || 0
 
   return (
-    <AppShell>
+    <AppShell
+      title={`DBC - ${view === "mission" ? currentMission?.name ?? "Mission" : libraryName || "Bibliothèque"}`}
+      description="Gestion des signaux et messages CAN pour l'export DBC"
+    >
     <div className="p-6 space-y-6">
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0">
-          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-            <FileCode className="h-6 w-6 shrink-0 text-primary" />
-            <span className="break-all">
-              DBC - {view === "mission" ? currentMission?.name ?? "Mission" : libraryName || "Bibliothèque"}
-            </span>
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Gestion des signaux et messages CAN pour l&apos;export DBC
-          </p>
-        </div>
         {/* Source switcher */}
         <div className="inline-flex rounded-lg border border-border bg-secondary/30 p-1 self-start">
           <Button

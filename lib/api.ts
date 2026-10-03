@@ -41,6 +41,7 @@ export interface Mission {
   updatedAt: string
   logsCount: number
   framesCount: number
+  lastCaptureDate?: string | null
 }
 
 export interface MissionCreateInput {
@@ -962,6 +963,21 @@ export interface WifiStatus {
   internetSource?: string
   internetInterface?: string
   internetVia?: string
+  hasInternet?: boolean
+  pingMs?: number
+  downloadSpeed?: number
+  secondaryInterfaces?: WifiSecondaryInterface[]
+}
+
+export interface WifiSecondaryInterface {
+  name: string
+  type: string
+  label: string
+  ssid: string
+  ip: string
+  signal: number
+  connected: boolean
+  isDefaultRoute?: boolean
 }
 
 export interface EthernetStatus {
@@ -1397,6 +1413,10 @@ export interface DBCSignal {
   max_val: number
   unit: string
   comment: string
+  // Payloads complets servant au replay (diff de familles / isolation)
+  sample_before?: string
+  sample_ack?: string
+  sample_status?: string
 }
 
 export interface DBCMessage {

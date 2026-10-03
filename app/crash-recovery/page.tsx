@@ -371,14 +371,11 @@ function CrashRecoveryContent() {
   }
 
   return (
-    <AppShell>
+    <AppShell
+      title="Crash Recovery"
+      description="Detection et recuperation apres crash CAN / fuzzing"
+    >
     <div className="container mx-auto space-y-6 py-6">
-      <div>
-        <h1 className="text-3xl font-bold text-foreground">Crash Recovery</h1>
-        <p className="text-muted-foreground mt-1">
-          Detection et recuperation apres crash CAN / fuzzing
-        </p>
-      </div>
 
       {/* Mission warning */}
       {!currentMission && (
