@@ -139,3 +139,7 @@ Outil offensif sur bus CAN réel. Voir `docs/AUDIT.md` pour l'état de sécurit�
 - **WiFi Access Point (hotspot)** créé par `backend/hotspot.py` : nmcli (primaire), hostapd/dnsmasq
   (fallback) ; SSID par défaut `AURIGE`, auto-démarrage ~45s après boot si pas d'internet (boot-only) ;
   mot de passe stocké dans `${AURIGE_DATA_DIR}/hotspot_password.txt`.
+- **Analyse IA** (`backend/ai_client.py`, `routers/ai.py`, endpoints `/api/ai/config|analyze`) : clé LLM
+  fournie par l'utilisateur, stockée dans `${AURIGE_DATA_DIR}/ai_config.json` (0o600), JAMAIS renvoyée
+  par l'API ni loggée ; `PUT /api/ai/config` efface la clé si `base_url`/`provider` change sans nouvelle
+  clé (anti-exfiltration). `analyze` envoie des données CAN à un provider externe (opt-in, nécessite internet).
