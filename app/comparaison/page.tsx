@@ -130,7 +130,7 @@ export default function ComparaisonPage() {
   const missions = useMissionStore((state) => state.missions)
   const { addFrames } = useExportStore()
   const { isCritical } = useCriticalIds()
-  const [pendingLoop, setPendingLoop] = useState<CompareFrameDiff | null>(null)
+  const [pendingLoop, setPendingLoop] = useState<{ canId: string; run: () => void } | null>(null)
 
   const [missionId, setMissionId] = useState<string>("")
   const [missionResolved, setMissionResolved] = useState(false)
@@ -374,7 +374,15 @@ export default function ComparaisonPage() {
     }
   }
 
-  const handleSendFrame = async (frame: CompareFrameDiff, usePayloadA: boolean) => {
+  const handleSendFrame = (frame: CompareFrameDiff, usePayloadA: boolean) => {
+    if (isCritical(frame.can_id)) {
+      setPendingLoop({ canId: frame.can_id, run: () => doSendFrame(frame, usePayloadA) })
+      return
+    }
+    doSendFrame(frame, usePayloadA)
+  }
+
+  const doSendFrame = async (frame: CompareFrameDiff, usePayloadA: boolean) => {
     setSendingFrame(frame.can_id)
     try {
       const payload = usePayloadA ? frame.payload_a : frame.payload_b
@@ -390,7 +398,7 @@ export default function ComparaisonPage() {
   const handleLoopFrame = (frame: CompareFrameDiff) => {
     if (!frame.payload_b) return
     if (isCritical(frame.can_id)) {
-      setPendingLoop(frame)
+      setPendingLoop({ canId: frame.can_id, run: () => doLoopFrame(frame) })
       return
     }
     doLoopFrame(frame)
@@ -1185,7 +1193,7 @@ export default function ComparaisonPage() {
               <AlertDialogTitle>ID critique (AUD-06)</AlertDialogTitle>
               <AlertDialogDescription>
                 Injection volontaire sur{" "}
-                <span className="font-mono font-semibold">{pendingLoop?.can_id}</span>. Cet ID est dans la liste
+                <span className="font-mono font-semibold">{pendingLoop?.canId}</span>. Cet ID est dans la liste
                 critique AUD-06 ; cette action explicite contourne volontairement le garde-fou des balayages.
                 Confirmer ?
               </AlertDialogDescription>
@@ -1194,9 +1202,9 @@ export default function ComparaisonPage() {
               <AlertDialogCancel>Annuler</AlertDialogCancel>
               <AlertDialogAction
                 onClick={() => {
-                  const f = pendingLoop
+                  const run = pendingLoop?.run
                   setPendingLoop(null)
-                  if (f) doLoopFrame(f)
+                  run?.()
                 }}
               >
                 Confirmer l&apos;injection
