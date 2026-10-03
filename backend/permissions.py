@@ -61,6 +61,7 @@ _ROUTE_RULES = [
     ("POST", r"^/api/can/(init|stop|scan-bitrate)", ["can_inject"]),
     ("POST", r"^/api/generator/", ["can_inject"]),
     ("POST", r"^/api/inject/", ["can_inject"]),
+    ("POST", r"^/api/uds/", ["can_inject"]),
     ("POST", r"^/api/known-frames", ["can_inject"]),
     ("PATCH", r"^/api/known-frames", ["can_inject"]),
     ("DELETE", r"^/api/known-frames", ["can_inject"]),
