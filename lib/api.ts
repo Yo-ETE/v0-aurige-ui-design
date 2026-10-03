@@ -965,7 +965,7 @@ export interface WifiStatus {
   internetVia?: string
   hasInternet?: boolean
   pingMs?: number
-  downloadSpeed?: number
+  downloadSpeed?: string
   secondaryInterfaces?: WifiSecondaryInterface[]
 }
 
