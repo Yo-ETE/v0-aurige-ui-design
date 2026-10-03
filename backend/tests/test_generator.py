@@ -104,3 +104,24 @@ def test_fixed_blocked_403_even_with_fixed_data(ctx):
     assert _start(c, idMode="fixed", canId="4C8", dataMode="fixed", dataValue="00").status_code == 403
     mock.assert_not_called()
     assert _start(c, idMode="fixed", canId="360", dataMode="fixed", dataValue="00").status_code == 200
+
+
+@pytest.mark.parametrize("bad", ["i", "r", "0x", "ZZ", "123456789", "FFFFFFFF"])
+def test_fixed_id_non_hex_rejected(ctx, bad):
+    c, main, mock = ctx
+    main._save_blocklist(["4C8"])
+    assert _start(c, idMode="fixed", canId=bad).status_code == 400
+    mock.assert_not_called()
+
+
+def test_fixed_id_normalized(ctx):
+    c, _, mock = ctx
+    assert _start(c, idMode="fixed", canId=" 0x3b7 ").status_code == 200
+    cmd = mock.call_args[0][0]
+    assert cmd[cmd.index("-I") + 1] == "3B7"
+
+
+def test_data_value_trailing_newline_400(ctx):
+    c, _, mock = ctx
+    assert _start(c, dataMode="fixed", dataValue="AA\n").status_code == 400
+    mock.assert_not_called()

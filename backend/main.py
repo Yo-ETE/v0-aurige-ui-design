@@ -1889,7 +1889,7 @@ async def start_generator(request: GeneratorRequest):
 
     data_hex = None
     if request.data_mode == "fixed":
-        if not request.data_value or not re.match(r'^([0-9A-Fa-f]{2}){1,8}$', request.data_value):
+        if not request.data_value or not re.fullmatch(r'(?:[0-9A-Fa-f]{2}){1,8}', request.data_value):
             raise HTTPException(status_code=400, detail="data_value invalide (1 a 8 octets hex)")
         data_hex = request.data_value.upper()
 
@@ -1897,8 +1897,17 @@ async def start_generator(request: GeneratorRequest):
     if id_mode == "fixed":
         if not request.can_id:
             raise HTTPException(status_code=400, detail="can_id requis en mode ID fixe")
-        if is_id_blocked(request.can_id):
-            raise HTTPException(status_code=403, detail=f"ID {_norm_id(request.can_id)} bloque (AUD-06)")
+        # Validation hex stricte AVANT la garde : "i"/"r" seraient sinon interpretes par cangen
+        # comme increment/random et contourneraient AUD-06
+        cid = request.can_id.strip()
+        if not re.fullmatch(r"(?:0[xX])?[0-9A-Fa-f]{1,8}", cid):
+            raise HTTPException(status_code=400, detail="CAN ID invalide")
+        fixed_id = _norm_id(cid)
+        id_val = _id_int(fixed_id)
+        if id_val is None or id_val > 0x1FFFFFFF:
+            raise HTTPException(status_code=400, detail="CAN ID invalide")
+        if is_id_blocked(fixed_id):
+            raise HTTPException(status_code=403, detail=f"ID {fixed_id} bloque (AUD-06)")
     elif _load_blocklist():
         # random et increment balayent tout l'espace d'IDs : cangen ne peut rien exclure
         raise HTTPException(
@@ -1912,7 +1921,7 @@ async def start_generator(request: GeneratorRequest):
         cmd.extend(["-L", str(request.data_length)])
 
     if id_mode == "fixed":
-        cmd.extend(["-I", request.can_id])
+        cmd.extend(["-I", fixed_id])
     elif id_mode == "increment":
         cmd.extend(["-I", "i"])
     else:
