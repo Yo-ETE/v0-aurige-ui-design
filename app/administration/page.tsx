@@ -7,6 +7,7 @@ import { useAuth } from "@/lib/auth-context"
 import { UserManagement } from "@/components/admin/user-management"
 import { SystemPanel } from "@/components/admin/system-panel"
 import { NetworkPanel } from "@/components/admin/network-panel"
+import { AiPanel } from "@/components/admin/ai-panel"
 
 function AdministrationConsole() {
   const { isAdmin, hasArea, isLoading, user } = useAuth()
@@ -19,6 +20,7 @@ function AdministrationConsole() {
     if (isAdmin || hasArea("area_configuration")) {
       t.push({ id: "systeme", label: "Système" })
       t.push({ id: "reseau", label: "Réseau" })
+      t.push({ id: "ia", label: "IA" })
     }
     return t
   }, [isAdmin, hasArea])
@@ -76,6 +78,11 @@ function AdministrationConsole() {
         {tabs.some((t) => t.id === "reseau") && (
           <TabsContent value="reseau" forceMount className="data-[state=inactive]:hidden pt-4">
             <NetworkPanel />
+          </TabsContent>
+        )}
+        {tabs.some((t) => t.id === "ia") && (
+          <TabsContent value="ia" forceMount className="data-[state=inactive]:hidden pt-4">
+            <AiPanel />
           </TabsContent>
         )}
       </Tabs>

@@ -2151,3 +2151,40 @@ export async function replayKnownFrame(
     }),
   })
 }
+
+// =============================================================================
+// Analyse IA (config provider + analyse)
+// =============================================================================
+
+export interface AIConfig {
+  provider: string
+  base_url: string
+  model: string
+  has_key: boolean
+}
+
+export interface AIConfigInput {
+  provider: string
+  base_url?: string
+  model: string
+  api_key?: string
+  clear_key?: boolean
+}
+
+export async function getAIConfig(): Promise<AIConfig> {
+  return fetchApi<AIConfig>("/ai/config", { cache: "no-store" })
+}
+
+export async function setAIConfig(input: AIConfigInput): Promise<AIConfig> {
+  return fetchApi<AIConfig>("/ai/config", {
+    method: "PUT",
+    body: JSON.stringify(input),
+  })
+}
+
+export async function aiAnalyze(context: string, question: string): Promise<{ answer: string }> {
+  return fetchApi<{ answer: string }>("/ai/analyze", {
+    method: "POST",
+    body: JSON.stringify({ context, question }),
+  })
+}
