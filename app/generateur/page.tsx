@@ -1,22 +1,30 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from "react"
+import { useRouter } from "next/navigation"
 import { AppShell } from "@/components/app-shell"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Switch } from "@/components/ui/switch"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Cpu, Play, Square, Shuffle, AlertCircle, CheckCircle2, Loader2 } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { startGenerator, stopGenerator, getGeneratorStatus, createCandumpWebSocket, type ProcessStatus, type CANInterface } from "@/lib/api"
+import { useExportStore } from "@/lib/export-store"
 import { SentFramesHistory, useSentFramesHistory } from "@/components/sent-frames-history"
 
+type GenMode = "random" | "fixed" | "increment"
+
 export default function Generateur() {
+  const router = useRouter()
+  const addExportFrames = useExportStore((state) => state.addFrames)
   const [canInterface, setCanInterface] = useState<CANInterface>("can0")
   const [canId, setCanId] = useState("")
-  const [useRandomId, setUseRandomId] = useState(true)
+  const [idMode, setIdMode] = useState<GenMode>("random")
+  const [dataMode, setDataMode] = useState<GenMode>("random")
+  const [dataValue, setDataValue] = useState("")
+  const [count, setCount] = useState("")
   const [frameLength, setFrameLength] = useState("8")
   const [delay, setDelay] = useState("100")
   const [status, setStatus] = useState<ProcessStatus>({ running: false })
@@ -95,18 +103,25 @@ export default function Generateur() {
     setIsStarting(true)
     setFrameCount(0)
     
+    const countNum = parseInt(count) || 0
+    const idLabel = idMode === "fixed" ? `ID fixe ${canId}` : idMode === "increment" ? "ID incrémental" : "ID aléatoire"
+    const dataLabel = dataMode === "fixed" ? `données ${dataValue}` : dataMode === "increment" ? "données incrémentales" : "données aléatoires"
     const frameId = addFrame({
-      canId: useRandomId ? "RANDOM" : (canId || "7DF"),
-      data: `${frameLength} octets @ ${delay}ms`,
+      canId: idMode === "fixed" ? (canId || "7DF") : idMode === "increment" ? "INCREMENT" : "RANDOM",
+      data: dataMode === "fixed" ? dataValue : `${frameLength} octets @ ${delay}ms`,
       interface: canInterface,
-      description: `Generateur cangen ${useRandomId ? "ID aleatoire" : `ID fixe ${canId}`}`,
+      description: `Générateur cangen ${idLabel}, ${dataLabel}${countNum > 0 ? `, ${countNum} trames` : ""}`,
     })
-    
+
     try {
       await startGenerator(canInterface, {
         delayMs: parseInt(delay) || 100,
         dataLength: parseInt(frameLength) || 8,
-        canId: useRandomId ? undefined : canId || undefined,
+        idMode,
+        canId: idMode === "fixed" ? canId || undefined : undefined,
+        dataMode,
+        dataValue: dataMode === "fixed" ? dataValue || undefined : undefined,
+        count: countNum > 0 ? countNum : undefined,
       })
       updateStatus(frameId, "success")
       setSuccess("Generateur demarre")
@@ -193,21 +208,24 @@ export default function Generateur() {
                 </Select>
               </div>
 
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label>ID aléatoire</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Générer un ID CAN aléatoire pour chaque trame
-                  </p>
-                </div>
-                <Switch
-                  checked={useRandomId}
-                  onCheckedChange={setUseRandomId}
-                  disabled={status.running}
-                />
+              <div className="space-y-2">
+                <Label htmlFor="id-mode">Mode ID</Label>
+                <Select value={idMode} onValueChange={(v) => setIdMode(v as GenMode)} disabled={status.running}>
+                  <SelectTrigger id="id-mode" className="w-full min-w-0">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="random">Aléatoire</SelectItem>
+                    <SelectItem value="fixed">Fixe</SelectItem>
+                    <SelectItem value="increment">Incrémental</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  IDs aléatoire/incrémental interdits si une liste d&apos;IDs critiques (AUD-06) est définie — cangen ne peut pas exclure. Utilisez un ID fixe.
+                </p>
               </div>
 
-              {!useRandomId && (
+              {idMode === "fixed" && (
                 <div className="space-y-2">
                   <Label htmlFor="can-id">CAN ID (hex)</Label>
                   <Input
@@ -222,7 +240,38 @@ export default function Generateur() {
               )}
 
               <div className="space-y-2">
-                <Label htmlFor="frame-length">Longueur de trame (1-8 octets)</Label>
+                <Label htmlFor="data-mode">Mode données</Label>
+                <Select value={dataMode} onValueChange={(v) => setDataMode(v as GenMode)} disabled={status.running}>
+                  <SelectTrigger id="data-mode" className="w-full min-w-0">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="random">Aléatoire</SelectItem>
+                    <SelectItem value="fixed">Fixe</SelectItem>
+                    <SelectItem value="increment">Incrémental</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {dataMode === "fixed" && (
+                <div className="space-y-2">
+                  <Label htmlFor="data-value">Données (hex)</Label>
+                  <Input
+                    id="data-value"
+                    value={dataValue}
+                    onChange={(e) => setDataValue(e.target.value.toUpperCase())}
+                    className="font-mono uppercase"
+                    placeholder="0011223344556677"
+                    disabled={status.running}
+                  />
+                  <p className="text-xs text-muted-foreground">1–8 octets hex</p>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <Label htmlFor="frame-length" className={dataMode === "fixed" ? "text-muted-foreground" : undefined}>
+                  Longueur de trame (1-8 octets)
+                </Label>
                 <Input
                   id="frame-length"
                   type="number"
@@ -230,8 +279,29 @@ export default function Generateur() {
                   onChange={(e) => setFrameLength(e.target.value)}
                   min={1}
                   max={8}
+                  disabled={status.running || dataMode === "fixed"}
+                />
+                {dataMode === "fixed" && (
+                  <p className="text-xs text-muted-foreground">
+                    Ignorée en mode données fixe : la longueur vient de la valeur hex.
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="frame-count">Limite de trames</Label>
+                <Input
+                  id="frame-count"
+                  type="number"
+                  value={count}
+                  onChange={(e) => setCount(e.target.value)}
+                  min={1}
+                  placeholder="illimité"
                   disabled={status.running}
                 />
+                <p className="text-xs text-muted-foreground">
+                  vide = infini (cangen tourne jusqu&apos;à Arrêter)
+                </p>
               </div>
 
               <div className="space-y-2">
@@ -351,7 +421,15 @@ export default function Generateur() {
 
         {/* Sent Frames History */}
         <div className="lg:col-span-2">
-          <SentFramesHistory frames={historyFrames} onClear={clearHistory} />
+          <SentFramesHistory
+            frames={historyFrames}
+            onClear={clearHistory}
+            showExport
+            onReplayFrame={(f) => {
+              addExportFrames([{ canId: f.canId, data: f.data, timestamp: "0", source: "generateur" }])
+              router.push("/replay-rapide")
+            }}
+          />
         </div>
       </div>
     </AppShell>
