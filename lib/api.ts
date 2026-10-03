@@ -383,19 +383,34 @@ export async function getReplayStatus(): Promise<ProcessStatus> {
 // Generator
 // =============================================================================
 
+export type GeneratorIdMode = "random" | "fixed" | "increment"
+export type GeneratorDataMode = "random" | "fixed" | "increment"
+
+export interface GeneratorOptions {
+  delayMs: number
+  dataLength: number
+  idMode?: GeneratorIdMode // defaut backend : fixed si canId fourni, sinon random
+  canId?: string // utilise uniquement si idMode === "fixed"
+  dataMode?: GeneratorDataMode
+  dataValue?: string // hex, si dataMode === "fixed"
+  count?: number // arrete cangen apres N trames
+}
+
 export async function startGenerator(
   iface: CANInterface,
-  delayMs: number,
-  dataLength: number,
-  canId?: string
+  opts: GeneratorOptions
 ): Promise<{ status: string }> {
   return fetchApi("/generator/start", {
     method: "POST",
     body: JSON.stringify({
       interface: iface,
-      delayMs,
-      dataLength,
-      canId,
+      delayMs: opts.delayMs,
+      dataLength: opts.dataLength,
+      idMode: opts.idMode,
+      canId: opts.canId,
+      dataMode: opts.dataMode,
+      dataValue: opts.dataValue,
+      count: opts.count,
     }),
   })
 }

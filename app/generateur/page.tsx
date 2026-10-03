@@ -103,12 +103,11 @@ export default function Generateur() {
     })
     
     try {
-      await startGenerator(
-        canInterface,
-        parseInt(delay) || 100,
-        parseInt(frameLength) || 8,
-        useRandomId ? undefined : canId || undefined
-      )
+      await startGenerator(canInterface, {
+        delayMs: parseInt(delay) || 100,
+        dataLength: parseInt(frameLength) || 8,
+        canId: useRandomId ? undefined : canId || undefined,
+      })
       updateStatus(frameId, "success")
       setSuccess("Generateur demarre")
       await fetchStatus()
