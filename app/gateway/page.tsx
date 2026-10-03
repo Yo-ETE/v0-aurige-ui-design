@@ -225,8 +225,8 @@ function InterBusCard() {
 function estimateClass(estimate: string): string {
   const e = estimate.toLowerCase()
   if (e.includes("obd")) return "bg-sky-600/20 text-sky-400 border-sky-600/30"
-  if (e.includes("gateway") || e.includes("diag")) return "bg-amber-600/20 text-amber-400 border-amber-600/30"
-  if (e.includes("inconnu") || e.includes("silenc") || e.includes("vide")) return "bg-red-600/20 text-red-400 border-red-600/30"
+  if (e.includes("gateway") || e.includes("diag") || e.includes("indétermin") || e.includes("indetermin")) return "bg-amber-600/20 text-amber-400 border-amber-600/30"
+  if (e.includes("aucun") || e.includes("inconnu") || e.includes("silenc") || e.includes("vide")) return "bg-red-600/20 text-red-400 border-red-600/30"
   return "bg-emerald-600/20 text-emerald-400 border-emerald-600/30"
 }
 
@@ -282,8 +282,9 @@ function IdentifyCard() {
             <Label className="text-xs text-muted-foreground">Durée (s)</Label>
             <Input
               type="number"
-              min={1}
-              max={30}
+              min={0.5}
+              max={10}
+              step={0.5}
               className="h-8 text-xs"
               value={duration}
               onChange={(e) => setDuration(Math.min(30, Math.max(1, Number(e.target.value) || 2)))}
