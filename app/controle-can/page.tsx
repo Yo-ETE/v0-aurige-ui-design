@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { AppShell } from "@/components/app-shell"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -23,6 +23,21 @@ const bitrates = [
   { value: "1000000", label: "1 Mbit/s" },
 ]
 
+function getControllerState(state?: string): { label: string; className: string } {
+  switch (state) {
+    case "ERROR-ACTIVE":
+      return { label: "Actif normal", className: "bg-success/20 text-success border-success/30" }
+    case "ERROR-WARNING":
+      return { label: "Avertissement (ERROR-WARNING)", className: "bg-amber-500/20 text-amber-500 border-amber-500/30" }
+    case "ERROR-PASSIVE":
+      return { label: "Erreur passive (ERROR-PASSIVE)", className: "bg-orange-500/20 text-orange-500 border-orange-500/30" }
+    case "BUS-OFF":
+      return { label: "BUS-OFF — vérifiez câblage / terminaison 120Ω", className: "bg-destructive/20 text-destructive border-destructive/30" }
+    default:
+      return { label: state ?? "", className: "bg-muted text-muted-foreground" }
+  }
+}
+
 export default function ControleCAN() {
   const [canInterface, setCanInterface] = useState<"can0" | "can1" | "vcan0">("can0")
   const [bitrate, setBitrate] = useState("500000")
@@ -40,33 +55,62 @@ export default function ControleCAN() {
   // Detailed results toggle
   const [showDetailedResults, setShowDetailedResults] = useState(false)
 
+  // Debit temps reel : echantillon precedent (compteurs + horodatage) conserve entre deux polls
+  const prevSampleRef = useRef<{ iface: string; tx: number; rx: number; t: number } | null>(null)
+  const [txRate, setTxRate] = useState<number | null>(null)
+  const [rxRate, setRxRate] = useState<number | null>(null)
+
+  const resetRates = () => {
+    prevSampleRef.current = null
+    setTxRate(null)
+    setRxRate(null)
+  }
+
   // Fetch CAN interface status
   const fetchStatus = async () => {
     try {
       const status = await getCANStatus(canInterface)
       setCanStatus(status)
+
+      if (status.up) {
+        const now = Date.now()
+        const prev = prevSampleRef.current
+        if (prev && prev.iface === canInterface && now > prev.t) {
+          const dt = (now - prev.t) / 1000
+          // Delta negatif (reset des compteurs) -> 0
+          setTxRate(Math.round(Math.max(0, status.txPackets - prev.tx) / dt))
+          setRxRate(Math.round(Math.max(0, status.rxPackets - prev.rx) / dt))
+        }
+        prevSampleRef.current = { iface: canInterface, tx: status.txPackets, rx: status.rxPackets, t: now }
+      } else {
+        resetRates()
+      }
       if (status.bitrate) {
         setBitrate(status.bitrate.toString())
       }
     } catch {
       setCanStatus(null)
+      resetRates()
     }
   }
 
   useEffect(() => {
+    resetRates()
     fetchStatus()
     const interval = setInterval(fetchStatus, 5000)
     return () => clearInterval(interval)
   }, [canInterface])
 
-  const handleInitialize = async () => {
+  // Prend iface/debit en parametres explicites : evite toute closure perimee
+  // quand on enchaine setState + init (ex. bouton "Initialiser a ce debit").
+  const initializeWith = async (iface: "can0" | "can1" | "vcan0", rate: string) => {
     setError(null)
     setSuccess(null)
     setIsInitializing(true)
-    
+
     try {
-      await initializeCAN(canInterface, parseInt(bitrate))
-      setSuccess(`Interface ${canInterface} initialisee a ${bitrates.find(b => b.value === bitrate)?.label}`)
+      await initializeCAN(iface, parseInt(rate))
+      setSuccess(`Interface ${iface} initialisee a ${bitrates.find(b => b.value === rate)?.label ?? `${rate} bit/s`}`)
       await fetchStatus()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur lors de l'initialisation")
@@ -75,13 +119,16 @@ export default function ControleCAN() {
     }
   }
 
+  const handleInitialize = () => initializeWith(canInterface, bitrate)
+
   const handleStop = async () => {
     setError(null)
     setSuccess(null)
     setIsStopping(true)
-    
+
     try {
       await stopCAN(canInterface)
+      resetRates()
       setSuccess(`Interface ${canInterface} arretee`)
       await fetchStatus()
     } catch (err) {
@@ -135,6 +182,7 @@ export default function ControleCAN() {
   }
 
   const isInitialized = canStatus?.up ?? false
+  const controllerState = getControllerState(canStatus?.can_state)
   const hasAnyResults = Object.values(scanResults).some(r => r.best_bitrate)
 
   return (
@@ -241,21 +289,59 @@ export default function ControleCAN() {
             </div>
           )}
 
+          {/* Etat du controleur CAN */}
+          {canStatus?.can_state && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-muted-foreground">Etat controleur</span>
+              <Badge variant="outline" className={`${controllerState.className} whitespace-normal`}>
+                {controllerState.label}
+              </Badge>
+            </div>
+          )}
+          {canStatus?.can_state === "BUS-OFF" && (
+            <Alert className="border-destructive/50 bg-destructive/10">
+              <AlertCircle className="h-4 w-4 text-destructive" />
+              <AlertDescription className="text-destructive">
+                {"BUS-OFF : le controleur s'est deconnecte du bus apres trop d'erreurs. Verifiez le cablage et la terminaison 120Ω."}
+              </AlertDescription>
+            </Alert>
+          )}
+
           {/* Stats if up */}
           {isInitialized && canStatus && (
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-center">
               <div className="rounded-lg bg-secondary p-3">
                 <p className="text-lg font-bold text-foreground">{canStatus.txPackets}</p>
                 <p className="text-xs text-muted-foreground">TX Packets</p>
+                {txRate !== null && <p className="text-[10px] text-muted-foreground">{txRate} pkt/s</p>}
               </div>
               <div className="rounded-lg bg-secondary p-3">
                 <p className="text-lg font-bold text-foreground">{canStatus.rxPackets}</p>
                 <p className="text-xs text-muted-foreground">RX Packets</p>
+                {rxRate !== null && <p className="text-[10px] text-muted-foreground">{rxRate} pkt/s</p>}
               </div>
               <div className="rounded-lg bg-secondary p-3">
                 <p className="text-lg font-bold text-foreground">{canStatus.errors}</p>
                 <p className="text-xs text-muted-foreground">Errors</p>
               </div>
+              {canStatus.berr_tx != null && (
+                <div className="rounded-lg bg-secondary p-3">
+                  <p className="text-lg font-bold text-foreground">{canStatus.berr_tx}</p>
+                  <p className="text-xs text-muted-foreground">Erreurs bus TX</p>
+                </div>
+              )}
+              {canStatus.berr_rx != null && (
+                <div className="rounded-lg bg-secondary p-3">
+                  <p className="text-lg font-bold text-foreground">{canStatus.berr_rx}</p>
+                  <p className="text-xs text-muted-foreground">Erreurs bus RX</p>
+                </div>
+              )}
+              {canStatus.restarts != null && (
+                <div className="rounded-lg bg-secondary p-3">
+                  <p className="text-lg font-bold text-foreground">{canStatus.restarts}</p>
+                  <p className="text-xs text-muted-foreground">Redemarrages</p>
+                </div>
+              )}
             </div>
           )}
 
@@ -340,7 +426,7 @@ export default function ControleCAN() {
                 {result && !isScanning && (
                   <div className="space-y-2">
                     {result.best_bitrate ? (
-                      <div className="flex items-center gap-2 rounded bg-success/10 border border-success/30 p-3">
+                      <div className="flex flex-wrap items-center gap-2 rounded bg-success/10 border border-success/30 p-3">
                         <Zap className="h-4 w-4 text-success shrink-0" />
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-semibold text-success">
@@ -359,6 +445,22 @@ export default function ControleCAN() {
                           className="gap-1 h-7 px-2 text-[10px]"
                         >
                           Appliquer
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            // Valeurs passees explicitement : pas de dependance a l'etat React tout juste modifie
+                            const rate = result.best_bitrate!.toString()
+                            setCanInterface(iface)
+                            setBitrate(rate)
+                            void initializeWith(iface, rate)
+                          }}
+                          disabled={isInitializing || (isInitialized && canInterface === iface)}
+                          className="gap-1 h-7 px-2 text-[10px] w-full sm:w-auto"
+                        >
+                          <Power className="h-3 w-3" />
+                          {`Initialiser ${iface} à ce débit`}
                         </Button>
                       </div>
                     ) : (
