@@ -15,6 +15,17 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { sendCANFrame, type CANInterface } from "@/lib/api"
 import { SentFramesHistory, useSentFramesHistory } from "@/components/sent-frames-history"
 import { useExportStore } from "@/lib/export-store"
+import { useCriticalIds, normalizeCanId } from "@/lib/critical-ids"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 
 interface QuickSlot {
   key: string
@@ -64,6 +75,18 @@ export default function ReplayRapide() {
   const router = useRouter()
   const burstCancelRef = useRef(false)
 
+  // Garde-fou UI AUD-06 : confirmation avant injection volontaire sur un ID critique.
+  const { isCritical } = useCriticalIds()
+  const [pendingCritical, setPendingCritical] = useState<{ ids: string[]; run: () => void } | null>(null)
+  const guardCritical = (canIds: string[], run: () => void) => {
+    const crit = Array.from(new Set(canIds.filter((i) => isCritical(i)).map(normalizeCanId)))
+    if (crit.length === 0) {
+      run()
+      return
+    }
+    setPendingCritical({ ids: crit, run })
+  }
+
   // Charger les slots persistes (localStorage) au montage.
   useEffect(() => {
     try {
@@ -102,14 +125,20 @@ export default function ReplayRapide() {
     setSlots(slots.filter((_, i) => i !== index))
   }
 
-  const handleSendSlot = useCallback(async (index: number) => {
+  const handleSendSlot = (index: number) => {
     const slot = slots[index]
+    if (!slot) return
     setError(null)
     const invalid = validateFrame(slot.id, slot.data)
     if (invalid) {
       setError(invalid)
       return
     }
+    guardCritical([slot.id], () => doSendSlot(index))
+  }
+
+  const doSendSlot = async (index: number) => {
+    const slot = slots[index]
     setIsLoading(`slot-${index}`)
 
     await trackFrame(
@@ -118,7 +147,7 @@ export default function ReplayRapide() {
     )
     
     setIsLoading(null)
-  }, [slots, trackFrame, canInterface])
+  }
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -135,7 +164,8 @@ export default function ReplayRapide() {
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [keyboardEnabled, slots, handleSendSlot])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [keyboardEnabled, slots, trackFrame, canInterface, isCritical])
 
   const handleBurstSend = async () => {
     setError(null)
@@ -144,6 +174,10 @@ export default function ReplayRapide() {
       setError(invalid)
       return
     }
+    guardCritical([burstId], doBurstSend)
+  }
+
+  const doBurstSend = async () => {
     // Clamp : Count 1..1000, Interval >= 0 (meme si saisie manuelle hors bornes HTML).
     const count = Math.min(1000, Math.max(1, parseInt(burstCount, 10) || 1))
     const interval = Math.max(0, parseInt(burstInterval, 10) || 0)
@@ -171,21 +205,26 @@ export default function ReplayRapide() {
     burstCancelRef.current = true
   }
 
-  const handleManualSend = async () => {
+  const handleManualSend = () => {
     if (!manualFrame) return
     setError(null)
-    setIsSendingManual(true)
-    
-    try {
-      const [canId, data] = manualFrame.split("#")
-      if (!canId || !data) {
-        throw new Error("Format invalide. Utilisez: ID#DATA (ex: 7DF#02010C)")
-      }
-      const invalid = validateFrame(canId, data)
-      if (invalid) {
-        throw new Error(invalid)
-      }
+    const [canId, data] = manualFrame.split("#")
+    if (!canId || !data) {
+      setError("Format invalide. Utilisez: ID#DATA (ex: 7DF#02010C)")
+      return
+    }
+    const invalid = validateFrame(canId, data)
+    if (invalid) {
+      setError(invalid)
+      return
+    }
+    guardCritical([canId], () => doManualSend(canId, data))
+  }
 
+  const doManualSend = async (canId: string, data: string) => {
+    setError(null)
+    setIsSendingManual(true)
+    try {
       await trackFrame(
         { canId: canId.trim(), data: data.trim(), interface: canInterface, description: "Envoi manuel" },
         () => sendCANFrame({ interface: canInterface, canId: canId.trim(), data: data.trim() })
@@ -198,7 +237,12 @@ export default function ReplayRapide() {
     }
   }
 
-  const handleReplayExported = async () => {
+  const handleReplayExported = () => {
+    const ids = exportedFrames.filter((f) => !validateFrame(f.canId, f.data)).map((f) => f.canId)
+    guardCritical(ids, doReplayExported)
+  }
+
+  const doReplayExported = async () => {
     setIsReplayingExported(true)
     setError(null)
     try {
@@ -234,6 +278,11 @@ export default function ReplayRapide() {
       setError(invalid)
       return
     }
+    guardCritical([frame.canId], () => doSendExportedFrame(index))
+  }
+
+  const doSendExportedFrame = async (index: number) => {
+    const frame = exportedFrames[index]
     try {
       await trackFrame(
         { canId: frame.canId, data: frame.data, interface: canInterface, description: `Trame isolee` },
@@ -616,6 +665,32 @@ export default function ReplayRapide() {
           </Card>
 
       </div>
+
+      <AlertDialog open={!!pendingCritical} onOpenChange={(o) => !o && setPendingCritical(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>ID critique (AUD-06)</AlertDialogTitle>
+            <AlertDialogDescription>
+              Injection volontaire sur{" "}
+              <span className="font-mono font-semibold">{pendingCritical?.ids.join(", ")}</span>.
+              Cet ID est dans la liste critique AUD-06 ; cette action explicite contourne volontairement le
+              garde-fou des balayages. Confirmer ?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annuler</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const run = pendingCritical?.run
+                setPendingCritical(null)
+                run?.()
+              }}
+            >
+              Confirmer l&apos;injection
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AppShell>
   )
 }

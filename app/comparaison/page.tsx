@@ -64,6 +64,17 @@ import { useRouter } from "next/navigation"
 import { useToast } from "@/hooks/use-toast"
 import { LogImportButton } from "@/components/log-import-button"
 import { InjectStatusBar } from "@/components/inject-status"
+import { useCriticalIds } from "@/lib/critical-ids"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 
 // Tree node type for hierarchical logs
 interface LogTreeNode extends LogEntry {
@@ -118,6 +129,8 @@ export default function ComparaisonPage() {
   const currentMissionId = useMissionStore((state) => state.currentMissionId)
   const missions = useMissionStore((state) => state.missions)
   const { addFrames } = useExportStore()
+  const { isCritical } = useCriticalIds()
+  const [pendingLoop, setPendingLoop] = useState<CompareFrameDiff | null>(null)
 
   const [missionId, setMissionId] = useState<string>("")
   const [missionResolved, setMissionResolved] = useState(false)
@@ -374,7 +387,16 @@ export default function ComparaisonPage() {
     }
   }
 
-  const handleLoopFrame = async (frame: CompareFrameDiff) => {
+  const handleLoopFrame = (frame: CompareFrameDiff) => {
+    if (!frame.payload_b) return
+    if (isCritical(frame.can_id)) {
+      setPendingLoop(frame)
+      return
+    }
+    doLoopFrame(frame)
+  }
+
+  const doLoopFrame = async (frame: CompareFrameDiff) => {
     if (!frame.payload_b) return
     try {
       await startInjectFrame(canInterface, frame.can_id, frame.payload_b)
@@ -1156,6 +1178,32 @@ export default function ComparaisonPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        <AlertDialog open={!!pendingLoop} onOpenChange={(o) => !o && setPendingLoop(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>ID critique (AUD-06)</AlertDialogTitle>
+              <AlertDialogDescription>
+                Injection volontaire sur{" "}
+                <span className="font-mono font-semibold">{pendingLoop?.can_id}</span>. Cet ID est dans la liste
+                critique AUD-06 ; cette action explicite contourne volontairement le garde-fou des balayages.
+                Confirmer ?
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Annuler</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  const f = pendingLoop
+                  setPendingLoop(null)
+                  if (f) doLoopFrame(f)
+                }}
+              >
+                Confirmer l&apos;injection
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </AppShell>
   )
