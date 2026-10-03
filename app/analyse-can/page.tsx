@@ -5,6 +5,7 @@ import { AppShell } from "@/components/app-shell"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -18,7 +19,7 @@ import {
   BarChart3, Loader2, AlertCircle, Database, Cpu, Search,
   Download, Save, Eye, EyeOff, Filter, ArrowUpDown, CheckCircle2,
   Zap, ChevronDown, ChevronRight, Info, GitBranch, ArrowRight,
-  FlaskConical, AlertTriangle, Check, X, Send, ArrowUp, ArrowDown, ClipboardCopy,
+  FlaskConical, AlertTriangle, Check, X, Send, ArrowUp, ArrowDown, ClipboardCopy, Sparkles,
 } from "lucide-react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useExportStore } from "@/lib/export-store"
@@ -29,6 +30,7 @@ import {
   validateCausality,
   listMissionLogs,
   addDBCSignal,
+  aiAnalyze,
   type HeatmapResult,
   type HeatmapIdEntry,
   type HeatmapByteInfo,
@@ -84,6 +86,8 @@ function signalTypeBadge(sig: DetectedSignal) {
   }
   return <Badge variant="outline" className="text-[9px] border-emerald-600/50 text-emerald-400">Valeur</Badge>
 }
+
+const DEFAULT_AI_QUESTION = "Aide-moi à identifier le rôle des IDs et des signaux"
 
 type SignalSortKey = "confidence" | "entropy" | "range"
 
@@ -358,6 +362,12 @@ function AnalyseCANPageInner() {
   const [pendingCausalityEdge, setPendingCausalityEdge] = useState<DependencyEdge | null>(null)
   const [causalityIface, setCausalityIface] = useState<CANInterface>("can0")
 
+  // Analyse IA state
+  const [aiQuestion, setAiQuestion] = useState(DEFAULT_AI_QUESTION)
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiAnswer, setAiAnswer] = useState<string | null>(null)
+  const [aiError, setAiError] = useState<string | null>(null)
+
   // Fetch missions on mount
   useEffect(() => {
     fetchMissions()
@@ -462,7 +472,7 @@ function AnalyseCANPageInner() {
 
   // --- Résumé Markdown des résultats courants, à coller dans une IA ---
   const hasAnyResult = !!(heatmapResult || detectResult || depResult)
-  const copyAiSummary = async () => {
+  const buildAiSummary = (): string => {
     const hex = (n: number) => n.toString(16).toUpperCase().padStart(2, "0")
     const lines: string[] = [
       "Voici des données CAN d'un véhicule (reverse engineering). Aide-moi à identifier le rôle des IDs et des signaux :",
@@ -496,10 +506,33 @@ function AnalyseCANPageInner() {
         lines.push(`- ${e.source} -> ${e.target} : score ${(e.score * 100).toFixed(0)}%, p_react ${(e.p_react * 100).toFixed(0)}%, lift ${e.lift.toFixed(1)}, ${e.co_occurrences} co-occurrences`)
       }
     }
-    const ok = await copyToClipboard(lines.join("\n"))
+    return lines.join("\n")
+  }
+  const copyAiSummary = async () => {
+    const ok = await copyToClipboard(buildAiSummary())
     toast(ok
       ? { title: "Résumé copié", description: "Colle-le dans ton assistant IA." }
       : { title: "Erreur", description: "Impossible de copier dans le presse-papiers", variant: "destructive" })
+  }
+
+  // --- Analyse in-app par LLM (meme resume que le bouton de copie) ---
+  const runAiAnalysis = async () => {
+    if (!hasAnyResult) return
+    setAiLoading(true)
+    setAiError(null)
+    setAiAnswer(null)
+    try {
+      const res = await aiAnalyze(buildAiSummary(), aiQuestion.trim() || DEFAULT_AI_QUESTION)
+      setAiAnswer(res.answer)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Erreur inconnue"
+      const noKey = /cl[eé]\s+ia|non\s+configur/i.test(msg)
+      const text = noKey ? "Configurez la clé IA dans Administration → IA" : msg
+      setAiError(text)
+      toast({ title: "Analyse IA impossible", description: text, variant: "destructive" })
+    } finally {
+      setAiLoading(false)
+    }
   }
 
   // Auto-detect: run analysis
@@ -836,11 +869,55 @@ function AnalyseCANPageInner() {
               </button>
             </div>
 
-            {hasAnyResult && (
-              <Button size="sm" variant="outline" className="h-8 gap-1.5 bg-transparent" onClick={copyAiSummary}>
-                <ClipboardCopy className="h-3.5 w-3.5" /> Copier résumé pour IA
-              </Button>
-            )}
+            {/* Analyse IA */}
+            <Card className="border-border/60">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-primary" /> Analyse IA
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-3">
+                <div className="flex flex-col gap-1.5">
+                  <Label className="text-xs text-muted-foreground" htmlFor="ai-question">Question (optionnelle)</Label>
+                  <Textarea
+                    id="ai-question"
+                    value={aiQuestion}
+                    onChange={(e) => setAiQuestion(e.target.value)}
+                    rows={2}
+                    className="text-xs"
+                  />
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button size="sm" className="h-8 gap-1.5" onClick={runAiAnalysis} disabled={!hasAnyResult || aiLoading}>
+                    {aiLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                    Analyser avec l&apos;IA
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-8 gap-1.5 bg-transparent" onClick={copyAiSummary} disabled={!hasAnyResult}>
+                    <ClipboardCopy className="h-3.5 w-3.5" /> Copier résumé pour IA
+                  </Button>
+                </div>
+                {!hasAnyResult && (
+                  <p className="text-xs text-amber-400">Lancez d&apos;abord une analyse</p>
+                )}
+                <p className="text-[11px] text-muted-foreground">
+                  Les données du résumé sont envoyées à l&apos;IA configurée (quitte le Pi, nécessite internet).
+                </p>
+                {aiError && (
+                  <Alert variant="destructive">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertDescription>{aiError}</AlertDescription>
+                  </Alert>
+                )}
+                {aiAnswer && (
+                  <div className="rounded-md border border-border/60 bg-muted/20 p-3">
+                    <div className="mb-1.5 text-xs font-semibold text-muted-foreground">Réponse de l&apos;IA</div>
+                    <div className="max-h-[480px] overflow-auto whitespace-pre-wrap break-words text-sm leading-relaxed">
+                      {aiAnswer}
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
 
             {/* Heatmap config */}
             {tab === "heatmap" && (
