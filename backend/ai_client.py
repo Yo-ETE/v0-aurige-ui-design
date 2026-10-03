@@ -43,6 +43,10 @@ def save_config(cfg: dict) -> None:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
         f.flush()
         os.fsync(f.fileno())
+    try:
+        os.chmod(tmp, 0o600)  # avant replace : le fichier final n'a jamais les droits par defaut
+    except OSError:
+        pass
     os.replace(tmp, path)
     try:
         os.chmod(path, 0o600)
@@ -82,7 +86,8 @@ async def analyze(context: str, question: str) -> str:
             return r.json()["content"][0]["text"]
     except httpx.HTTPStatusError as e:
         # raise ... from None : ne pas chainer l'exception d'origine (requete/en-tetes)
-        raise RuntimeError(f"IA erreur {e.response.status_code}: {e.response.text[:200]}") from None
+        excerpt = e.response.text[:200].replace(key, "***")
+        raise RuntimeError(f"IA erreur {e.response.status_code}: {excerpt}") from None
     except httpx.HTTPError as e:
         raise RuntimeError(f"IA injoignable: {type(e).__name__}") from None
     except (KeyError, IndexError, TypeError, ValueError):

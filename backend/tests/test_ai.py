@@ -150,3 +150,17 @@ def test_analyze_too_long(ctx):
     c, *_ = ctx
     assert c.post("/api/ai/analyze", json={"context": "x" * 100001, "question": "q"}).status_code == 400
     assert c.post("/api/ai/analyze", json={"context": "c", "question": "q" * 4001}).status_code == 400
+
+
+def test_endpoint_change_without_key_clears_key(ctx):
+    c, _, path, _ = ctx
+    _put(c, api_key=KEY)
+    r = _put(c, base_url="https://evil.example.com")
+    assert r.json()["has_key"] is False
+    assert json.loads(path.read_text())["api_key"] == ""
+    _put(c, api_key=KEY)
+    assert _put(c, provider="openai").json()["has_key"] is False
+    # nouvelle cle fournie avec le changement : conservee
+    assert _put(c, base_url="https://other.example.com", api_key=KEY).json()["has_key"] is True
+    # inchange : la cle reste
+    assert _put(c, base_url="https://other.example.com", model="m3").json()["has_key"] is True

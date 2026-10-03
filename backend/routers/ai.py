@@ -46,6 +46,10 @@ async def put_ai_config(body: AIConfigInput):
     if body.base_url and not body.base_url.startswith(("http://", "https://")):
         raise HTTPException(status_code=400, detail="URL invalide (http/https requis)")
     cfg = ai_client.load_config()
+    # Anti-exfiltration : changer de destination (provider/base_url) sans nouvelle cle
+    # efface la cle stockee, sinon elle serait envoyee a l'hote choisi.
+    endpoint_changed = body.provider != cfg["provider"] or (
+        bool(body.base_url) and body.base_url != cfg["base_url"])
     cfg["provider"] = body.provider
     cfg["model"] = body.model
     if body.base_url:
@@ -54,6 +58,8 @@ async def put_ai_config(body: AIConfigInput):
         cfg["api_key"] = ""
     elif body.api_key:
         cfg["api_key"] = body.api_key
+    elif endpoint_changed:
+        cfg["api_key"] = ""
     ai_client.save_config(cfg)
     return _public(cfg)
 
