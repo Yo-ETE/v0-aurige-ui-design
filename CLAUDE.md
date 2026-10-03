@@ -97,13 +97,12 @@ ethernet) · `system/*` (apt, update, backups, reboot, restart-services) · `tai
 - **Historique récurrent d'erreurs d'hydratation Next.js** (rendu de l'heure, terminal
   flottant, auto-scroll). Attention à tout rendu dépendant du temps / de `Date` / de
   `window` : gérer le `mount` client, `suppressHydrationWarning` si besoin.
-- `backend/main.py` fait 8 350 lignes dans un seul fichier → candidat évident au
-  découpage en routers FastAPI par domaine (can, capture, missions, obd, analysis…).
-- **Doublon : `/api/system/restart-services` est défini deux fois** (≈ lignes 5130 et 6586).
-- Incohérences de packaging à corriger si tu passes par là :
-  - le README pointe sur `github.com/Yo-ETE/aurige.git`, le vrai dépôt est `v0-aurige-ui-design` ;
-  - le README mentionne un `.env.example` **absent** du dépôt ;
-  - `scripts/update_pi.sh` cible en dur la branche `v0/yo-ete-5c91d9cb` au lieu de `main`.
+- `backend/main.py` fait 8 000+ lignes dans un seul fichier → candidat évident au
+  découpage en routers FastAPI par domaine (can, capture, missions, obd, analysis…). **Dette
+  ouverte** (refactor risqué, non fait).
+- ~~Doublon `/api/system/restart-services`~~ : **résolu** (une seule définition).
+- ~~Incohérences de packaging~~ : **résolues** (URLs repo → `v0-aurige-ui-design` dans README +
+  `install_pi.sh` ; `.env.example` créé ; `scripts/update_pi.sh` cible `main`).
 
 ## Sécurité (contexte métier)
 
