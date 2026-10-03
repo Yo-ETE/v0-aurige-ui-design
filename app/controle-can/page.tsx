@@ -184,7 +184,7 @@ export default function ControleCAN() {
                 onValueChange={(v) => setCanInterface(v as "can0" | "can1" | "vcan0")}
                 disabled={isInitialized}
               >
-                <SelectTrigger id="interface">
+                <SelectTrigger id="interface" className="w-full min-w-0">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -201,7 +201,7 @@ export default function ControleCAN() {
                 onValueChange={setBitrate}
                 disabled={isInitialized}
               >
-                <SelectTrigger id="bitrate">
+                <SelectTrigger id="bitrate" className="w-full min-w-0">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
