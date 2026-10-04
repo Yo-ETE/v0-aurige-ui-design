@@ -497,6 +497,8 @@ export default function Isolation() {
     try {
       const result = await renameLog(log.missionId, log.id, newLogName.trim())
       updateLogName(log.id, result.newId, result.newName)
+      // Sync le log ouvert dans le viewer (rename change aussi l'id) pour eviter un titre/id stale
+      setViewingLog((prev) => (prev && prev.id === log.id ? { ...prev, id: result.newId, name: result.newName } : prev))
       setRenamingLog(null)
       setNewLogName("")
     } catch (err) {
