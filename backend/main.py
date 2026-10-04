@@ -2249,6 +2249,33 @@ def _change_rate(values: list) -> float:
     return round(changes / (len(values) - 1), 4)
 
 
+def _classify_action_byte(byte_vals, frame_count, is_counter=False, is_checksum=False):
+    """Classe un octet par cardinalite pour reperer un signal d'action (faible cardinalite).
+
+    Retourne (klass, distinct_values_hex[<=16], score).
+    klass in constant / compteur / checksum / aleatoire / etat / continu.
+    Un octet "etat" (2..16 valeurs distinctes, peu de valeurs par rapport au nombre de
+    trames) est le candidat typique d'une action humaine (essuie-glaces, feux...).
+    """
+    uniq = sorted(set(byte_vals))
+    n = len(uniq)
+    distinct = [f"{v:02X}" for v in uniq[:16]]
+    if n <= 1:
+        return ("constant", distinct, 0.0)
+    if is_counter:
+        return ("compteur", distinct, 0.0)
+    if is_checksum:
+        return ("checksum", distinct, 0.0)
+    small = frame_count < 8  # trop peu de trames : le ratio n'est pas significatif
+    ratio = n / frame_count if frame_count else 1.0
+    ent = _shannon_entropy(byte_vals)
+    if 2 <= n <= 16 and (small or ratio < 0.5):
+        return ("etat", distinct, round((17 - n) / 16.0, 4))
+    if not small and ratio >= 0.5 and ent >= 3.0:
+        return ("aleatoire", distinct, 0.0)
+    return ("continu", distinct, round(max(0.1, 0.4 - ratio * 0.3), 4))
+
+
 
 
 # =============================================================================

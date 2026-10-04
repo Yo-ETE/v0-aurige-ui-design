@@ -447,18 +447,33 @@ async def byte_heatmap_endpoint(request: HeatmapRequest):
         else:
             freq_hz = 0.0
 
+        # Series par octet pour la detection compteur/checksum (classification cardinalite)
+        byte_series = {
+            bi: [f["bytes"][bi] for f in frames if bi < len(f["bytes"])]
+            for bi in range(dlc)
+        }
+        counters = main._detect_counter_bytes(byte_series, dlc, 0.75)
+        checksums = main._detect_checksum_bytes(byte_series, dlc, 0.70)
+
         bytes_info = []
         for bi in range(dlc):
-            byte_vals = [f["bytes"][bi] for f in frames if bi < len(f["bytes"])]
+            byte_vals = byte_series[bi]
             if not byte_vals:
                 bytes_info.append({
                     "index": bi, "change_rate": 0, "entropy": 0,
                     "min": 0, "max": 0, "unique_count": 0, "is_constant": True,
+                    "klass": "constant", "distinct_values": [], "score": 0,
                 })
                 continue
             cr = main._change_rate(byte_vals)
             ent = main._shannon_entropy(byte_vals)
+            k, dv, sc = main._classify_action_byte(
+                byte_vals, frame_count, bi in counters, bi in checksums
+            )
             bytes_info.append({
+                "klass": k,
+                "distinct_values": dv,
+                "score": sc,
                 "index": bi,
                 "change_rate": cr,
                 "entropy": round(ent, 4),
