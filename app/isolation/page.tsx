@@ -99,8 +99,8 @@ function LogTreeItem({
   return (
     <div className="space-y-1">
       <div
-        className="flex items-center gap-2 rounded-md border border-border bg-secondary/50 p-3 hover:bg-secondary"
-        style={{ marginLeft: depth * 24 }}
+        className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-secondary/50 p-2 sm:p-3 hover:bg-secondary"
+        style={{ marginLeft: depth * 16 }}
       >
         {hasChildren ? (
           <Button
@@ -116,11 +116,11 @@ function LogTreeItem({
         )}
         <FileText className="h-4 w-4 text-muted-foreground" />
         {renamingLog === item.id ? (
-          <div className="flex-1 flex items-center gap-2">
+          <div className="min-w-0 flex-1 basis-[calc(100%-4rem)] sm:basis-auto flex items-center gap-2">
             <Input
               value={newLogName}
               onChange={(e) => setNewLogName(e.target.value)}
-              className="h-7 text-sm"
+              className="h-7 min-w-0 text-sm"
               autoFocus
               onKeyDown={(e) => {
                 if (e.key === "Enter") onRename(item)
@@ -131,9 +131,9 @@ function LogTreeItem({
             <Button size="sm" variant="ghost" onClick={() => setRenamingLog(null)}>Annuler</Button>
           </div>
         ) : (
-          <span className="flex-1 truncate font-mono text-sm">{item.name}</span>
+          <span className="min-w-0 flex-1 basis-[calc(100%-4rem)] sm:basis-auto truncate font-mono text-sm">{item.name}</span>
         )}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 basis-full sm:basis-auto">
           {item.tags.map((tag) => (
             <Badge
               key={tag}
@@ -143,7 +143,7 @@ function LogTreeItem({
               {tag}
             </Badge>
           ))}
-          <div className="flex items-center gap-1 ml-2">
+          <div className="flex flex-wrap items-center gap-1 sm:ml-2">
             {isReplaying === item.id ? (
               <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive">
                 <Loader2 className="h-3 w-3 animate-spin" />
@@ -501,6 +501,63 @@ export default function Isolation() {
       setNewLogName("")
     } catch (err) {
       alert(err instanceof Error ? err.message : "Erreur lors du renommage")
+    }
+  }
+
+  // Actions par trame (partagees entre le tableau desktop et les cartes mobiles)
+  const handleReplayFrame = async (frame: LogFrame, index: number) => {
+    if (!frame.canId) return
+    setReplayingFrameIdx(index)
+    setReplayedFrameIdx(null)
+    try {
+      await sendCANFrame({ interface: canInterface, canId: frame.canId, data: frame.data || frame.raw || "" })
+      setReplayedFrameIdx(index)
+      setTimeout(() => setReplayedFrameIdx((prev) => prev === index ? null : prev), 2000)
+    } catch (err) {
+      console.error("[v0] sendCANFrame error:", err, "interface:", canInterface, "canId:", frame.canId, "data:", frame.data || frame.raw)
+      setReplayedFrameIdx(null)
+    } finally {
+      setReplayingFrameIdx(null)
+    }
+  }
+
+  const handleAddFrameToReplay = (frame: LogFrame) => {
+    if (!frame.canId) return
+    addFrames([{
+      canId: frame.canId,
+      data: frame.data || frame.raw || "",
+      timestamp: String(frame.timestamp || 0),
+      source: originLogId || viewingLog?.name || "unknown",
+    }])
+  }
+
+  const handleExtractFrameSuccess = async (frame: LogFrame) => {
+    const data = frame.data || frame.raw || ""
+    const logMission = viewingLog?.missionId || missionId
+    if (!logMission || !frame.canId) return
+    try {
+      const ts = frame.timestamp ? String(frame.timestamp) : undefined
+      const name = `success_${frame.canId}_${Date.now().toString(36)}`
+      const result = await createFrameLog(logMission, {
+        canId: frame.canId,
+        data,
+        timestamp: ts,
+        name,
+        interface: canInterface,
+      })
+      // Ajouter comme log success dans le store isolation
+      importLog({
+        id: result.logId,
+        name: result.filename,
+        filename: result.filename,
+        missionId: logMission,
+        tags: ["success"],
+        frameCount: 1,
+      })
+      // Tagger directement comme success
+      updateLogTags(result.logId, ["success"])
+    } catch (err) {
+      console.error("[v0] Erreur creation log success:", err)
     }
   }
 
@@ -1058,7 +1115,7 @@ export default function Isolation() {
                 </Button>
               </div>
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-2 overflow-x-hidden">
                 {logs.map((log) => (
                   <LogTreeItem
                     key={log.id}
@@ -1521,6 +1578,24 @@ export default function Isolation() {
               <Send className="h-3 w-3" />
               <span className="hidden sm:inline">Exporter vers</span> Replay
             </Button>
+            {/* Renommage du log en cours (le champ du tableau est cache derriere le dialogue) */}
+            {viewingLog && renamingLog === viewingLog.id && (
+              <div className="flex w-full items-center gap-2">
+                <Input
+                  value={newLogName}
+                  onChange={(e) => setNewLogName(e.target.value)}
+                  className="h-8 min-w-0 flex-1 text-sm"
+                  placeholder="Nouveau nom"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleRename(viewingLog)
+                    if (e.key === "Escape") setRenamingLog(null)
+                  }}
+                />
+                <Button size="sm" variant="ghost" onClick={() => handleRename(viewingLog)}>OK</Button>
+                <Button size="sm" variant="ghost" onClick={() => setRenamingLog(null)}>Annuler</Button>
+              </div>
+            )}
             {/* Actions sur le log en cours */}
             {viewingLog && (
               <div className="flex items-center gap-1">
@@ -1636,8 +1711,81 @@ export default function Isolation() {
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
               </div>
             ) : (
-<ScrollArea className="h-[350px] rounded-md border border-border">
-                  <div className="p-2 overflow-x-auto">
+<ScrollArea className="h-[50vh] sm:h-[350px] rounded-md border border-border">
+                  {/* Mobile : cartes empilees (actions accessibles sans scroll horizontal) */}
+                  <div className="sm:hidden p-2 space-y-2">
+                    {logFrames.map((frame, index) => {
+                      const isSelected = selectedFrame &&
+                        selectedFrame.timestamp === frame.timestamp &&
+                        selectedFrame.canId === frame.canId
+                      return (
+                        <div
+                          key={index}
+                          className={`rounded-md border p-2 font-mono text-xs space-y-2 ${
+                            isSelected ? "border-primary bg-primary/20" : "border-border bg-secondary/30"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-sm font-semibold text-primary">{frame.canId || "-"}</span>
+                            <span className="text-muted-foreground">{frame.interface || "-"}</span>
+                          </div>
+                          <div className="text-muted-foreground break-all">{frame.timestamp || "-"}</div>
+                          <div className="break-all">{frame.data || frame.raw}</div>
+                          <div className="flex flex-wrap gap-1">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className={`h-8 gap-1 text-xs bg-transparent ${replayedFrameIdx === index ? "text-success bg-success/20" : "text-success hover:text-success"}`}
+                              disabled={replayingFrameIdx === index}
+                              onClick={() => handleReplayFrame(frame, index)}
+                              title={`Rejouer sur ${canInterface}: ${frame.canId}#${frame.data || frame.raw}`}
+                            >
+                              {replayingFrameIdx === index ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : replayedFrameIdx === index ? (
+                                <CheckCircle2 className="h-3 w-3" />
+                              ) : (
+                                <Play className="h-3 w-3" />
+                              )}
+                              Rejouer
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-8 gap-1 text-xs bg-transparent"
+                              onClick={() => handleAddFrameToReplay(frame)}
+                              title="Ajouter au Replay Rapide"
+                            >
+                              <Send className="h-3 w-3" />
+                              Replay rapide
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-8 gap-1 text-xs bg-transparent"
+                              onClick={() => handleExtractFrameSuccess(frame)}
+                              title="Extraire comme log success"
+                            >
+                              <CheckCircle2 className="h-3 w-3" />
+                              Success
+                            </Button>
+                            {originLogId && (
+                              <Button
+                                size="sm"
+                                variant={isSelected ? "default" : "outline"}
+                                className={`h-8 gap-1 text-xs ${isSelected ? "" : "bg-transparent"}`}
+                                onClick={() => handleSelectFrameForAnalysis(frame)}
+                              >
+                                <Network className="h-3 w-3" />
+                                {isSelected ? "Selectionnee" : "Selectionner (causale)"}
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  <div className="hidden sm:block p-2 overflow-x-auto">
                     <table className="w-full text-xs font-mono min-w-[700px]">
                     <thead className="sticky top-0 bg-secondary">
                       <tr className="text-left text-muted-foreground">
