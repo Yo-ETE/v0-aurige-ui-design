@@ -316,10 +316,30 @@ function AnalyseCANPageInner() {
   const activeMission = missions.find((m) => m.id === currentMissionId) ?? null
 
   // Tab state
-  const [tab, setTab] = useState<"heatmap" | "autodetect" | "dependencies">("heatmap")
+  const [tab, setTab] = useState<"candidats" | "heatmap" | "autodetect" | "dependencies">("candidats")
 
   // Heatmap state
   const [heatmapResult, setHeatmapResult] = useState<HeatmapResult | null>(null)
+  // Candidats : liste a plat de tous les octets de tous les IDs (issue du resultat heatmap)
+  const candidateBytes = useMemo(() => {
+    if (!heatmapResult) return []
+    return heatmapResult.ids.flatMap((id) =>
+      id.bytes.map((b) => ({
+        canId: id.can_id,
+        index: b.index,
+        klass: b.klass ?? (b.is_constant ? "constant" : "continu"),
+        distinct_values: b.distinct_values ?? [],
+        score: b.score ?? 0,
+        change_rate: b.change_rate,
+        entropy: b.entropy,
+      }))
+    )
+  }, [heatmapResult])
+  const candidates = useMemo(
+    () => candidateBytes.filter((b) => b.score > 0).sort((a, b) => b.score - a.score),
+    [candidateBytes],
+  )
+  const maskedNoise = useMemo(() => candidateBytes.filter((b) => !(b.score > 0)), [candidateBytes])
   const [heatmapLoading, setHeatmapLoading] = useState(false)
   const [heatmapError, setHeatmapError] = useState<string | null>(null)
   const [heatmapMode, setHeatmapMode] = useState<"change_rate" | "entropy">("change_rate")
@@ -835,6 +855,17 @@ function AnalyseCANPageInner() {
             {/* Tab toggle */}
             <div className="flex rounded-lg border border-border bg-muted p-0.5 gap-0.5">
               <button
+                onClick={() => setTab("candidats")}
+                className={cn(
+                  "flex-1 flex items-center justify-center gap-1.5 text-xs rounded-md px-3 py-1.5 font-medium transition-colors",
+                  tab === "candidats"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <Sparkles className="h-3.5 w-3.5" /> Candidats
+              </button>
+              <button
                 onClick={() => setTab("heatmap")}
                 className={cn(
                   "flex-1 flex items-center justify-center gap-1.5 text-xs rounded-md px-3 py-1.5 font-medium transition-colors",
@@ -919,8 +950,8 @@ function AnalyseCANPageInner() {
               </CardContent>
             </Card>
 
-            {/* Heatmap config */}
-            {tab === "heatmap" && (
+            {/* Heatmap config (partage avec l'onglet Candidats : meme bouton Analyser) */}
+            {(tab === "heatmap" || tab === "candidats") && (
               <Card className="border-border/60">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-sm flex items-center gap-2">
@@ -1200,6 +1231,105 @@ function AnalyseCANPageInner() {
 
           {/* Right column: Results */}
           <div className="flex flex-col gap-4">
+            {/* CANDIDATS TAB */}
+            {tab === "candidats" && (
+              <Card className="border-border/60">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-primary" /> Candidats
+                  </CardTitle>
+                  <CardDescription className="text-xs">
+                    Trié par cardinalité : un octet à peu de valeurs distinctes = signal d&apos;action probable (ex vitesse essuie-glace). Compteurs / CRC / aléatoire = bruit, repliés.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="flex flex-col gap-3">
+                  {heatmapError && (
+                    <Alert variant="destructive">
+                      <AlertCircle className="h-4 w-4" />
+                      <AlertDescription>{heatmapError}</AlertDescription>
+                    </Alert>
+                  )}
+                  {heatmapLoading && (
+                    <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                      <Loader2 className="h-8 w-8 animate-spin mb-3 text-primary" />
+                      <p className="text-sm">Analyse en cours...</p>
+                    </div>
+                  )}
+                  {!heatmapLoading && (!heatmapResult || heatmapResult.ids.length === 0) && (
+                    <div className="flex flex-col items-center justify-center gap-3 py-12 text-muted-foreground">
+                      <Sparkles className="h-10 w-10 opacity-40" />
+                      <p className="text-sm text-center">Lance l&apos;analyse heatmap pour voir les candidats</p>
+                      <Button onClick={runHeatmap} disabled={!hasLog || heatmapLoading}>
+                        <Search className="h-4 w-4 mr-2" /> Analyser
+                      </Button>
+                    </div>
+                  )}
+                  {heatmapResult && heatmapResult.ids.length > 0 && !heatmapLoading && (
+                    <>
+                      {candidates.length === 0 && (
+                        <p className="text-xs text-muted-foreground">Aucun candidat : tous les octets sont constants ou du bruit.</p>
+                      )}
+                      <div className="flex flex-col gap-1.5">
+                        {candidates.map((c) => (
+                          <button
+                            key={`${c.canId}-${c.index}`}
+                            type="button"
+                            onClick={() => {
+                              setExpandedIds((prev) => new Set(prev).add(c.canId))
+                              setTab("heatmap")
+                            }}
+                            title="Voir cet ID dans la heatmap"
+                            className="flex flex-col gap-1.5 rounded-md border border-border/60 px-3 py-2 text-left hover:bg-muted/50 transition-colors"
+                          >
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Badge variant="outline" className="font-mono text-xs">{c.canId}</Badge>
+                              <span className="font-mono text-xs font-semibold">B{c.index}</span>
+                              <Badge
+                                variant={c.klass === "etat" ? "default" : "secondary"}
+                                className={cn("text-[10px]", c.klass !== "etat" && "text-muted-foreground")}
+                              >
+                                {c.klass === "etat" ? "État" : "Continu"}
+                              </Badge>
+                              <span className="text-xs text-muted-foreground">
+                                {c.distinct_values.length >= 16 ? "16+" : c.distinct_values.length} valeurs
+                              </span>
+                              <span className="text-[10px] text-muted-foreground sm:ml-auto">
+                                change {(c.change_rate * 100).toFixed(0)}% · entropie {c.entropy.toFixed(2)}
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap gap-1">
+                              {c.distinct_values.map((v) => (
+                                <span key={v} className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px]">{v}</span>
+                              ))}
+                              {c.distinct_values.length >= 16 && (
+                                <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px]">16+</span>
+                              )}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                      <details className="rounded-md border border-border/60 px-3 py-2">
+                        <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+                          Bruit masqué ({maskedNoise.length})
+                        </summary>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {maskedNoise.map((n) => (
+                            <span
+                              key={`${n.canId}-${n.index}`}
+                              className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                            >
+                              <span className="font-mono">{n.canId} · B{n.index}</span>
+                              <Badge variant="outline" className="text-[9px] px-1 py-0">{n.klass}</Badge>
+                            </span>
+                          ))}
+                        </div>
+                      </details>
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
             {/* HEATMAP TAB */}
             {tab === "heatmap" && (
               <Card className="border-border/60">

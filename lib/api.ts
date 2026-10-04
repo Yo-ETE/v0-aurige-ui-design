@@ -1798,6 +1798,9 @@ export interface HeatmapByteInfo {
   max: number
   unique_count: number
   is_constant: boolean
+  klass: "constant" | "compteur" | "checksum" | "aleatoire" | "etat" | "continu"
+  distinct_values: string[]
+  score: number
 }
 
 export interface HeatmapIdEntry {
