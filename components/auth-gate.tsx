@@ -4,7 +4,8 @@
  * Formulaire identifiant + mot de passe (remplace le champ token AUD-01).
  */
 import React, { useState } from "react"
-import { KeyRound, Loader2 } from "lucide-react"
+import Image from "next/image"
+import { Loader2 } from "lucide-react"
 import { useAuth } from "@/lib/auth-context"
 import { APIError } from "@/lib/api"
 import { Button } from "@/components/ui/button"
@@ -57,8 +58,8 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
       <form onSubmit={handleSubmit} className="w-full max-w-sm space-y-5 rounded-lg border border-border bg-card p-6 shadow-sm">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary/10">
-            <KeyRound className="h-5 w-5 text-primary" />
+          <div className="flex h-10 w-10 items-center justify-center rounded-md bg-white p-1">
+            <Image src="/aurige-emblem.png" alt="AURIGE" width={32} height={32} className="h-full w-full object-contain" priority />
           </div>
           <div>
             <h1 className="text-lg font-semibold text-foreground">AURIGE</h1>

@@ -13,7 +13,14 @@ const _geistMono = Geist_Mono({ subsets: ["latin"] });
 export const metadata: Metadata = {
   title: 'AURIGE - CAN Bus Analysis',
   description: 'Professional CAN bus analysis tool for automotive forensics and diagnostics',
+  applicationName: 'AURIGE',
   generator: 'v0.app',
+  // Icone d'ecran d'accueil iOS (apple-icon.png) + favicon (icon.png) auto-cables par app/.
+  appleWebApp: {
+    capable: true,
+    title: 'AURIGE',
+    statusBarStyle: 'black-translucent',
+  },
 }
 
 export const viewport: Viewport = {
