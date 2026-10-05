@@ -868,14 +868,20 @@ async def get_system_status():
 # =============================================================================
 
 def _count_log_frames(path) -> int:
-    """Compte les lignes (= trames candump -L) d'un fichier log, 0 si illisible."""
+    """Compte les lignes (= trames candump -L) d'un fichier log, 0 si illisible.
+
+    Lecture binaire en pur Python : PAS de subprocess (`wc`). Appele a chaque poll de
+    statut (1s) pendant une capture ; un fork par poll bloquerait l'event loop asyncio.
+    Reste O(taille) : les appelants async l'invoquent via asyncio.to_thread.
+    """
     try:
-        r = run_command(["wc", "-l", str(path)], check=False)
-        if r.returncode == 0 and r.stdout.strip():
-            return int(r.stdout.strip().split()[0])
+        n = 0
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                n += chunk.count(b"\n")
+        return n
     except Exception:
-        pass
-    return 0
+        return 0
 
 
 # =============================================================================

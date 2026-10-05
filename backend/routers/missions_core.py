@@ -2,6 +2,7 @@
 Extrait de main.py, routes inchangees. Les modeles Pydantic et helpers restent
 dans main.py (le router est inclus en fin de main.py, donc tous les modeles
 sont deja definis a l'import). Helpers appeles via main.<nom> a l'execution."""
+import asyncio
 import json
 import shutil
 import tempfile
@@ -249,7 +250,8 @@ async def list_mission_logs(mission_id: str):
     
     for log_file in logs_dir.glob("*.log"):
         stat = log_file.stat()
-        frames_count = main.count_log_frames(log_file)
+        # Comptage hors event loop (O(taille) par log ; peut etre appele apres un stop de capture).
+        frames_count = await asyncio.to_thread(main.count_log_frames, log_file)
         
         # Load metadata if exists
         meta = {}

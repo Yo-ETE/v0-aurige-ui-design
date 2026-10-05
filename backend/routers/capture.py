@@ -172,7 +172,7 @@ async def stop_capture(interface: Optional[str] = None, body: Optional[CaptureSt
                 json.dump(meta, f)
 
         main.update_mission_stats(log_path.parent.parent.name, new_capture=True)
-        frames_count = main._count_log_frames(log_path)
+        frames_count = await asyncio.to_thread(main._count_log_frames, log_path)
     finally:
         # Quoi qu'il arrive : ferme le fd et retire le slot
         try:
@@ -193,13 +193,19 @@ async def stop_capture(interface: Optional[str] = None, body: Optional[CaptureSt
 async def get_capture_status():
     """Liste les captures en cours (une entree par interface)."""
     now = datetime.now()
+    slots = list(_live_slots().items())
+    # Comptage des trames hors event loop (lecture O(taille) a chaque poll 1s).
+    counts = (
+        await asyncio.gather(*[asyncio.to_thread(main._count_log_frames, slot["file"]) for _, slot in slots])
+        if slots else []
+    )
     captures = []
-    for iface, slot in _live_slots().items():
+    for (iface, slot), frames_count in zip(slots, counts):
         captures.append({
             "interface": iface,
             "running": True,
             "filename": slot["file"].name,
             "durationSeconds": int((now - slot["start_time"]).total_seconds()),
-            "framesCount": main._count_log_frames(slot["file"]),
+            "framesCount": frames_count,
         })
     return {"captures": captures}
