@@ -105,3 +105,75 @@ def test_uds_request_bad_inputs(ctx):
     assert c.post("/api/uds/request", json={"interface": "canX", "request_id": "7E0", "service": "2F"}).status_code == 400
     assert c.post("/api/uds/request", json={"interface": "can0", "request_id": "ZZ", "service": "2F"}).status_code == 400
     assert c.post("/api/uds/request", json={"interface": "can0", "request_id": "7E0", "service": "2FF"}).status_code == 400
+
+
+# ---- scan UDS ----
+
+import asyncio as _asyncio
+
+
+class _FakeStdout:
+    def __init__(self, lines, delay=0.2):
+        self._lines = list(lines)
+        self._delay = delay
+    async def readline(self):
+        if self._lines:
+            await _asyncio.sleep(self._delay)
+            return self._lines.pop(0).encode()
+        await _asyncio.sleep(3600)  # bloque jusqu'a annulation
+        return b""
+
+
+class _FakeProc:
+    def __init__(self, lines):
+        self.stdout = _FakeStdout(lines)
+        self.returncode = None
+    def terminate(self): pass
+    def kill(self): pass
+    async def wait(self): return 0
+
+
+def _patch_candump(monkeypatch, main, lines):
+    async def fake_exec(*a, **k):
+        return _FakeProc(lines)
+    monkeypatch.setattr(main, "can_send_frame", lambda *a, **k: (True, ""))
+    monkeypatch.setattr(_asyncio, "create_subprocess_exec", fake_exec)
+
+
+def test_uds_scan_detects_positive(ctx):
+    c, main, monkeypatch = ctx
+    _patch_candump(monkeypatch, main, ["(0.0) can0 7E8#027E0000000000"])
+    r = c.post("/api/uds/scan", json={"interface": "can0", "start_id": "700", "end_id": "700", "listen_ms": 400, "gap_ms": 10})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["scanned"] == 1
+    resp = body["responders"]
+    assert len(resp) == 1 and resp[0]["response_id"] == "7E8" and resp[0]["kind"] == "positive"
+
+
+def test_uds_scan_detects_negative(ctx):
+    c, main, monkeypatch = ctx
+    _patch_candump(monkeypatch, main, ["(0.0) can0 7E8#037F3E11000000"])
+    r = c.post("/api/uds/scan", json={"interface": "can0", "start_id": "700", "end_id": "700", "listen_ms": 400, "gap_ms": 10})
+    assert r.json()["responders"][0]["kind"] == "negative"
+
+
+def test_uds_scan_blocked_id_skipped(ctx):
+    c, main, monkeypatch = ctx
+    _patch_candump(monkeypatch, main, [])
+    monkeypatch.setattr(main, "is_id_blocked", lambda rid: rid == "700")
+    r = c.post("/api/uds/scan", json={"interface": "can0", "start_id": "700", "end_id": "700", "listen_ms": 20, "gap_ms": 10})
+    body = r.json()
+    assert body["scanned"] == 0 and body["blocked_skipped"] == 1 and body["responders"] == []
+
+
+def test_uds_scan_range_too_large_400(ctx):
+    c, main, monkeypatch = ctx
+    r = c.post("/api/uds/scan", json={"interface": "can0", "start_id": "0", "end_id": "FFF"})
+    assert r.status_code == 400
+
+
+def test_uds_scan_bad_inputs(ctx):
+    c, main, monkeypatch = ctx
+    assert c.post("/api/uds/scan", json={"interface": "canX", "start_id": "700", "end_id": "7FF"}).status_code == 400
+    assert c.post("/api/uds/scan", json={"interface": "can0", "start_id": "7FF", "end_id": "700"}).status_code == 400

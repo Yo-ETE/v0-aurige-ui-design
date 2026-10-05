@@ -5,7 +5,9 @@ est géré par `main.obd_send_with_flow_control` ; le framing single-frame + dé
 `uds_client`. Injection bus → garde `can_inject` (permissions) + confirmation côté UI sur les
 services d'action. Les helpers restent dans main.py (appelés via main.<nom>).
 """
+import asyncio
 import re
+import time
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -70,4 +72,121 @@ async def uds_request(req: UDSRequest):
             "data": (req.data or "").upper(),
         },
         "response": response,
+    }
+
+
+# Motifs d'une reponse TesterPresent (3E) : data hex majuscule, sans separateur.
+_UDS_POS = "027E00"   # positive : PCI 02, 7E (=0x3E+0x40), sous-fonction 00
+_UDS_NEG = "037F3E"   # negative : PCI 03, 7F, service 3E, puis NRC
+
+
+class UDSScanRequest(BaseModel):
+    interface: str = "can0"
+    start_id: str = "700"
+    end_id: str = "7FF"
+    service: str = "3E"
+    data: str = "00"
+    gap_ms: int = 40
+    listen_ms: int = 90
+
+
+@router.post("/api/uds/scan")
+async def uds_scan(req: UDSScanRequest):
+    """Balaye une plage de request IDs en TesterPresent et detecte les ECU qui repondent.
+
+    TesterPresent (3E 00) n'actionne rien : sert a reperer les adresses UDS presentes sur le bus.
+    Balayage = injection multi-ID -> is_id_blocked applique par ID (comme fuzzing/generator).
+    """
+    if req.interface not in _IFACES:
+        raise HTTPException(status_code=400, detail="Interface invalide (can0/can1/vcan0)")
+    if not _ID_RE.match(req.start_id) or not _ID_RE.match(req.end_id):
+        raise HTTPException(status_code=400, detail="start_id/end_id hex 1..8 requis")
+    if not _SERVICE_RE.match(req.service):
+        raise HTTPException(status_code=400, detail="service = 1 octet hex")
+    if not _DATA_RE.match(req.data or ""):
+        raise HTTPException(status_code=400, detail="data doit etre une suite d'octets hex")
+    start = int(req.start_id, 16)
+    end = int(req.end_id, 16)
+    if end < start:
+        raise HTTPException(status_code=400, detail="end_id doit etre >= start_id")
+    if (end - start + 1) > 512:
+        raise HTTPException(status_code=400, detail="Plage trop large (max 512 IDs)")
+    try:
+        frame = uds_client.build_single_frame(req.service, req.data)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    gap = min(max(req.gap_ms, 10), 500) / 1000.0
+    listen = min(max(req.listen_ms, 10), 500) / 1000.0
+
+    started = time.time()
+    responders = []
+    seen = set()
+    scanned = 0
+    blocked = 0
+
+    # Un seul candump pour tout le scan ; lecture temps reel via PIPE.
+    candump = None
+    reader_task = None
+    lines: list[str] = []
+    try:
+        candump = await asyncio.create_subprocess_exec(
+            "candump", "-L", "-ta", req.interface,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+        )
+
+        async def _reader():
+            assert candump.stdout is not None
+            while True:
+                raw = await candump.stdout.readline()
+                if not raw:
+                    break
+                lines.append(raw.decode("utf-8", "replace").strip())
+
+        reader_task = asyncio.create_task(_reader())
+        await asyncio.sleep(0.15)  # laisser candump demarrer
+
+        for v in range(start, end + 1):
+            rid = f"{v:03X}"
+            if main.is_id_blocked(rid):
+                blocked += 1
+                continue
+            mark = len(lines)
+            main.can_send_frame(req.interface, rid, frame)
+            scanned += 1
+            await asyncio.sleep(listen)
+            for line in lines[mark:]:
+                parsed = main.parse_candump_line(line)
+                if not parsed:
+                    continue
+                d = parsed["data"]
+                if d.startswith(_UDS_POS) or d.startswith(_UDS_NEG):
+                    key = (rid, parsed["id"])
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    responders.append({
+                        "request_id": rid,
+                        "response_id": parsed["id"],
+                        "kind": "positive" if d.startswith(_UDS_POS) else "negative",
+                        "data": d,
+                    })
+            await asyncio.sleep(gap)
+    finally:
+        if reader_task:
+            reader_task.cancel()
+        if candump:
+            candump.terminate()
+            try:
+                await asyncio.wait_for(candump.wait(), timeout=2.0)
+            except asyncio.TimeoutError:
+                candump.kill()
+
+    return {
+        "status": "ok",
+        "interface": req.interface,
+        "scanned": scanned,
+        "blocked_skipped": blocked,
+        "responders": responders,
+        "elapsed_ms": round((time.time() - started) * 1000, 1),
     }

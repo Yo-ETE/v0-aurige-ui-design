@@ -194,6 +194,7 @@ EXPECTED: list[tuple[str, str]] = [
     ('POST', '/api/tailscale/set-exit-node'),
     ('POST', '/api/tailscale/up'),
     ('POST', '/api/uds/request'),
+    ('POST', '/api/uds/scan'),
     ('PUT', '/api/ai/config'),
     ('PUT', '/api/aud06/blocklist'),
     ('PUT', '/api/missions/{mission_id}/logs/{log_id}/tags'),
