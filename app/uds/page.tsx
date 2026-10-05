@@ -19,8 +19,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { AlertTriangle, Info, Loader2, Send } from "lucide-react"
-import { udsRequest, type CANInterface, type UDSResult } from "@/lib/api"
+import { AlertTriangle, Info, Loader2, Radar, Send } from "lucide-react"
+import { udsRequest, udsScan, type CANInterface, type UDSResult, type UDSScanResult } from "@/lib/api"
 import { useCriticalIds } from "@/lib/critical-ids"
 import { cn } from "@/lib/utils"
 
@@ -112,6 +112,36 @@ export default function UdsPage() {
   const [pending, setPending] = useState(false)
   const [last, setLast] = useState<Exchange | null>(null)
   const [history, setHistory] = useState<Exchange[]>([])
+
+  const [scanStart, setScanStart] = useState("700")
+  const [scanEnd, setScanEnd] = useState("7FF")
+  const [scanning, setScanning] = useState(false)
+  const [scanPending, setScanPending] = useState(false)
+  const [scanResult, setScanResult] = useState<UDSScanResult | null>(null)
+  const [scanError, setScanError] = useState<string | null>(null)
+
+  const scanValid = clean(scanStart).length > 0 && clean(scanEnd).length > 0
+
+  const doScan = async () => {
+    setScanPending(false)
+    setScanning(true)
+    setScanError(null)
+    setScanResult(null)
+    try {
+      const r = await udsScan({ interface: iface, startId: clean(scanStart), endId: clean(scanEnd) })
+      if (r.status !== "ok") setScanError("Le scan a échoué.")
+      else setScanResult(r)
+    } catch (e) {
+      setScanError(e instanceof Error ? e.message : "Erreur inconnue")
+    }
+    setScanning(false)
+  }
+
+  const useResponder = (reqId: string, respId: string) => {
+    setRequestId(reqId)
+    setResponseId(respId)
+    window.scrollTo({ top: 0, behavior: "smooth" })
+  }
 
   const choosePreset = (id: PresetId) => {
     setPreset(id)
@@ -336,7 +366,100 @@ export default function UdsPage() {
             )}
           </CardContent>
         </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Scan UDS (découverte d'adresses)</CardTitle>
+            <CardDescription>
+              TesterPresent (3E 00) n'actionne rien ; balaye les IDs pour repérer les ECU présents sur le bus branché.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="space-y-1 w-28">
+                <Label>Interface</Label>
+                <Select value={iface} onValueChange={(v) => setIface(v as CANInterface)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="can0">can0</SelectItem>
+                    <SelectItem value="can1">can1</SelectItem>
+                    <SelectItem value="vcan0">vcan0</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1 w-28">
+                <Label>Start ID (hex)</Label>
+                <Input className="font-mono" value={scanStart} onChange={(e) => setScanStart(e.target.value)} />
+              </div>
+              <div className="space-y-1 w-28">
+                <Label>End ID (hex)</Label>
+                <Input className="font-mono" value={scanEnd} onChange={(e) => setScanEnd(e.target.value)} />
+              </div>
+              <Button onClick={() => setScanPending(true)} disabled={!scanValid || scanning}>
+                {scanning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Radar className="mr-2 h-4 w-4" />}
+                {scanning ? "Scan en cours…" : "Scanner"}
+              </Button>
+            </div>
+
+            {scanError && (
+              <Alert variant="destructive">
+                <AlertTriangle className="h-4 w-4" />
+                <AlertTitle>Échec du scan</AlertTitle>
+                <AlertDescription className="break-words">{scanError}</AlertDescription>
+              </Alert>
+            )}
+
+            {scanResult && (
+              <div className="space-y-2">
+                <p className="text-sm text-muted-foreground">
+                  {scanResult.scanned} IDs testés · {scanResult.blocked_skipped} bloqués · {scanResult.elapsed_ms} ms
+                </p>
+                {scanResult.responders.length === 0 ? (
+                  <p className="text-sm">Aucun ECU détecté sur cette plage (vérifie le bus / élargis la plage).</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {scanResult.responders.map((r) => (
+                      <li
+                        key={`${r.request_id}-${r.response_id}`}
+                        className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border p-2"
+                      >
+                        <span className="font-mono text-sm">{r.request_id} → {r.response_id}</span>
+                        <Badge
+                          variant="outline"
+                          className={r.kind === "positive"
+                            ? "border-green-600 text-green-600 dark:text-green-400"
+                            : "border-orange-500 text-orange-500"}
+                        >
+                          {r.kind === "positive" ? "positive" : "négative"}
+                        </Badge>
+                        <span className="min-w-0 flex-1 break-all font-mono text-xs text-muted-foreground">{r.data}</span>
+                        <Button size="sm" variant="outline" onClick={() => useResponder(r.request_id, r.response_id)}>
+                          Utiliser
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
+
+      <AlertDialog open={scanPending} onOpenChange={(o) => !o && setScanPending(false)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirmer le scan UDS</AlertDialogTitle>
+            <AlertDialogDescription>
+              Balaye {clean(scanStart)}–{clean(scanEnd)} en TesterPresent sur un bus réel. Continuer ?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annuler</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void doScan()}>Scanner</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={pending} onOpenChange={(o) => !o && setPending(false)}>
         <AlertDialogContent>

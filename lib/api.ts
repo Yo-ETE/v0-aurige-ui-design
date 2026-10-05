@@ -2230,3 +2230,35 @@ export async function udsRequest(p: {
     }),
   })
 }
+
+export interface UDSResponder {
+  request_id: string
+  response_id: string
+  kind: "positive" | "negative"
+  data: string
+}
+
+export interface UDSScanResult {
+  status: string
+  interface: string
+  scanned: number
+  blocked_skipped: number
+  responders: UDSResponder[]
+  elapsed_ms: number
+}
+
+/** Balaye une plage d'IDs de requete en TesterPresent (peut durer ~30 s ; aucun timeout client). */
+export async function udsScan(p: {
+  interface: CANInterface
+  startId: string
+  endId: string
+}): Promise<UDSScanResult> {
+  return fetchApi<UDSScanResult>("/uds/scan", {
+    method: "POST",
+    body: JSON.stringify({
+      interface: p.interface,
+      start_id: p.startId,
+      end_id: p.endId,
+    }),
+  })
+}
