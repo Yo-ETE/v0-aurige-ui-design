@@ -85,6 +85,10 @@ function describe(r: UDSResult): { text: string; tone: "ok" | "neg" | "err" } {
     const echo = resp.service_echo !== undefined ? resp.service_echo.toString(16).toUpperCase().padStart(2, "0") : "??"
     return { text: `${echo}${resp.data_hex ? " " + resp.data_hex : ""}`, tone: "ok" }
   }
+  // Pas de vraie reponse negative (ni NRC, ni trame brute) = aucune reponse de l'ECU, pas un 7F.
+  if (!resp.nrc && !resp.raw) {
+    return { text: resp.error === "pas de reponse" ? "Pas de réponse de l'ECU" : (resp.error || "Pas de réponse"), tone: "err" }
+  }
   const code = resp.nrc ? resp.nrc.code.toString(16).toUpperCase().padStart(2, "0") : "??"
   return { text: `7F ${resp.nrc ? `${resp.nrc.label} (0x${code})` : resp.raw}`, tone: "neg" }
 }
@@ -283,8 +287,12 @@ export default function UdsPage() {
           lastDesc.tone === "err" ? (
             <Alert variant="destructive">
               <AlertTriangle className="h-4 w-4" />
-              <AlertTitle>Erreur</AlertTitle>
-              <AlertDescription className="font-mono break-all">{lastDesc.text}</AlertDescription>
+              <AlertTitle>{lastDesc.text}</AlertTitle>
+              <AlertDescription className="break-words">
+                Aucun ECU n'a répondu sur <span className="font-mono">{clean(responseId)}</span>. Vérifie : le bon bus
+                (OBD pour <span className="font-mono">7E0/7E8</span>, ou le bus de l'ECU cible derrière le gateway) et les
+                IDs UDS (request/response) de l'ECU visé.
+              </AlertDescription>
             </Alert>
           ) : (
             <Card className={lastDesc.tone === "ok" ? "border-green-600/50" : "border-destructive/50"}>

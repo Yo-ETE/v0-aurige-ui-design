@@ -2202,6 +2202,7 @@ export interface UDSResponse {
   nrc?: { code: number; label: string }
   data_hex?: string
   service_echo?: number
+  error?: string
 }
 
 export interface UDSResult {
