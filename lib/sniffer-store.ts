@@ -195,6 +195,8 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
       set({ ws: null })
     }
     
+    // Nouvelle connexion : buffers vides
+    resetBuffers()
     set({
       isConnecting: true,
       error: null,
@@ -226,210 +228,9 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
       const ws = createSnifferWebSocket(
         selectedInterface,
         (msg: CANMessage) => {
-          const { 
-            isPaused, 
-            frameMap, 
-            sortedIds, 
-            totalMessages, 
-            lastPayloadById,
-            lastDecodedSignalsById,
-            changeCountById,
-            highlightChangesEnabled,
-            highlightMode,
-            dbcEnabled,
-            dbcLookup,
-            notchActive,
-            notchBaseline,
-            noiseMask,
-            changedSinceNotchById,
-            changeCountSinceNotchById,
-          } = get()
-          if (isPaused) return
-          
-          const id = msg.canId.toUpperCase()
-          const newBytes = (msg.data || "").match(/.{1,2}/g) || []
-          const now = typeof msg.timestamp === "number" 
-            ? msg.timestamp 
-            : Date.now() / 1000
-          const nowMs = now * 1000
-          const ts = new Date(nowMs).toISOString().substr(11, 12)
-          
-          const existing = frameMap.get(id)
-          
-          // Byte-level change detection (for coloring)
-          const changedIndices = new Set<number>()
-          if (existing) {
-            for (let i = 0; i < newBytes.length; i++) {
-              if (existing.bytes[i] !== newBytes[i]) {
-                changedIndices.add(i)
-              }
-            }
-          }
-          
-          // Payload-level change detection (for flash animation)
-          const payloadHex = newBytes.join("")
-          const prevPayloadHex = lastPayloadById.get(id)
-          let payloadChanged = false
-          let deltaBytes = 0
-          let isNoisy = false
-          
-          if (highlightChangesEnabled && prevPayloadHex !== undefined) {
-            if (prevPayloadHex !== payloadHex) {
-              payloadChanged = true
-              // Count how many bytes changed
-              const prevBytesArr = prevPayloadHex.match(/.{1,2}/g) || []
-              const maxLen = Math.max(newBytes.length, prevBytesArr.length)
-              for (let i = 0; i < maxLen; i++) {
-                const a = newBytes[i] || ""
-                const b = prevBytesArr[i] || ""
-                if (a !== b) deltaBytes++
-              }
-              
-              // Track change frequency for noise detection
-              const changeStats = changeCountById.get(id) || { count: 0, lastResetTs: nowMs }
-              const timeSinceReset = nowMs - changeStats.lastResetTs
-              
-              if (timeSinceReset > 1000) {
-                // Reset counter every second
-                changeCountById.set(id, { count: 1, lastResetTs: nowMs })
-              } else {
-                const newCount = changeStats.count + 1
-                changeCountById.set(id, { count: newCount, lastResetTs: changeStats.lastResetTs })
-                // Mark as noisy if > 10 changes per second
-                if (newCount > 10) {
-                  isNoisy = true
-                }
-              }
-            }
-          }
-          
-          // Signal-level change detection (DBC-aware)
-          let signalChanged = false
-          const changedSignalNames: string[] = []
-          
-          if (highlightChangesEnabled && dbcEnabled && (highlightMode === "signal" || highlightMode === "both")) {
-            const dbcEntry = dbcLookup.get(id)
-            if (dbcEntry && dbcEntry.signals.length > 0) {
-              // Decode current signals
-              const currentSignals: Record<string, number> = {}
-              const decoded = get().decodeSignals(id, newBytes)
-              for (const sig of decoded) {
-                currentSignals[sig.name] = sig.value
-              }
-              
-              // Compare with previous
-              const prevSignals = lastDecodedSignalsById.get(id)
-              if (prevSignals) {
-                for (const sigName in currentSignals) {
-                  const curr = currentSignals[sigName]
-                  const prev = prevSignals[sigName]
-                  if (prev !== undefined && curr !== prev) {
-                    signalChanged = true
-                    changedSignalNames.push(sigName)
-                  }
-                }
-              }
-              
-              // Update memory
-              lastDecodedSignalsById.set(id, currentSignals)
-            }
-          }
-          
-          // Determine final change status based on mode
-          let finalPayloadChanged = false
-          if (highlightMode === "payload") {
-            finalPayloadChanged = payloadChanged
-          } else if (highlightMode === "signal") {
-            finalPayloadChanged = signalChanged
-          } else {
-            // both
-            finalPayloadChanged = payloadChanged || signalChanged
-          }
-          
-          // Update payload memory
-          lastPayloadById.set(id, payloadHex)
-          
-          const deltaMs = existing && existing._lastRawTs > 0
-            ? Math.round((now - existing._lastRawTs) * 1000)
-            : 0
-          
-          const prevCycle = existing?.cycleMs || 0
-          const cycleMs = prevCycle > 0
-            ? Math.round(prevCycle * 0.7 + deltaMs * 0.3)
-            : deltaMs
-          
-          const newFrame: SnifferFrame = {
-            canId: id,
-            bytes: newBytes,
-            prevBytes: existing ? existing.bytes : newBytes,
-            changedIndices,
-            lastTimestamp: ts,
-            count: (existing?.count || 0) + 1,
-            deltaMs,
-            dlc: newBytes.length,
-            cycleMs,
-            _lastRawTs: now,
-            payloadChanged: finalPayloadChanged,
-            deltaBytes,
-            changedAt: finalPayloadChanged ? nowMs : (existing?.changedAt || 0),
-            isNoisy,
-            changedSignalNames,
-            signalChanged,
-          }
-          
-          // Notch tracking: O(dlc) per frame, maps mutated in place (keyed by id)
-          if (notchActive) {
-            const base = notchBaseline.get(id)
-            if (!base) {
-              // ID appeared after the notch: its first frame is the reference
-              notchBaseline.set(id, newBytes)
-            } else {
-              const noise = noiseMask.get(id)
-              let changedSet = changedSinceNotchById.get(id)
-              let counts = changeCountSinceNotchById.get(id)
-              for (let i = 0; i < newBytes.length; i++) {
-                if (newBytes[i] === base[i]) continue
-                if (noise && noise.has(i)) continue
-                if (!changedSet) {
-                  changedSet = new Set<number>()
-                  changedSinceNotchById.set(id, changedSet)
-                }
-                if (!counts) {
-                  counts = []
-                  changeCountSinceNotchById.set(id, counts)
-                }
-                changedSet.add(i)
-                // Count real transitions only (not every frame differing from baseline)
-                if (existing && existing.bytes[i] !== newBytes[i]) {
-                  counts[i] = (counts[i] || 0) + 1
-                } else if (counts[i] === undefined) {
-                  counts[i] = 1
-                }
-              }
-            }
-          }
-          
-          const newMap = new Map(frameMap)
-          newMap.set(id, newFrame)
-          
-          // Only re-sort if new ID appeared
-          let newSortedIds = sortedIds
-          if (!existing) {
-            newSortedIds = Array.from(newMap.keys()).sort((a, b) => {
-              const numA = parseInt(a, 16)
-              const numB = parseInt(b, 16)
-              return numA - numB
-            })
-          }
-          
-          set({
-            frameMap: newMap,
-            sortedIds: newSortedIds,
-            totalMessages: totalMessages + 1,
-            lastPayloadById,
-            lastDecodedSignalsById,
-            changeCountById,
-          })
+          // Callback leger : on bufferise, le flush (rAF) fait le travail
+          if (get().isPaused) return
+          bufferMessage(msg)
         },
         () => {
           set({
@@ -472,6 +273,7 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
   },
   
   stop: () => {
+    resetBuffers()
     const { ws } = get()
     if (ws) {
       try { ws.close() } catch { /* ignore */ }
@@ -485,17 +287,20 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
   
   toggleExpand: () => set((state) => ({ isExpanded: !state.isExpanded })),
   
-  clearFrames: () => set({
-    frameMap: new Map(),
-    sortedIds: [],
-    totalMessages: 0,
-    // Baseline refers to cleared frames: drop the notch with them
-    notchActive: false,
-    notchBaseline: new Map(),
-    noiseMask: new Map(),
-    changedSinceNotchById: new Map(),
-    changeCountSinceNotchById: new Map(),
-  }),
+  clearFrames: () => {
+    resetBuffers()
+    set({
+      frameMap: new Map(),
+      sortedIds: [],
+      totalMessages: 0,
+      // Baseline refers to cleared frames: drop the notch with them
+      notchActive: false,
+      notchBaseline: new Map(),
+      noiseMask: new Map(),
+      changedSinceNotchById: new Map(),
+      changeCountSinceNotchById: new Map(),
+    })
+  },
   
   toggleDbcOverlay: () => set((state) => ({ dbcEnabled: !state.dbcEnabled })),
   
@@ -636,3 +441,263 @@ export const useSnifferStore = create<SnifferState>((set, get) => ({
     })
   },
 }))
+
+// ---------------------------------------------------------------------------
+// Batching : le WS envoie 1 message par trame (~430/s sur bus charge). On
+// bufferise hors store et on ne fait qu'un seul set() par frame d'animation.
+// ---------------------------------------------------------------------------
+const MAX_PENDING = 5000
+let _pending: CANMessage[] = []
+let _rafId: number | ReturnType<typeof setTimeout> | null = null
+let _usingRaf = false
+
+function scheduleFlush() {
+  if (_rafId != null) return
+  if (typeof requestAnimationFrame !== "undefined") {
+    _usingRaf = true
+    _rafId = requestAnimationFrame(flushPending)
+  } else {
+    _usingRaf = false
+    _rafId = setTimeout(flushPending, 16)
+  }
+}
+
+function resetBuffers() {
+  if (_rafId != null) {
+    if (_usingRaf && typeof cancelAnimationFrame !== "undefined") {
+      cancelAnimationFrame(_rafId as number)
+    } else {
+      clearTimeout(_rafId as ReturnType<typeof setTimeout>)
+    }
+  }
+  _rafId = null
+  _pending = []
+}
+
+function bufferMessage(msg: CANMessage) {
+  _pending.push(msg)
+  // Garde-fou : on conserve les trames les plus recentes
+  if (_pending.length > MAX_PENDING) _pending = _pending.slice(-MAX_PENDING)
+  scheduleFlush()
+}
+
+/** Traite tout le buffer en une passe puis fait un seul set() */
+function flushPending() {
+  _rafId = null
+  const batch = _pending
+  _pending = []
+  if (batch.length === 0) return
+
+  const store = useSnifferStore.getState()
+  // Pause entre-temps : on jette le lot (comportement identique a l'ancien early-return)
+  if (store.isPaused) return
+  const {
+    frameMap,
+    sortedIds,
+    totalMessages,
+    lastPayloadById,
+    lastDecodedSignalsById,
+    changeCountById,
+    highlightChangesEnabled,
+    highlightMode,
+    dbcEnabled,
+    dbcLookup,
+    notchActive,
+    notchBaseline,
+    noiseMask,
+    changedSinceNotchById,
+    changeCountSinceNotchById,
+  } = store
+
+  // Copie de travail unique, mutee en place pour tout le lot
+  const newMap = new Map(frameMap)
+  let newIdAppeared = false
+
+  for (const msg of batch) {
+    const id = msg.canId.toUpperCase()
+    const newBytes = (msg.data || "").match(/.{1,2}/g) || []
+    const now = typeof msg.timestamp === "number" 
+      ? msg.timestamp 
+      : Date.now() / 1000
+    const nowMs = now * 1000
+    const ts = new Date(nowMs).toISOString().substr(11, 12)
+    
+    const existing = newMap.get(id)
+    
+    // Byte-level change detection (for coloring)
+    const changedIndices = new Set<number>()
+    if (existing) {
+      for (let i = 0; i < newBytes.length; i++) {
+        if (existing.bytes[i] !== newBytes[i]) {
+          changedIndices.add(i)
+        }
+      }
+    }
+    
+    // Payload-level change detection (for flash animation)
+    const payloadHex = newBytes.join("")
+    const prevPayloadHex = lastPayloadById.get(id)
+    let payloadChanged = false
+    let deltaBytes = 0
+    let isNoisy = false
+    
+    if (highlightChangesEnabled && prevPayloadHex !== undefined) {
+      if (prevPayloadHex !== payloadHex) {
+        payloadChanged = true
+        // Count how many bytes changed
+        const prevBytesArr = prevPayloadHex.match(/.{1,2}/g) || []
+        const maxLen = Math.max(newBytes.length, prevBytesArr.length)
+        for (let i = 0; i < maxLen; i++) {
+          const a = newBytes[i] || ""
+          const b = prevBytesArr[i] || ""
+          if (a !== b) deltaBytes++
+        }
+        
+        // Track change frequency for noise detection
+        const changeStats = changeCountById.get(id) || { count: 0, lastResetTs: nowMs }
+        const timeSinceReset = nowMs - changeStats.lastResetTs
+        
+        if (timeSinceReset > 1000) {
+          // Reset counter every second
+          changeCountById.set(id, { count: 1, lastResetTs: nowMs })
+        } else {
+          const newCount = changeStats.count + 1
+          changeCountById.set(id, { count: newCount, lastResetTs: changeStats.lastResetTs })
+          // Mark as noisy if > 10 changes per second
+          if (newCount > 10) {
+            isNoisy = true
+          }
+        }
+      }
+    }
+    
+    // Signal-level change detection (DBC-aware)
+    let signalChanged = false
+    const changedSignalNames: string[] = []
+    
+    if (highlightChangesEnabled && dbcEnabled && (highlightMode === "signal" || highlightMode === "both")) {
+      const dbcEntry = dbcLookup.get(id)
+      if (dbcEntry && dbcEntry.signals.length > 0) {
+        // Decode current signals
+        const currentSignals: Record<string, number> = {}
+        const decoded = store.decodeSignals(id, newBytes)
+        for (const sig of decoded) {
+          currentSignals[sig.name] = sig.value
+        }
+        
+        // Compare with previous
+        const prevSignals = lastDecodedSignalsById.get(id)
+        if (prevSignals) {
+          for (const sigName in currentSignals) {
+            const curr = currentSignals[sigName]
+            const prev = prevSignals[sigName]
+            if (prev !== undefined && curr !== prev) {
+              signalChanged = true
+              changedSignalNames.push(sigName)
+            }
+          }
+        }
+        
+        // Update memory
+        lastDecodedSignalsById.set(id, currentSignals)
+      }
+    }
+    
+    // Determine final change status based on mode
+    let finalPayloadChanged = false
+    if (highlightMode === "payload") {
+      finalPayloadChanged = payloadChanged
+    } else if (highlightMode === "signal") {
+      finalPayloadChanged = signalChanged
+    } else {
+      // both
+      finalPayloadChanged = payloadChanged || signalChanged
+    }
+    
+    // Update payload memory
+    lastPayloadById.set(id, payloadHex)
+    
+    const deltaMs = existing && existing._lastRawTs > 0
+      ? Math.round((now - existing._lastRawTs) * 1000)
+      : 0
+    
+    const prevCycle = existing?.cycleMs || 0
+    const cycleMs = prevCycle > 0
+      ? Math.round(prevCycle * 0.7 + deltaMs * 0.3)
+      : deltaMs
+    
+    const newFrame: SnifferFrame = {
+      canId: id,
+      bytes: newBytes,
+      prevBytes: existing ? existing.bytes : newBytes,
+      changedIndices,
+      lastTimestamp: ts,
+      count: (existing?.count || 0) + 1,
+      deltaMs,
+      dlc: newBytes.length,
+      cycleMs,
+      _lastRawTs: now,
+      payloadChanged: finalPayloadChanged,
+      deltaBytes,
+      changedAt: finalPayloadChanged ? nowMs : (existing?.changedAt || 0),
+      isNoisy,
+      changedSignalNames,
+      signalChanged,
+    }
+    
+    // Notch tracking: O(dlc) per frame, maps mutated in place (keyed by id)
+    if (notchActive) {
+      const base = notchBaseline.get(id)
+      if (!base) {
+        // ID appeared after the notch: its first frame is the reference
+        notchBaseline.set(id, newBytes)
+      } else {
+        const noise = noiseMask.get(id)
+        let changedSet = changedSinceNotchById.get(id)
+        let counts = changeCountSinceNotchById.get(id)
+        for (let i = 0; i < newBytes.length; i++) {
+          if (newBytes[i] === base[i]) continue
+          if (noise && noise.has(i)) continue
+          if (!changedSet) {
+            changedSet = new Set<number>()
+            changedSinceNotchById.set(id, changedSet)
+          }
+          if (!counts) {
+            counts = []
+            changeCountSinceNotchById.set(id, counts)
+          }
+          changedSet.add(i)
+          // Count real transitions only (not every frame differing from baseline)
+          if (existing && existing.bytes[i] !== newBytes[i]) {
+            counts[i] = (counts[i] || 0) + 1
+          } else if (counts[i] === undefined) {
+            counts[i] = 1
+          }
+        }
+      }
+    }
+    
+
+    newMap.set(id, newFrame)
+    if (!existing) newIdAppeared = true
+  }
+
+  // Re-tri uniquement si un nouvel ID est apparu
+  let newSortedIds = sortedIds
+  if (newIdAppeared) {
+    newSortedIds = Array.from(newMap.keys()).sort((a, b) => {
+      const numA = parseInt(a, 16)
+      const numB = parseInt(b, 16)
+      return numA - numB
+    })
+  }
+
+  useSnifferStore.setState({
+    frameMap: newMap,
+    sortedIds: newSortedIds,
+    totalMessages: totalMessages + batch.length,
+    lastPayloadById,
+    lastDecodedSignalsById,
+    changeCountById,
+  })
+}
