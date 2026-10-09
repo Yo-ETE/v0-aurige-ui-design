@@ -61,6 +61,10 @@ _ROUTE_RULES = [
     ("POST", r"^/api/can/(init|stop|scan-bitrate)", ["can_inject"]),
     ("POST", r"^/api/generator/", ["can_inject"]),
     ("POST", r"^/api/inject/", ["can_inject"]),
+    # Bibliotheque de DID UDS (metadonnees, pas d'injection) : AVANT la regle generique (first-match)
+    ("POST", r"^/api/uds/dids", ["dbc_manage"]),
+    ("PATCH", r"^/api/uds/dids/", ["dbc_manage"]),
+    ("DELETE", r"^/api/uds/dids/", ["dbc_manage"]),
     ("POST", r"^/api/uds/", ["can_inject"]),
     ("POST", r"^/api/known-frames", ["can_inject"]),
     ("PATCH", r"^/api/known-frames", ["can_inject"]),

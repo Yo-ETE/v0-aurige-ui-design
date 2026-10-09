@@ -8,6 +8,8 @@ services d'action. Les helpers restent dans main.py (appelés via main.<nom>).
 import asyncio
 import re
 import time
+import uuid
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -29,6 +31,95 @@ class UDSRequest(BaseModel):
     response_id: str = "7E8"
     service: str
     data: str = ""
+
+
+_DID_RE = re.compile(r"^[0-9A-Fa-f]{2,8}$")
+
+
+class UDSDidCreate(BaseModel):
+    did: str
+    name: str
+    brand: str = ""
+    ecu_request_id: str = "7E0"
+    ecu_response_id: str = "7E8"
+    note: str = ""
+
+
+class UDSDidPatch(BaseModel):
+    did: Optional[str] = None
+    name: Optional[str] = None
+    brand: Optional[str] = None
+    ecu_request_id: Optional[str] = None
+    ecu_response_id: Optional[str] = None
+    note: Optional[str] = None
+
+
+def _check_did(did: str) -> None:
+    if not _DID_RE.match(did) or len(did) % 2 != 0:
+        raise HTTPException(status_code=400, detail="did hex requis (1 a 4 octets, longueur paire)")
+
+
+def _check_ecu(v: str) -> None:
+    if not _ID_RE.match(v):
+        raise HTTPException(status_code=400, detail="ID ECU hex 1..8 requis")
+
+
+@router.get("/api/uds/dids")
+async def uds_dids_list():
+    return {"dids": main._load_dids()}
+
+
+@router.post("/api/uds/dids")
+async def uds_dids_create(req: UDSDidCreate):
+    _check_did(req.did)
+    _check_ecu(req.ecu_request_id)
+    _check_ecu(req.ecu_response_id)
+    obj = {
+        "id": uuid.uuid4().hex,
+        "did": req.did.upper(),
+        "name": req.name,
+        "brand": req.brand,
+        "ecu_request_id": req.ecu_request_id.upper(),
+        "ecu_response_id": req.ecu_response_id.upper(),
+        "note": req.note,
+    }
+    dids = main._load_dids()
+    dids.append(obj)
+    main._save_dids(dids)
+    return {"status": "ok", "did": obj}
+
+
+@router.patch("/api/uds/dids/{did_id}")
+async def uds_dids_patch(did_id: str, req: UDSDidPatch):
+    dids = main._load_dids()
+    target = next((d for d in dids if d.get("id") == did_id), None)
+    if target is None:
+        raise HTTPException(status_code=404, detail="DID introuvable")
+    if req.did is not None:
+        _check_did(req.did)
+        target["did"] = req.did.upper()
+    if req.ecu_request_id is not None:
+        _check_ecu(req.ecu_request_id)
+        target["ecu_request_id"] = req.ecu_request_id.upper()
+    if req.ecu_response_id is not None:
+        _check_ecu(req.ecu_response_id)
+        target["ecu_response_id"] = req.ecu_response_id.upper()
+    for k in ("name", "brand", "note"):
+        v = getattr(req, k)
+        if v is not None:
+            target[k] = v
+    main._save_dids(dids)
+    return {"status": "ok", "did": target}
+
+
+@router.delete("/api/uds/dids/{did_id}")
+async def uds_dids_delete(did_id: str):
+    dids = main._load_dids()
+    kept = [d for d in dids if d.get("id") != did_id]
+    if len(kept) == len(dids):
+        raise HTTPException(status_code=404, detail="DID introuvable")
+    main._save_dids(kept)
+    return {"status": "ok"}
 
 
 @router.post("/api/uds/request")

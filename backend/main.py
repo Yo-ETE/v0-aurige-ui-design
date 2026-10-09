@@ -994,6 +994,60 @@ def _save_blocklist(ids: list) -> None:
     os.replace(tmp, path)
 
 
+# =============================================================================
+# Bibliotheque de DID UDS (ReadDataByIdentifier 0x22) — metadonnees uniquement
+# =============================================================================
+
+DIDS_PATH = DATA_DIR / "uds_dids.json"
+
+# Seed : identifiants STANDARD ISO 14229 (F1xx) uniquement, aucune base constructeur
+_DEFAULT_DIDS = [
+    {"id": f"std-{d.lower()}", "did": d, "name": n, "brand": "",
+     "ecu_request_id": "7E0", "ecu_response_id": "7E8", "note": ""}
+    for d, n in [
+        ("F190", "VIN"),
+        ("F18C", "Numéro de série ECU"),
+        ("F187", "Référence pièce constructeur"),
+        ("F189", "Version logiciel"),
+        ("F191", "Numéro matériel"),
+        ("F195", "Version SW fournisseur"),
+        ("F197", "Nom du système"),
+        ("F18A", "Identifiant fournisseur système"),
+    ]
+]
+
+
+def _load_dids() -> list:
+    """Charge la bibliotheque de DID ; cree le fichier avec le seed s'il est absent."""
+    import copy
+    try:
+        with open(DIDS_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("dids", []) if isinstance(data, dict) else []
+    except FileNotFoundError:
+        seed = copy.deepcopy(_DEFAULT_DIDS)
+        try:
+            _save_dids(seed)
+        except OSError as e:
+            log_error("uds_dids.json : ecriture du seed impossible", e)
+        return copy.deepcopy(_DEFAULT_DIDS)
+    except (ValueError, OSError) as e:
+        log_error("uds_dids.json corrompu — bibliotheque DID vide", e)
+        return []
+
+
+def _save_dids(dids: list) -> None:
+    """Sauvegarde atomique (fichier temporaire + os.replace)."""
+    path = Path(DIDS_PATH)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"dids": dids}, f, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+
+
 def is_id_blocked(can_id: str) -> bool:
     """True si l'ID est dans la liste critique. Les IDs OBD ne sont JAMAIS bloques."""
     n = _norm_id(can_id)
