@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { AppShell } from "@/components/app-shell"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -19,7 +19,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { AlertTriangle, Info, Loader2, Radar, Send } from "lucide-react"
+import { AlertTriangle, Info, Loader2, Play, Radar, Send, Square } from "lucide-react"
 import { udsRequest, udsScan, type CANInterface, type UDSResult, type UDSScanResult } from "@/lib/api"
 import { useCriticalIds } from "@/lib/critical-ids"
 import { cn } from "@/lib/utils"
@@ -99,6 +99,42 @@ const toneClass = {
   err: "text-destructive",
 }
 
+const LIVE_MAX_HISTORY = 60
+const LIVE_MAX_FAILS = 5
+const LIVE_MIN_INTERVAL = 200
+
+interface LiveSample {
+  id: number
+  time: string
+  text: string
+  tone: "ok" | "neg" | "err"
+  value: number | null
+}
+
+/** data_hex (1 a 4 octets) -> entier non signe, sinon null. */
+function hexToValue(hex?: string): number | null {
+  const h = clean(hex ?? "")
+  if (h.length < 2 || h.length > 8 || h.length % 2 !== 0) return null
+  return parseInt(h, 16)
+}
+
+function Sparkline({ values }: { values: number[] }) {
+  if (values.length < 2) return null
+  const w = 240
+  const h = 48
+  const min = Math.min(...values)
+  const max = Math.max(...values)
+  const span = max - min || 1
+  const pts = values
+    .map((v, i) => `${((i / (values.length - 1)) * w).toFixed(1)},${(h - 2 - ((v - min) / span) * (h - 4)).toFixed(1)}`)
+    .join(" ")
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className="h-12 w-full max-w-md text-primary" preserveAspectRatio="none" aria-label="Courbe de la valeur">
+      <polyline points={pts} fill="none" stroke="currentColor" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+    </svg>
+  )
+}
+
 export default function UdsPage() {
   const { isCritical } = useCriticalIds()
   const [iface, setIface] = useState<CANInterface>("can0")
@@ -119,6 +155,21 @@ export default function UdsPage() {
   const [scanPending, setScanPending] = useState(false)
   const [scanResult, setScanResult] = useState<UDSScanResult | null>(null)
   const [scanError, setScanError] = useState<string | null>(null)
+
+  // --- Mode live ---
+  const [liveOn, setLiveOn] = useState(false)
+  const [liveIntervalStr, setLiveIntervalStr] = useState("500")
+  const [livePending, setLivePending] = useState(false)
+  const [liveLast, setLiveLast] = useState<LiveSample | null>(null)
+  const [liveHistory, setLiveHistory] = useState<LiveSample[]>([])
+  const [liveReads, setLiveReads] = useState(0)
+  const [liveErrors, setLiveErrors] = useState(0)
+  const [liveMsg, setLiveMsg] = useState<string | null>(null)
+  const liveRunning = useRef(false)
+  const liveSeq = useRef(0)
+  const liveParams = useRef({ iface, requestId, responseId, service, data, intervalMs: 500, critical: false })
+
+  useEffect(() => () => { liveRunning.current = false }, [])
 
   const scanValid = clean(scanStart).length > 0 && clean(scanEnd).length > 0
 
@@ -195,6 +246,84 @@ export default function UdsPage() {
     if (needsConfirm) setPending(true)
     else void doSend()
   }
+
+  liveParams.current = {
+    iface, requestId, responseId, service, data,
+    intervalMs: Math.max(LIVE_MIN_INTERVAL, parseInt(liveIntervalStr, 10) || 500),
+    critical: isCritical(requestId),
+  }
+
+  const stopLive = useCallback((msg?: string) => {
+    liveRunning.current = false
+    setLiveOn(false)
+    if (msg) setLiveMsg(msg)
+  }, [])
+
+  const runLive = useCallback(async () => {
+    if (liveRunning.current) return
+    liveRunning.current = true
+    setLiveOn(true)
+    setLiveMsg(null)
+    let fails = 0
+    while (liveRunning.current) {
+      const p = liveParams.current
+      // Garde-fou : si le formulaire devient une action/ecriture en cours de live, on coupe.
+      if (isActionService(p.service, p.data) || p.critical) {
+        stopLive("Live arrêté : le service ou l'ID est devenu une action ou un ID critique.")
+        break
+      }
+      const t0 = Date.now()
+      let result: UDSResult
+      let thrown = false
+      try {
+        result = await udsRequest({
+          interface: p.iface,
+          requestId: clean(p.requestId),
+          responseId: clean(p.responseId),
+          service: clean(p.service),
+          data: clean(p.data),
+        })
+      } catch (e) {
+        thrown = true
+        result = { status: "error", error: e instanceof Error ? e.message : "Erreur inconnue" }
+      }
+      if (!liveRunning.current) break
+      const d = describe(result)
+      const resp = result.response
+      const sample: LiveSample = {
+        id: ++liveSeq.current,
+        time: new Date().toLocaleTimeString("fr-FR"),
+        text: d.tone === "ok" && resp?.data_hex ? resp.data_hex : d.text,
+        tone: d.tone,
+        value: d.tone === "ok" ? hexToValue(resp?.data_hex) : null,
+      }
+      setLiveLast(sample)
+      setLiveHistory((h) => [sample, ...h].slice(0, LIVE_MAX_HISTORY))
+      setLiveReads((n) => n + 1)
+      if (d.tone !== "ok") setLiveErrors((n) => n + 1)
+      fails = thrown ? fails + 1 : 0
+      if (fails >= LIVE_MAX_FAILS) {
+        stopLive(`Live arrêté : ${LIVE_MAX_FAILS} échecs consécutifs`)
+        break
+      }
+      const wait = Math.max(0, liveParams.current.intervalMs - (Date.now() - t0))
+      await new Promise<void>((r) => setTimeout(r, wait))
+    }
+  }, [stopLive])
+
+  const onToggleLive = () => {
+    if (liveOn) { stopLive(); return }
+    if (!valid) return
+    setLiveReads(0)
+    setLiveErrors(0)
+    setLiveHistory([])
+    setLiveLast(null)
+    if (needsConfirm) setLivePending(true)
+    else void runLive()
+  }
+
+  const liveValues = liveHistory.filter((h) => h.value !== null).map((h) => h.value as number).reverse()
+  const liveSparkOk = liveValues.length >= 2 && liveValues.length === liveHistory.length
 
   const lastDesc = last ? describe(last.result) : null
 
@@ -444,7 +573,99 @@ export default function UdsPage() {
             )}
           </CardContent>
         </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Mode live (lecture continue)</CardTitle>
+            <CardDescription>
+              Répète la requête du formulaire ci-dessus (une seule à la fois) et affiche la dernière valeur.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Le live répète la requête : à réserver aux services de lecture (22, 01…).
+            </p>
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="space-y-1 w-36">
+                <Label>Intervalle (ms)</Label>
+                <Input
+                  className="font-mono"
+                  inputMode="numeric"
+                  value={liveIntervalStr}
+                  onChange={(e) => setLiveIntervalStr(e.target.value.replace(/\D/g, ""))}
+                  onBlur={() => setLiveIntervalStr(String(Math.max(LIVE_MIN_INTERVAL, parseInt(liveIntervalStr, 10) || 500)))}
+                />
+              </div>
+              <Button
+                onClick={onToggleLive}
+                disabled={!liveOn && !valid}
+                variant={liveOn ? "destructive" : "default"}
+              >
+                {liveOn ? <Square className="mr-2 h-4 w-4" /> : <Play className="mr-2 h-4 w-4" />}
+                {liveOn ? "Arrêter" : "Démarrer le live"}
+              </Button>
+              {needsConfirm && <Badge variant="destructive">Confirmation requise</Badge>}
+              <span className="font-mono text-sm text-muted-foreground break-all">
+                {clean(requestId)} ← {clean(service)} {clean(data)}
+              </span>
+            </div>
+
+            {liveMsg && (
+              <Alert variant="destructive">
+                <AlertTriangle className="h-4 w-4" />
+                <AlertDescription>{liveMsg}</AlertDescription>
+              </Alert>
+            )}
+
+            <p className="text-sm text-muted-foreground">
+              {liveReads} lectures · {liveErrors} erreurs
+            </p>
+
+            {liveLast && (
+              <div className="space-y-2 rounded-md border p-3">
+                <p className={cn("font-mono text-lg break-all", toneClass[liveLast.tone])}>{liveLast.text}</p>
+                {liveLast.value !== null && (
+                  <p className="text-sm">
+                    valeur (déc) : <span className="font-mono text-base font-semibold">{liveLast.value}</span>
+                  </p>
+                )}
+                {liveSparkOk && <Sparkline values={liveValues} />}
+              </div>
+            )}
+
+            {liveHistory.length > 0 && (
+              <ul className="max-h-64 space-y-1 overflow-y-auto">
+                {liveHistory.map((h) => (
+                  <li key={h.id} className="flex flex-wrap items-baseline gap-x-3 font-mono text-xs">
+                    <span className="text-muted-foreground" suppressHydrationWarning>{h.time}</span>
+                    <span className={cn("break-all", toneClass[h.tone])}>{h.text}</span>
+                    {h.value !== null && <span className="text-muted-foreground">({h.value})</span>}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
       </div>
+
+      <AlertDialog open={livePending} onOpenChange={(o) => !o && setLivePending(false)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirmer le live sur une action</AlertDialogTitle>
+            <AlertDialogDescription>
+              Répéter un service d'écriture/d'action (ou un ID critique) actionne l'ECU en boucle toutes les{" "}
+              {Math.max(LIVE_MIN_INTERVAL, parseInt(liveIntervalStr, 10) || 500)} ms. Démarrer quand même ?
+              <span className="mt-2 block font-mono">
+                {clean(requestId)} ← {clean(service)} {clean(data)}
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annuler</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { setLivePending(false); void runLive() }}>Démarrer le live</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={scanPending} onOpenChange={(o) => !o && setScanPending(false)}>
         <AlertDialogContent>
