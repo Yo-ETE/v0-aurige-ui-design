@@ -2262,3 +2262,40 @@ export async function udsScan(p: {
     }),
   })
 }
+
+// --- Bibliotheque de DID UDS (metadonnees ReadDataByIdentifier 0x22) ---
+
+export interface UDSDid {
+  id: string
+  did: string
+  name: string
+  brand: string
+  ecu_request_id: string
+  ecu_response_id: string
+  note: string
+}
+
+export async function udsDidsList(): Promise<{ dids: UDSDid[] }> {
+  return fetchApi<{ dids: UDSDid[] }>("/uds/dids")
+}
+
+export async function udsDidCreate(p: Omit<UDSDid, "id">): Promise<{ status: string; did: UDSDid }> {
+  return fetchApi<{ status: string; did: UDSDid }>("/uds/dids", {
+    method: "POST",
+    body: JSON.stringify(p),
+  })
+}
+
+export async function udsDidUpdate(
+  id: string,
+  p: Partial<Omit<UDSDid, "id">>
+): Promise<{ status: string; did: UDSDid }> {
+  return fetchApi<{ status: string; did: UDSDid }>(`/uds/dids/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(p),
+  })
+}
+
+export async function udsDidDelete(id: string): Promise<{ status: string }> {
+  return fetchApi<{ status: string }>(`/uds/dids/${encodeURIComponent(id)}`, { method: "DELETE" })
+}

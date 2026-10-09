@@ -19,8 +19,19 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { AlertTriangle, Info, Loader2, Play, Radar, Send, Square } from "lucide-react"
-import { udsRequest, udsScan, type CANInterface, type UDSResult, type UDSScanResult } from "@/lib/api"
+import { AlertTriangle, Info, Loader2, Pencil, Play, Plus, Radar, Send, Square, Trash2 } from "lucide-react"
+import {
+  udsDidCreate,
+  udsDidDelete,
+  udsDidsList,
+  udsDidUpdate,
+  udsRequest,
+  udsScan,
+  type CANInterface,
+  type UDSDid,
+  type UDSResult,
+  type UDSScanResult,
+} from "@/lib/api"
 import { useCriticalIds } from "@/lib/critical-ids"
 import { cn } from "@/lib/utils"
 
@@ -69,6 +80,10 @@ function isActionService(service: string, data: string): boolean {
   if (s === "10") return sub !== "01"
   return false
 }
+
+type DidForm = Omit<UDSDid, "id"> & { id?: string }
+
+const EMPTY_DID_FORM: DidForm = { did: "", name: "", brand: "", ecu_request_id: "7E0", ecu_response_id: "7E8", note: "" }
 
 interface Exchange {
   id: number
@@ -170,6 +185,98 @@ export default function UdsPage() {
   const liveParams = useRef({ iface, requestId, responseId, service, data, intervalMs: 500, critical: false })
 
   useEffect(() => () => { liveRunning.current = false }, [])
+
+  // --- Bibliotheque DID ---
+  const [dids, setDids] = useState<UDSDid[]>([])
+  const [didFilter, setDidFilter] = useState("")
+  const [didBrand, setDidBrand] = useState("all")
+  const [didForm, setDidForm] = useState<DidForm | null>(null)
+  const [didSaving, setDidSaving] = useState(false)
+  const [didError, setDidError] = useState<string | null>(null)
+  const [didToDelete, setDidToDelete] = useState<UDSDid | null>(null)
+
+  const refreshDids = useCallback(async () => {
+    try {
+      const r = await udsDidsList()
+      setDids(r.dids ?? [])
+    } catch (e) {
+      setDidError(e instanceof Error ? e.message : "Impossible de charger la bibliothèque DID")
+    }
+  }, [])
+
+  useEffect(() => { void refreshDids() }, [refreshDids])
+
+  const didBrands = Array.from(new Set(dids.map((d) => d.brand).filter(Boolean))).sort()
+  const didQuery = didFilter.trim().toLowerCase()
+  const filteredDids = dids.filter((d) => {
+    if (didBrand !== "all" && d.brand !== didBrand) return false
+    if (!didQuery) return true
+    return [d.did, d.name, d.brand, d.note].some((v) => (v ?? "").toLowerCase().includes(didQuery))
+  })
+
+  const useDid = (d: UDSDid) => {
+    setPreset("raw")
+    setService("22")
+    setData(d.did)
+    setRequestId(d.ecu_request_id)
+    setResponseId(d.ecu_response_id)
+    window.scrollTo({ top: 0, behavior: "smooth" })
+  }
+
+  const openAddDid = () => {
+    setDidError(null)
+    const fromCurrent = clean(service) === "22"
+    setDidForm({
+      ...EMPTY_DID_FORM,
+      did: fromCurrent ? clean(data) : "",
+      ecu_request_id: fromCurrent && clean(requestId) ? clean(requestId) : EMPTY_DID_FORM.ecu_request_id,
+      ecu_response_id: fromCurrent && clean(responseId) ? clean(responseId) : EMPTY_DID_FORM.ecu_response_id,
+    })
+  }
+
+  const openEditDid = (d: UDSDid) => {
+    setDidError(null)
+    setDidForm({ ...d })
+  }
+
+  const saveDid = async () => {
+    if (!didForm) return
+    setDidSaving(true)
+    setDidError(null)
+    const body = {
+      did: clean(didForm.did),
+      name: didForm.name.trim(),
+      brand: didForm.brand.trim(),
+      ecu_request_id: clean(didForm.ecu_request_id),
+      ecu_response_id: clean(didForm.ecu_response_id),
+      note: didForm.note.trim(),
+    }
+    try {
+      if (didForm.id) await udsDidUpdate(didForm.id, body)
+      else await udsDidCreate(body)
+      setDidForm(null)
+      await refreshDids()
+    } catch (e) {
+      setDidError(e instanceof Error ? e.message : "Erreur inconnue")
+    }
+    setDidSaving(false)
+  }
+
+  const confirmDeleteDid = async () => {
+    const d = didToDelete
+    setDidToDelete(null)
+    if (!d) return
+    setDidError(null)
+    try {
+      await udsDidDelete(d.id)
+      await refreshDids()
+    } catch (e) {
+      setDidError(e instanceof Error ? e.message : "Erreur inconnue")
+    }
+  }
+
+  const setDidField = (k: keyof DidForm, v: string) => setDidForm((f) => (f ? { ...f, [k]: v } : f))
+  const didFormValid = !!didForm && clean(didForm.did).length > 0 && didForm.name.trim().length > 0
 
   const scanValid = clean(scanStart).length > 0 && clean(scanEnd).length > 0
 
@@ -576,6 +683,111 @@ export default function UdsPage() {
 
         <Card>
           <CardHeader>
+            <CardTitle>Bibliothèque DID</CardTitle>
+            <CardDescription>
+              DID standard ISO F1xx fournis. Ajoute les DID spécifiques de ta marque (odometer…) trouvés par RE / Scan UDS.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="space-y-1 min-w-[10rem] flex-1">
+                <Label>Filtre</Label>
+                <Input placeholder="DID, nom, note…" value={didFilter} onChange={(e) => setDidFilter(e.target.value)} />
+              </div>
+              <div className="space-y-1 w-full sm:w-44">
+                <Label>Marque</Label>
+                <Select value={didBrand} onValueChange={setDidBrand}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Toutes</SelectItem>
+                    {didBrands.map((b) => <SelectItem key={b} value={b}>{b}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button onClick={openAddDid} disabled={didSaving}>
+                <Plus className="mr-2 h-4 w-4" />
+                Ajouter
+              </Button>
+            </div>
+
+            {didError && (
+              <Alert variant="destructive">
+                <AlertTriangle className="h-4 w-4" />
+                <AlertDescription className="break-words">{didError}</AlertDescription>
+              </Alert>
+            )}
+
+            {didForm && (
+              <div className="space-y-3 rounded-md border p-3">
+                <p className="text-sm font-medium">{didForm.id ? "Modifier le DID" : "Nouveau DID"}</p>
+                <div className="flex flex-wrap gap-3">
+                  <div className="space-y-1 w-28">
+                    <Label>DID (hex)</Label>
+                    <Input className="font-mono" placeholder="F190" value={didForm.did} onChange={(e) => setDidField("did", e.target.value)} />
+                  </div>
+                  <div className="space-y-1 min-w-[12rem] flex-1">
+                    <Label>Nom</Label>
+                    <Input value={didForm.name} onChange={(e) => setDidField("name", e.target.value)} />
+                  </div>
+                  <div className="space-y-1 min-w-[8rem] flex-1">
+                    <Label>Marque</Label>
+                    <Input value={didForm.brand} onChange={(e) => setDidField("brand", e.target.value)} />
+                  </div>
+                  <div className="space-y-1 w-28">
+                    <Label>Request ID</Label>
+                    <Input className="font-mono" value={didForm.ecu_request_id} onChange={(e) => setDidField("ecu_request_id", e.target.value)} />
+                  </div>
+                  <div className="space-y-1 w-28">
+                    <Label>Response ID</Label>
+                    <Input className="font-mono" value={didForm.ecu_response_id} onChange={(e) => setDidField("ecu_response_id", e.target.value)} />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <Label>Note</Label>
+                  <Input value={didForm.note} onChange={(e) => setDidField("note", e.target.value)} />
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button onClick={() => void saveDid()} disabled={!didFormValid || didSaving}>
+                    {didSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    {didForm.id ? "Enregistrer" : "Ajouter"}
+                  </Button>
+                  <Button variant="outline" onClick={() => { setDidForm(null); setDidError(null) }} disabled={didSaving}>
+                    Annuler
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {filteredDids.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Aucun DID.</p>
+            ) : (
+              <ul className="space-y-2">
+                {filteredDids.map((d) => (
+                  <li key={d.id} className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border p-2">
+                    <Badge variant="secondary" className="font-mono">{d.did}</Badge>
+                    <span className="min-w-0 flex-1 basis-40 break-words text-sm">
+                      {d.name}
+                      {d.brand && <span className="ml-2 text-xs text-muted-foreground">{d.brand}</span>}
+                    </span>
+                    <span className="font-mono text-xs">{d.ecu_request_id}→{d.ecu_response_id}</span>
+                    <div className="flex flex-wrap gap-2">
+                      <Button size="sm" variant="outline" onClick={() => useDid(d)}>Utiliser</Button>
+                      <Button size="sm" variant="outline" onClick={() => openEditDid(d)} aria-label={`Éditer ${d.did}`}>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => setDidToDelete(d)} aria-label={`Supprimer ${d.did}`}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
             <CardTitle>Mode live (lecture continue)</CardTitle>
             <CardDescription>
               Répète la requête du formulaire ci-dessus (une seule à la fois) et affiche la dernière valeur.
@@ -647,6 +859,21 @@ export default function UdsPage() {
           </CardContent>
         </Card>
       </div>
+
+      <AlertDialog open={didToDelete !== null} onOpenChange={(o) => !o && setDidToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Supprimer ce DID ?</AlertDialogTitle>
+            <AlertDialogDescription>
+              <span className="font-mono">{didToDelete?.did}</span> — {didToDelete?.name}. Cette action est définitive.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annuler</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void confirmDeleteDid()}>Supprimer</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={livePending} onOpenChange={(o) => !o && setLivePending(false)}>
         <AlertDialogContent>
