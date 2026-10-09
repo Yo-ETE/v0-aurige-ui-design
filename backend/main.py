@@ -1079,68 +1079,97 @@ async def obd_send_with_flow_control(interface: str, request_id: str, request_da
     Returns:
         dict with 'success', 'responses', and 'error' keys
     """
-    # Calculate flow control target (response_id - 8)
+    # Cible du flow control (physique : response_id - 8, ex 7E8 -> 7E0)
     flow_target = f"{int(response_id, 16) - 8:03X}"
-    
-    # Start candump to capture response
-    log_file = Path(f"/tmp/obd_response_{int(time.time())}.log")
-    log_handle = None
+    rid = response_id.upper()
+
+    # candump en PIPE + lecture temps reel : on pilote l'ISO-TP (first frame -> FC -> CF)
+    # au lieu d'un flow control a delai fixe (sinon le FC peut precede la first frame d'un
+    # ECU lent -> l'ECU attend un FC deja passe -> aucun consecutive frame -> reponse tronquee).
     candump = None
-    
+    reader_task = None
+    lines: list[str] = []
     try:
-        log_handle = open(log_file, "w")
         candump = await asyncio.create_subprocess_exec(
             "candump", "-L", "-ta", interface,
-            stdout=log_handle,
-            stderr=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
         )
     except Exception as e:
-        if log_handle:
-            log_handle.close()
         return {"success": False, "responses": [], "error": f"Failed to start candump: {e}"}
-    
+
+    async def _reader():
+        assert candump.stdout is not None
+        while True:
+            raw = await candump.stdout.readline()
+            if not raw:
+                break
+            lines.append(raw.decode("utf-8", "replace").strip())
+
     send_error = None
     try:
-        await asyncio.sleep(0.1)  # Let candump start
-        
-        # Send the OBD request
+        reader_task = asyncio.create_task(_reader())
+        await asyncio.sleep(0.15)  # laisser candump demarrer
+
         success, error = can_send_frame(interface, request_id, request_data)
         if not success:
             send_error = f"Failed to send frame on {interface}: {error}"
         else:
-            await asyncio.sleep(0.1)
-            
-            # Send flow control for multi-frame responses
-            _, _ = can_send_frame(interface, flow_target, "3000000000000000")
-            
-            # Wait for response
-            await asyncio.sleep(0.5)
-        
+            # Machine a etats ISO-TP, piloté par les trames recues sur response_id.
+            fc_sent = False
+            expected_len = None   # longueur totale annoncee par la first frame
+            received = 0          # octets de charge utile recus
+            done = False
+            idx = 0
+            deadline = time.monotonic() + 2.0          # garde-fou global
+            quiet_deadline = time.monotonic() + 0.6    # delai max sans 1re reponse
+            while not done and time.monotonic() < deadline:
+                progressed = False
+                while idx < len(lines):
+                    parsed = parse_candump_line(lines[idx])
+                    idx += 1
+                    if not parsed or parsed["id"] != rid:
+                        continue
+                    progressed = True
+                    d = parsed["data"]
+                    if len(d) < 2:
+                        continue
+                    pci = int(d[0:2], 16) >> 4
+                    if pci == 0x0:            # single frame -> complet
+                        done = True
+                        break
+                    if pci == 0x1:            # first frame : longueur sur 12 bits
+                        if len(d) >= 4:
+                            expected_len = ((int(d[0:2], 16) & 0x0F) << 8) | int(d[2:4], 16)
+                        received = max(0, (len(d) // 2) - 2)  # octets apres PCI (2 octets)
+                        if not fc_sent:
+                            can_send_frame(interface, flow_target, "3000000000000000")
+                            fc_sent = True
+                    elif pci == 0x2:          # consecutive frame
+                        received += max(0, (len(d) // 2) - 1)
+                        if expected_len is not None and received >= expected_len:
+                            done = True
+                            break
+                if done:
+                    break
+                if progressed:
+                    quiet_deadline = time.monotonic() + 0.3  # repousse le quiet apres activite
+                elif time.monotonic() > quiet_deadline:
+                    break  # aucune (nouvelle) reponse -> on s'arrete
+                await asyncio.sleep(0.02)
     finally:
+        if reader_task:
+            reader_task.cancel()
         if candump:
             candump.terminate()
             try:
                 await asyncio.wait_for(candump.wait(), timeout=2.0)
             except asyncio.TimeoutError:
                 candump.kill()
-        if log_handle:
-            log_handle.close()
-    
+
     if send_error:
-        if log_file.exists():
-            log_file.unlink()
         return {"success": False, "responses": [], "error": send_error}
-    
-    # Read captured response
-    responses = []
-    if log_file.exists():
-        with open(log_file, "r") as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    responses.append(line)
-        log_file.unlink()
-    
+
+    responses = [ln for ln in lines if ln]
     return {"success": True, "responses": responses, "error": None}
 
 
