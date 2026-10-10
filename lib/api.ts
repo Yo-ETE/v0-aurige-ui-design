@@ -2263,6 +2263,44 @@ export async function udsScan(p: {
   })
 }
 
+export interface UDSDidScanRow {
+  did: string
+  kind: "positive" | "locked"
+  data: string
+  nrc?: string
+}
+
+export interface UDSDidScanResult {
+  status: string
+  interface: string
+  request_id: string
+  response_id: string
+  scanned: number
+  unsupported: number
+  supported: UDSDidScanRow[]
+  elapsed_ms: number
+}
+
+/** Balaye une plage de DID (0x22) d'un ECU (injecte ; ~20-30 s pour 256 DID ; aucun timeout client). */
+export async function udsScanDids(p: {
+  interface: CANInterface
+  requestId: string
+  responseId: string
+  startDid: string
+  endDid: string
+}): Promise<UDSDidScanResult> {
+  return fetchApi<UDSDidScanResult>("/uds/scan-dids", {
+    method: "POST",
+    body: JSON.stringify({
+      interface: p.interface,
+      request_id: p.requestId,
+      response_id: p.responseId,
+      start_did: p.startDid,
+      end_did: p.endDid,
+    }),
+  })
+}
+
 // --- Bibliotheque de DID UDS (metadonnees ReadDataByIdentifier 0x22) ---
 
 export interface UDSDid {

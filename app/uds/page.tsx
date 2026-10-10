@@ -27,8 +27,12 @@ import {
   udsDidUpdate,
   udsRequest,
   udsScan,
+  udsScanDids,
+  APIError,
   type CANInterface,
   type UDSDid,
+  type UDSDidScanResult,
+  type UDSDidScanRow,
   type UDSResult,
   type UDSScanResult,
 } from "@/lib/api"
@@ -187,6 +191,13 @@ export default function UdsPage() {
   useEffect(() => () => { liveRunning.current = false }, [])
 
   // --- Bibliotheque DID ---
+  const [didScanStart, setDidScanStart] = useState("F100")
+  const [didScanEnd, setDidScanEnd] = useState("F1FF")
+  const [didScanning, setDidScanning] = useState(false)
+  const [didScanPending, setDidScanPending] = useState(false)
+  const [didScanResult, setDidScanResult] = useState<UDSDidScanResult | null>(null)
+  const [didScanError, setDidScanError] = useState<string | null>(null)
+  const [didScanMsg, setDidScanMsg] = useState<string | null>(null)
   const [dids, setDids] = useState<UDSDid[]>([])
   const [didFilter, setDidFilter] = useState("")
   const [didBrand, setDidBrand] = useState("all")
@@ -293,6 +304,63 @@ export default function UdsPage() {
       setScanError(e instanceof Error ? e.message : "Erreur inconnue")
     }
     setScanning(false)
+  }
+
+  const didScanValid =
+    /^[0-9A-F]{1,4}$/.test(clean(didScanStart)) &&
+    /^[0-9A-F]{1,4}$/.test(clean(didScanEnd)) &&
+    clean(requestId).length > 0 &&
+    clean(responseId).length > 0
+
+  const doScanDids = async () => {
+    setDidScanPending(false)
+    setDidScanning(true)
+    setDidScanError(null)
+    setDidScanMsg(null)
+    setDidScanResult(null)
+    try {
+      const r = await udsScanDids({
+        interface: iface,
+        requestId: clean(requestId),
+        responseId: clean(responseId),
+        startDid: clean(didScanStart),
+        endDid: clean(didScanEnd),
+      })
+      if (r.status !== "ok") setDidScanError("Le scan DID a échoué.")
+      else setDidScanResult(r)
+    } catch (e) {
+      if (e instanceof APIError && e.status === 403) setDidScanError("ECU bloqué (AUD-06)")
+      else setDidScanError(e instanceof Error ? e.message : "Erreur inconnue")
+    }
+    setDidScanning(false)
+  }
+
+  const useScannedDid = (r: UDSDidScanResult, row: UDSDidScanRow) => {
+    setPreset("raw")
+    setService("22")
+    setData(row.did)
+    setRequestId(r.request_id)
+    setResponseId(r.response_id)
+    window.scrollTo({ top: 0, behavior: "smooth" })
+  }
+
+  const addScannedDid = async (r: UDSDidScanResult, row: UDSDidScanRow) => {
+    setDidScanError(null)
+    setDidScanMsg(null)
+    try {
+      await udsDidCreate({
+        did: row.did,
+        name: row.did,
+        brand: "",
+        ecu_request_id: r.request_id,
+        ecu_response_id: r.response_id,
+        note: row.kind === "locked" ? "verrouille" : "",
+      })
+      await refreshDids()
+      setDidScanMsg(`DID ${row.did} ajouté à la bibliothèque.`)
+    } catch (e) {
+      setDidScanError(e instanceof Error ? e.message : "Erreur inconnue")
+    }
   }
 
   const useResponder = (reqId: string, respId: string) => {
@@ -683,6 +751,81 @@ export default function UdsPage() {
 
         <Card>
           <CardHeader>
+            <CardTitle>Scan DID (DID supportés d'un ECU)</CardTitle>
+            <CardDescription>
+              Énumère les DID lisibles (0x22) d'un ECU. Choisis l'ECU (via Scan UDS ou saisie), puis une plage de DID.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-wrap items-end gap-3">
+              <p className="w-full font-mono text-xs text-muted-foreground">
+                ECU : {clean(requestId) || "?"} → {clean(responseId) || "?"} ({iface})
+              </p>
+              <div className="space-y-1 w-28">
+                <Label>Start DID (hex)</Label>
+                <Input className="font-mono" maxLength={4} value={didScanStart} onChange={(e) => setDidScanStart(e.target.value)} />
+              </div>
+              <div className="space-y-1 w-28">
+                <Label>End DID (hex)</Label>
+                <Input className="font-mono" maxLength={4} value={didScanEnd} onChange={(e) => setDidScanEnd(e.target.value)} />
+              </div>
+              <Button onClick={() => setDidScanPending(true)} disabled={!didScanValid || didScanning}>
+                {didScanning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Radar className="mr-2 h-4 w-4" />}
+                {didScanning ? "Scan en cours…" : "Scanner les DID"}
+              </Button>
+            </div>
+
+            {didScanError && (
+              <Alert variant="destructive">
+                <AlertTriangle className="h-4 w-4" />
+                <AlertTitle>Erreur</AlertTitle>
+                <AlertDescription className="break-words">{didScanError}</AlertDescription>
+              </Alert>
+            )}
+            {didScanMsg && <p className="text-sm text-green-600 dark:text-green-400">{didScanMsg}</p>}
+
+            {didScanResult && (
+              <div className="space-y-2">
+                <p className="text-sm text-muted-foreground">
+                  {didScanResult.scanned} DID testés · {didScanResult.supported.length} supportés · {didScanResult.unsupported} non supportés · {didScanResult.elapsed_ms} ms
+                </p>
+                {didScanResult.supported.length === 0 ? (
+                  <p className="text-sm">Aucun DID supporté sur cette plage.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {didScanResult.supported.map((row) => (
+                      <li key={row.did} className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border p-2">
+                        <Badge variant="secondary" className="font-mono">{row.did}</Badge>
+                        <Badge
+                          variant="outline"
+                          className={row.kind === "positive"
+                            ? "border-green-600 text-green-600 dark:text-green-400"
+                            : "border-orange-500 text-orange-500"}
+                        >
+                          {row.kind === "positive" ? "lisible" : `verrouillé${row.nrc ? ` (${row.nrc})` : ""}`}
+                        </Badge>
+                        <span className="min-w-0 flex-1 basis-40 truncate font-mono text-xs text-muted-foreground" title={row.data}>
+                          {row.data}
+                        </span>
+                        <div className="flex gap-2">
+                          <Button size="sm" variant="outline" onClick={() => useScannedDid(didScanResult, row)}>
+                            Utiliser
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => void addScannedDid(didScanResult, row)}>
+                            <Plus className="mr-1 h-3 w-3" />Biblio
+                          </Button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
             <CardTitle>Bibliothèque DID</CardTitle>
             <CardDescription>
               DID standard ISO F1xx fournis. Ajoute les DID spécifiques de ta marque (odometer…) trouvés par RE / Scan UDS.
@@ -894,7 +1037,22 @@ export default function UdsPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={scanPending} onOpenChange={(o) => !o && setScanPending(false)}>
+      <AlertDialog open={didScanPending} onOpenChange={(o) => !o && setDidScanPending(false)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirmer le scan DID</AlertDialogTitle>
+            <AlertDialogDescription>
+              Balaye les DID {clean(didScanStart)}–{clean(didScanEnd)} sur l'ECU {clean(requestId)} (TX réel). Continuer ?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annuler</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void doScanDids()}>Scanner les DID</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={scanPending}onOpenChange={(o) => !o && setScanPending(false)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Confirmer le scan UDS</AlertDialogTitle>
