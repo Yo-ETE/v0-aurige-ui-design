@@ -281,3 +281,135 @@ async def uds_scan(req: UDSScanRequest):
         "responders": responders,
         "elapsed_ms": round((time.time() - started) * 1000, 1),
     }
+
+
+# Motifs d'une reponse a ReadDataByIdentifier (0x22) : data hex majuscule.
+_DID_POS = "62"        # 0x22 + 0x40 = reponse positive
+_DID_NRC_UNSUPPORTED = "7F2231"  # requestOutOfRange = DID non supporte
+_DID_NRC_PREFIX = "7F22"         # autre NRC sur le service 22 (ex 33 = verrouille)
+_DID_RE = re.compile(r"^[0-9A-Fa-f]{1,4}$")
+
+
+class UDSScanDidsRequest(BaseModel):
+    interface: str = "can0"
+    request_id: str = "7E0"
+    response_id: str = "7E8"
+    start_did: str = "F100"
+    end_did: str = "F1FF"
+    gap_ms: int = 30
+    listen_ms: int = 80
+
+
+@router.post("/api/uds/scan-dids")
+async def uds_scan_dids(req: UDSScanDidsRequest):
+    """Enumere les DID (ReadDataByIdentifier 0x22) supportes par UN ECU.
+
+    Pour chaque DID de la plage : envoie 22 <DID>, detecte 62=supporte / 7F2231=non supporte /
+    7F22xx=present mais autre NRC (ex 33 verrouille). Lecture seule (0x22) mais TX sur l'ECU ->
+    garde can_inject + is_id_blocked sur le request_id.
+    """
+    if req.interface not in _IFACES:
+        raise HTTPException(status_code=400, detail="Interface invalide (can0/can1/vcan0)")
+    if not _ID_RE.match(req.request_id) or not _ID_RE.match(req.response_id):
+        raise HTTPException(status_code=400, detail="request_id/response_id hex 1..8 requis")
+    if not _DID_RE.match(req.start_did) or not _DID_RE.match(req.end_did):
+        raise HTTPException(status_code=400, detail="start_did/end_did hex 1..4 requis")
+    start = int(req.start_did, 16)
+    end = int(req.end_did, 16)
+    if end < start:
+        raise HTTPException(status_code=400, detail="end_did doit etre >= start_did")
+    if (end - start + 1) > 1024:
+        raise HTTPException(status_code=400, detail="Plage trop large (max 1024 DID)")
+    if main.is_id_blocked(req.request_id):
+        raise HTTPException(status_code=403, detail=f"ID {req.request_id.upper()} bloque (AUD-06)")
+
+    gap = min(max(req.gap_ms, 10), 500) / 1000.0
+    listen = min(max(req.listen_ms, 10), 500) / 1000.0
+    rid = req.response_id.upper()
+    req_id = req.request_id.upper()
+
+    started = time.time()
+    supported = []
+    seen = set()
+    scanned = 0
+    unsupported = 0
+
+    candump = None
+    reader_task = None
+    lines: list[str] = []
+    try:
+        candump = await asyncio.create_subprocess_exec(
+            "candump", "-L", "-ta", req.interface,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+        )
+
+        async def _reader():
+            assert candump.stdout is not None
+            while True:
+                raw = await candump.stdout.readline()
+                if not raw:
+                    break
+                lines.append(raw.decode("utf-8", "replace").strip())
+
+        reader_task = asyncio.create_task(_reader())
+        await asyncio.sleep(0.15)
+
+        for v in range(start, end + 1):
+            did = f"{v:04X}"
+            frame = uds_client.build_single_frame("22", did)
+            mark = len(lines)
+            main.can_send_frame(req.interface, req_id, frame)
+            scanned += 1
+            await asyncio.sleep(listen)
+            for line in lines[mark:]:
+                parsed = main.parse_candump_line(line)
+                if not parsed or parsed["id"] != rid:
+                    continue
+                d = parsed["data"]
+                if did in seen or len(d) < 2:
+                    if did in seen:
+                        break
+                    continue
+                # Strip le PCI ISO-TP pour obtenir la charge utile UDS.
+                pci = int(d[0:2], 16) >> 4
+                if pci == 0x0:        # single frame : 1 octet de PCI
+                    payload = d[2:]
+                elif pci == 0x1:      # first frame : 2 octets de PCI
+                    payload = d[4:]
+                else:
+                    continue
+                if payload.startswith(_DID_POS):
+                    seen.add(did)
+                    supported.append({"did": did, "kind": "positive", "data": d})
+                    break
+                if payload.startswith(_DID_NRC_UNSUPPORTED):
+                    unsupported += 1
+                    seen.add(did)
+                    break
+                if payload.startswith(_DID_NRC_PREFIX):
+                    # present mais autre NRC (ex 33 = verrouille SecurityAccess)
+                    nrc = payload[4:6] if len(payload) >= 6 else ""
+                    seen.add(did)
+                    supported.append({"did": did, "kind": "locked", "data": d, "nrc": nrc})
+                    break
+            await asyncio.sleep(gap)
+    finally:
+        if reader_task:
+            reader_task.cancel()
+        if candump:
+            candump.terminate()
+            try:
+                await asyncio.wait_for(candump.wait(), timeout=2.0)
+            except asyncio.TimeoutError:
+                candump.kill()
+
+    return {
+        "status": "ok",
+        "interface": req.interface,
+        "request_id": req_id,
+        "response_id": rid,
+        "scanned": scanned,
+        "unsupported": unsupported,
+        "supported": supported,
+        "elapsed_ms": round((time.time() - started) * 1000, 1),
+    }

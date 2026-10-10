@@ -177,3 +177,46 @@ def test_uds_scan_bad_inputs(ctx):
     c, main, monkeypatch = ctx
     assert c.post("/api/uds/scan", json={"interface": "canX", "start_id": "700", "end_id": "7FF"}).status_code == 400
     assert c.post("/api/uds/scan", json={"interface": "can0", "start_id": "7FF", "end_id": "700"}).status_code == 400
+
+
+# ---- scan DID (0x22) ----
+
+def test_scan_dids_positive(ctx):
+    c, main, monkeypatch = ctx
+    _patch_candump(monkeypatch, main, ["(0.0) can0 7E8#0762F19012345678"])
+    r = c.post("/api/uds/scan-dids", json={"interface": "can0", "request_id": "7E0", "response_id": "7E8", "start_did": "F190", "end_did": "F190", "listen_ms": 400, "gap_ms": 10})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["scanned"] == 1
+    sup = body["supported"]
+    assert len(sup) == 1 and sup[0]["did"] == "F190" and sup[0]["kind"] == "positive"
+
+
+def test_scan_dids_unsupported(ctx):
+    c, main, monkeypatch = ctx
+    _patch_candump(monkeypatch, main, ["(0.0) can0 7E8#037F223100000000"])
+    r = c.post("/api/uds/scan-dids", json={"interface": "can0", "request_id": "7E0", "response_id": "7E8", "start_did": "0101", "end_did": "0101", "listen_ms": 400, "gap_ms": 10})
+    body = r.json()
+    assert body["unsupported"] == 1 and body["supported"] == []
+
+
+def test_scan_dids_locked(ctx):
+    c, main, monkeypatch = ctx
+    _patch_candump(monkeypatch, main, ["(0.0) can0 7E8#037F223300000000"])
+    r = c.post("/api/uds/scan-dids", json={"interface": "can0", "request_id": "7E0", "response_id": "7E8", "start_did": "0200", "end_did": "0200", "listen_ms": 400, "gap_ms": 10})
+    sup = r.json()["supported"]
+    assert len(sup) == 1 and sup[0]["kind"] == "locked" and sup[0]["nrc"] == "33"
+
+
+def test_scan_dids_blocked_id_403(ctx):
+    c, main, monkeypatch = ctx
+    _patch_candump(monkeypatch, main, [])
+    monkeypatch.setattr(main, "is_id_blocked", lambda cid: cid.upper() == "7E0")
+    r = c.post("/api/uds/scan-dids", json={"interface": "can0", "request_id": "7E0", "response_id": "7E8", "start_did": "F100", "end_did": "F1FF"})
+    assert r.status_code == 403
+
+
+def test_scan_dids_range_too_large_400(ctx):
+    c, main, monkeypatch = ctx
+    r = c.post("/api/uds/scan-dids", json={"interface": "can0", "request_id": "7E0", "response_id": "7E8", "start_did": "0", "end_did": "FFFF"})
+    assert r.status_code == 400
